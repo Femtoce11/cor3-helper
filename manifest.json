@@ -1,21 +1,27 @@
 {
   "manifest_version": 3,
-  "name": "Job Timer Macro Pro",
-  "version": "2.0",
-  "description": "Record macros, monitor job timers, and get alerts.",
+  "name": "COR3 Helper",
+  "version": "3.0",
+  "description": "Monitor markets, expeditions, daily ops, and get timer alerts for cor3.gg.",
   "permissions": [
     "storage",
     "activeTab",
-    "scripting",
-    "alarms"
+    "tabs"
   ],
   "host_permissions": [
-    "https://cor3.gg/*"
+    "https://cor3.gg/*",
+    "https://svc-corie.cor3.gg/*"
   ],
   "background": {
     "service_worker": "background.js"
   },
   "content_scripts": [
+    {
+      "matches": ["https://cor3.gg/*"],
+      "js": ["content-early.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
     {
       "matches": ["https://cor3.gg/*"],
       "js": ["content.js"],
@@ -24,6 +30,12 @@
   ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Job Timer Macro"
-  }
+    "default_title": "COR3 Helper"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["ws-interceptor.js"],
+      "matches": ["<all_urls>"]
+    }
+  ]
 }

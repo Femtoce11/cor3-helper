@@ -15,24 +15,6 @@
             text-align: center;
             color: #61dafb;
         }
-        .timer-box {
-            background: #2d2d44;
-            border-radius: 8px;
-            padding: 10px;
-            margin-bottom: 12px;
-            text-align: center;
-            border: 1px solid #44475a;
-        }
-        .timer-label {
-            font-size: 12px;
-            opacity: 0.7;
-        }
-        .timer-value {
-            font-size: 28px;
-            font-weight: bold;
-            font-family: 'Courier New', monospace;
-            color: #f8f8f2;
-        }
         .section {
             margin-bottom: 15px;
             border-top: 1px solid #44475a;
@@ -52,6 +34,18 @@
             border: 1px solid #6272a4;
             border-radius: 5px;
             box-sizing: border-box;
+        }
+        input[type="number"] {
+            width: 50px;
+            padding: 4px 6px;
+            margin: 0;
+            text-align: center;
+            -moz-appearance: textfield;
+        }
+        input[type="number"]::-webkit-outer-spin-button,
+        input[type="number"]::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
         }
         button {
             width: 100%;
@@ -78,6 +72,7 @@
             display: flex;
             align-items: center;
             justify-content: space-between;
+            margin-bottom: 4px;
         }
         .slider-container {
             display: flex;
@@ -94,42 +89,450 @@
             text-align: center;
             opacity: 0.8;
         }
+
+        /* Decisions view */
+        #decisionsView {
+            display: none;
+        }
+        #decisionsView.active {
+            display: block;
+        }
+        #mainView.hidden {
+            display: none;
+        }
+        .back-btn {
+            background-color: #44475a !important;
+            margin-bottom: 10px;
+        }
+        .decision-card {
+            background: #2d2d44;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 12px;
+            border: 1px solid #44475a;
+        }
+        .decision-card .merc-info {
+            font-size: 11px;
+            color: #8be9fd;
+            margin-bottom: 6px;
+        }
+        .decision-card .msg-content {
+            font-size: 13px;
+            color: #f8f8f2;
+            margin-bottom: 10px;
+            line-height: 1.4;
+        }
+        .decision-card .deadline {
+            font-size: 11px;
+            color: #ffb86c;
+            margin-bottom: 8px;
+        }
+        .option-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #383a59;
+            border-radius: 6px;
+            padding: 8px 10px;
+            margin-bottom: 6px;
+        }
+        .option-label {
+            font-weight: bold;
+            color: #f1fa8c;
+            font-size: 13px;
+            flex: 1;
+        }
+        .option-stats {
+            display: flex;
+            gap: 12px;
+            font-size: 11px;
+        }
+        .stat-risk {
+            color: #ff5555;
+        }
+        .stat-loot {
+            color: #50fa7b;
+        }
+        .option-selected {
+            border: 1px solid #50fa7b;
+        }
+        .no-decisions {
+            text-align: center;
+            color: #6272a4;
+            padding: 20px;
+            font-size: 13px;
+        }
+        .resolved-tag {
+            display: inline-block;
+            background: #50fa7b;
+            color: #1e1e2f;
+            font-size: 10px;
+            font-weight: bold;
+            padding: 2px 6px;
+            border-radius: 3px;
+            margin-left: 6px;
+        }
+        .pending-tag {
+            display: inline-block;
+            background: #ffb86c;
+            color: #1e1e2f;
+            font-size: 10px;
+            font-weight: bold;
+            padding: 2px 6px;
+            border-radius: 3px;
+            margin-left: 6px;
+        }
+
+        /* Inventory view */
+        #inventoryView {
+            display: none;
+        }
+        #inventoryView.active {
+            display: block;
+        }
+        .inventory-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .inventory-header h3 {
+            margin: 0;
+        }
+        .space-badge {
+            background: #44475a;
+            border-radius: 6px;
+            padding: 4px 10px;
+            font-size: 12px;
+            color: #8be9fd;
+            font-weight: bold;
+        }
+        .item-card {
+            background: #2d2d44;
+            border-radius: 8px;
+            padding: 10px;
+            margin-bottom: 8px;
+            border: 1px solid #44475a;
+            display: flex;
+            gap: 10px;
+            align-items: flex-start;
+        }
+        .item-card img {
+            width: 48px;
+            height: 48px;
+            border-radius: 6px;
+            object-fit: contain;
+            background: #1e1e2f;
+            flex-shrink: 0;
+        }
+        .item-details {
+            flex: 1;
+            min-width: 0;
+        }
+        .item-name {
+            font-size: 13px;
+            font-weight: bold;
+            color: #f8f8f2;
+            margin-bottom: 4px;
+            word-wrap: break-word;
+        }
+        .item-badges {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            margin-bottom: 4px;
+        }
+        .badge {
+            display: inline-block;
+            font-size: 9px;
+            font-weight: bold;
+            padding: 2px 5px;
+            border-radius: 3px;
+        }
+        .badge-sell { background: #50fa7b; color: #1e1e2f; }
+        .badge-craft { background: #8be9fd; color: #1e1e2f; }
+        .badge-use { background: #bd93f9; color: #1e1e2f; }
+        .badge-delete { background: #ff5555; color: #1e1e2f; }
+        .badge-no { background: #44475a; color: #6272a4; }
+        .tier-common { border-left: 3px solid #a0a0a0; }
+        .tier-rare { border-left: 3px solid #8be9fd; }
+        .tier-epic { border-left: 3px solid #bd93f9; }
+        .tier-legendary { border-left: 3px solid #f1fa8c; }
+        .tier-quest { border-left: 3px solid #ffb86c; }
+        .tier-tag {
+            display: inline-block;
+            font-size: 9px;
+            font-weight: bold;
+            padding: 2px 5px;
+            border-radius: 3px;
+        }
+        .tier-tag-common { background: #a0a0a0; color: #1e1e2f; }
+        .tier-tag-rare { background: #8be9fd; color: #1e1e2f; }
+        .tier-tag-epic { background: #bd93f9; color: #1e1e2f; }
+        .tier-tag-legendary { background: #f1fa8c; color: #1e1e2f; }
+        .tier-tag-quest { background: #ffb86c; color: #1e1e2f; }
+        .item-price {
+            font-size: 11px;
+            color: #50fa7b;
+            margin-top: 2px;
+        }
+
+        /* Inline button row for Back + Refresh */
+        .btn-row {
+            display: flex;
+            gap: 6px;
+            margin-bottom: 10px;
+        }
+        .btn-row button {
+            flex: 1;
+            padding: 6px 8px;
+            font-size: 12px;
+            margin: 0;
+        }
+
+        /* Section header with inline refresh button */
+        .section-header-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .section-header-row .section-title {
+            margin-bottom: 0;
+        }
+        .refresh-btn-small {
+            background: #44475a !important;
+            border: none;
+            color: #f8f8f2;
+            font-size: 14px;
+            cursor: pointer;
+            border-radius: 4px;
+            padding: 2px 7px !important;
+            width: auto !important;
+            margin: 0 !important;
+            line-height: 1;
+        }
+        .refresh-btn-small:hover {
+            background: #6272a4 !important;
+        }
+
+        /* Daily Ops Timer */
+        .daily-timer-box {
+            background: #2d2d44;
+            border-radius: 8px;
+            padding: 10px;
+            margin-bottom: 8px;
+            text-align: center;
+            border: 1px solid #44475a;
+        }
+        .daily-timer-value {
+            font-size: 22px;
+            font-weight: bold;
+            font-family: 'Courier New', monospace;
+            color: #f8f8f2;
+        }
+
+        /* Expandable section */
+        .expandable-header {
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+            user-select: none;
+            gap: 6px;
+            padding: 6px 0;
+        }
+        .expandable-header .expand-arrow {
+            font-size: 12px;
+            transition: transform 0.2s;
+            color: #6272a4;
+        }
+        .expandable-header.open .expand-arrow {
+            transform: rotate(90deg);
+        }
+        .expandable-header .expand-label {
+            font-size: 12px;
+            color: #8be9fd;
+        }
+        .expandable-body {
+            display: none;
+            padding-left: 4px;
+        }
+        .expandable-body.open {
+            display: block;
+        }
+        .detail-row {
+            font-size: 11px;
+            color: #c0c0c0;
+            padding: 2px 0;
+        }
+        .detail-row span.label {
+            color: #6272a4;
+        }
+
+        /* Market section */
+        .market-rep-bar {
+            background: #44475a;
+            border-radius: 4px;
+            height: 8px;
+            margin: 4px 0 8px 0;
+            overflow: hidden;
+        }
+        .market-rep-fill {
+            background: #bd93f9;
+            height: 100%;
+            border-radius: 4px;
+        }
+        .market-category-title {
+            font-size: 12px;
+            color: #bd93f9;
+            margin: 8px 0 4px 0;
+            font-weight: bold;
+        }
+        .market-item-card {
+            background: #2d2d44;
+            border-radius: 8px;
+            padding: 8px;
+            margin-bottom: 6px;
+            border: 1px solid #44475a;
+            display: flex;
+            gap: 8px;
+            align-items: flex-start;
+        }
+        .market-item-card img {
+            width: 40px;
+            height: 40px;
+            border-radius: 6px;
+            object-fit: contain;
+            background: #1e1e2f;
+            flex-shrink: 0;
+        }
+        .market-item-info {
+            flex: 1;
+            min-width: 0;
+        }
+        .market-item-name {
+            font-size: 12px;
+            font-weight: bold;
+            color: #f8f8f2;
+        }
+        .market-item-price {
+            font-size: 11px;
+            color: #50fa7b;
+        }
+        .market-item-bought {
+            font-size: 10px;
+            font-weight: bold;
+            color: #ff5555;
+            margin-left: 6px;
+        }
+
+        /* Market sub-header with inline refresh */
+        .market-sub-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 4px;
+        }
+        .market-sub-label {
+            font-size: 12px;
+            color: #8be9fd;
+            font-weight: bold;
+        }
+
+        /* Alarm settings */
+        .alarm-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            margin-bottom: 4px;
+        }
+        .alarm-row select {
+            width: auto;
+            flex: 1;
+            padding: 4px 6px;
+            margin: 0;
+            font-size: 11px;
+        }
+        .threshold-row {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 12px;
+            margin-bottom: 6px;
+        }
+        .threshold-row span.th-label {
+            color: #c0c0c0;
+        }
     </style>
 </head>
 <body>
-    <h3>⏱️ Job Timer Macro Pro</h3>
-    
-    <!-- Timer Display -->
-    <div class="timer-box">
-        <div class="timer-label">Current Job Timer</div>
-        <div id="timerDisplay" class="timer-value">--:--:--</div>
+    <!-- Main View -->
+    <div id="mainView">
+    <h3>🛰️ COR3 Helper</h3>
+
+    <!-- Daily Ops Timer -->
+    <div class="section">
+        <div class="section-title">📅 Daily Ops Timer</div>
+        <div class="daily-timer-box">
+            <div class="timer-label">Next Task In</div>
+            <div id="dailyTimerDisplay" class="daily-timer-value">--:--:--</div>
+        </div>
+        <div class="expandable-header" id="dailyDetailsToggle">
+            <span class="expand-arrow">▶</span>
+            <span class="expand-label">Details</span>
+        </div>
+        <div class="expandable-body" id="dailyDetailsBody">
+            <div class="detail-row"><span class="label">Claimed Today:</span> <span id="dailyClaimed">--</span></div>
+            <div class="detail-row"><span class="label">Current Streak:</span> <span id="dailyStreak">--</span></div>
+            <div class="detail-row"><span class="label">Difficulty:</span> <span id="dailyDifficulty">--</span></div>
+            <div class="detail-row"><span class="label">Streak Bonus:</span> <span id="dailyStreakBonus">--</span></div>
+        </div>
     </div>
 
-    <!-- Macro Selection -->
+    <!-- Markets -->
     <div class="section">
-        <div class="section-title">📋 Saved Macros</div>
-        <select id="macroSelect">
-            <option value="">-- No macros --</option>
-        </select>
-        <button id="runMacroBtn">▶️ Run Selected Macro</button>
-        <button id="deleteMacroBtn" class="danger">🗑️ Delete Selected</button>
+        <div class="section-title">🏪 Markets</div>
+        <div class="market-sub-header">
+            <span class="market-sub-label">🏠 CORE Market</span>
+            <button id="refreshMarketBtn" class="refresh-btn-small" title="Refresh CORE Market">🔄</button>
+        </div>
+        <div id="marketContainer"><div class="no-decisions">Loading CORE market data...</div></div>
+        <div style="border-top:1px solid #44475a;margin:10px 0;"></div>
+        <div class="market-sub-header">
+            <span class="market-sub-label">🌑 BMI-ZEN Market</span>
+            <button id="refreshDarkMarketBtn" class="refresh-btn-small" title="Refresh BMI-ZEN Market">🔄</button>
+        </div>
+        <div id="darkMarketContainer"><div class="no-decisions">Waiting for BMI-ZEN market...</div></div>
     </div>
 
-    <!-- Recording Controls -->
+    <!-- Expedition Decisions -->
     <div class="section">
-        <div class="section-title">🎤 Recording</div>
-        <button id="recordBtn">🔴 Start Recording</button>
-        <button id="testBtn">🧪 Test Current Macro</button>
+        <div class="section-title">🎯 Expeditions</div>
+        <button id="checkDecisionsBtn">📋 Check Decisions</button>
+        <button id="openInventoryBtn">🎒 Inventory</button>
     </div>
 
     <!-- Alarm Settings -->
     <div class="section">
-        <div class="section-title">⏰ 5-Minute Alarm</div>
+        <div class="section-title">⏰ Timer Alarm</div>
         <div class="switch-row">
             <span>Enable Alarm</span>
             <label>
                 <input type="checkbox" id="alarmToggle"> On
             </label>
+        </div>
+        <div class="alarm-row">
+            <span>Watch:</span>
+            <select id="alarmTimerSelect">
+                <option value="daily">Daily Ops Timer</option>
+                <option value="home_jobs">CORE Market Jobs Reset</option>
+                <option value="dark_jobs">BMI-ZEN Market Jobs Reset</option>
+            </select>
+        </div>
+        <div class="threshold-row">
+            <span class="th-label">Alert when remaining:</span>
+            <input type="number" id="alarmMinutes" min="0" max="59" value="1"> <span class="th-label">m</span>
+            <input type="number" id="alarmSeconds" min="0" max="59" value="0"> <span class="th-label">s</span>
         </div>
         <div class="switch-row">
             <span>Continuous (beep every 2s)</span>
@@ -147,7 +550,31 @@
     </div>
 
     <div id="status">Status: Ready</div>
+    </div><!-- end mainView -->
+
+    <!-- Decisions View -->
+    <div id="decisionsView">
+        <h3>🎯 Expedition Decisions</h3>
+        <div class="btn-row">
+            <button id="backToMainBtn" class="back-btn">⬅️ Back</button>
+            <button id="refreshDecisionsBtn">🔄 Refresh</button>
+        </div>
+        <div id="decisionsContainer"></div>
+    </div>
     
+    <!-- Inventory View -->
+    <div id="inventoryView">
+        <div class="inventory-header">
+            <h3>🎒 Inventory <span id="totalValue" style="font-size:12px;color:#50fa7b;font-weight:normal;"></span></h3>
+            <span id="spaceInfo" class="space-badge">-- / --</span>
+        </div>
+        <div class="btn-row">
+            <button id="backFromInventoryBtn" class="back-btn">⬅️ Back</button>
+            <button id="refreshInventoryBtn">🔄 Refresh</button>
+        </div>
+        <div id="inventoryContainer"></div>
+    </div>
+
     <script src="popup.js"></script>
 </body>
 </html>
