@@ -3,35 +3,151 @@
 <head>
     <meta charset="UTF-8">
     <style>
+        /* ===== Theme CSS Variables ===== */
+        body {
+            --bg-primary: #1e1e2f;
+            --bg-card: #2d2d44;
+            --bg-option: #383a59;
+            --border: #44475a;
+            --text: #ffffff;
+            --text-secondary: #f8f8f2;
+            --text-muted: #c0c0c0;
+            --text-dim: #6272a4;
+            --accent: #61dafb;
+            --accent-purple: #bd93f9;
+            --accent-cyan: #8be9fd;
+            --accent-green: #50fa7b;
+            --accent-orange: #ffb86c;
+            --accent-yellow: #f1fa8c;
+            --accent-red: #ff5555;
+            --btn-bg: #6272a4;
+            --btn-hover: #7a93d1;
+            --btn-small-bg: #44475a;
+            --btn-small-hover: #6272a4;
+        }
+
+        /* Theme: Abyss — ultra-dark blue-black */
+        body.theme-abyss {
+            --bg-primary: #0a0e1a;
+            --bg-card: #111827;
+            --bg-option: #1a2236;
+            --border: #1e293b;
+            --text: #e2e8f0;
+            --text-secondary: #cbd5e1;
+            --text-muted: #94a3b8;
+            --text-dim: #475569;
+            --accent: #38bdf8;
+            --accent-purple: #a78bfa;
+            --accent-cyan: #67e8f9;
+            --accent-green: #34d399;
+            --accent-orange: #fb923c;
+            --accent-yellow: #fbbf24;
+            --accent-red: #f87171;
+            --btn-bg: #1e3a5f;
+            --btn-hover: #2563eb;
+            --btn-small-bg: #1e293b;
+            --btn-small-hover: #334155;
+        }
+
+        /* Theme: Void — pure black with crimson accents */
+        body.theme-void {
+            --bg-primary: #000000;
+            --bg-card: #0d0d0d;
+            --bg-option: #1a1a1a;
+            --border: #2a2a2a;
+            --text: #e0e0e0;
+            --text-secondary: #cccccc;
+            --text-muted: #888888;
+            --text-dim: #555555;
+            --accent: #ff3c3c;
+            --accent-purple: #c084fc;
+            --accent-cyan: #66d9ef;
+            --accent-green: #a6e22e;
+            --accent-orange: #fd971f;
+            --accent-yellow: #e6db74;
+            --accent-red: #f92672;
+            --btn-bg: #2a0a0a;
+            --btn-hover: #5c1a1a;
+            --btn-small-bg: #1a1a1a;
+            --btn-small-hover: #333333;
+        }
+
+        /* Theme: Nebula — deep purple-black */
+        body.theme-nebula {
+            --bg-primary: #0d0b14;
+            --bg-card: #16121f;
+            --bg-option: #1f1a2e;
+            --border: #2d2640;
+            --text: #e8e0f0;
+            --text-secondary: #d4cce0;
+            --text-muted: #9e93b0;
+            --text-dim: #5e5477;
+            --accent: #c084fc;
+            --accent-purple: #a855f7;
+            --accent-cyan: #7dd3fc;
+            --accent-green: #4ade80;
+            --accent-orange: #fb923c;
+            --accent-yellow: #facc15;
+            --accent-red: #fb7185;
+            --btn-bg: #2d1b69;
+            --btn-hover: #4c1d95;
+            --btn-small-bg: #1f1a2e;
+            --btn-small-hover: #2d2640;
+        }
+
+        /* Theme: Tactical — military dark green-grey */
+        body.theme-tactical {
+            --bg-primary: #0c0f0a;
+            --bg-card: #141a12;
+            --bg-option: #1c2419;
+            --border: #2a3325;
+            --text: #d4ddd0;
+            --text-secondary: #bdc8b8;
+            --text-muted: #8a9584;
+            --text-dim: #556050;
+            --accent: #84cc16;
+            --accent-purple: #a78bfa;
+            --accent-cyan: #5eead4;
+            --accent-green: #22c55e;
+            --accent-orange: #f59e0b;
+            --accent-yellow: #eab308;
+            --accent-red: #ef4444;
+            --btn-bg: #1a2e1a;
+            --btn-hover: #2d4a2d;
+            --btn-small-bg: #1c2419;
+            --btn-small-hover: #2a3325;
+        }
+
+        /* ===== Base Styles (using variables) ===== */
         body {
             width: 300px;
             padding: 15px;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #1e1e2f;
-            color: #ffffff;
+            background-color: var(--bg-primary);
+            color: var(--text);
         }
         h3 {
             margin-top: 0;
             text-align: center;
-            color: #61dafb;
+            color: var(--accent);
         }
         .section {
             margin-bottom: 15px;
-            border-top: 1px solid #44475a;
+            border-top: 1px solid var(--border);
             padding-top: 10px;
         }
         .section-title {
             font-size: 14px;
             margin-bottom: 8px;
-            color: #bd93f9;
+            color: var(--accent-purple);
         }
         select, input {
             width: 100%;
             padding: 8px;
             margin: 5px 0;
-            background: #2d2d44;
-            color: white;
-            border: 1px solid #6272a4;
+            background: var(--bg-card);
+            color: var(--text);
+            border: 1px solid var(--text-dim);
             border-radius: 5px;
             box-sizing: border-box;
         }
@@ -55,18 +171,19 @@
             border-radius: 5px;
             font-weight: bold;
             cursor: pointer;
-            background-color: #6272a4;
-            color: white;
+            background-color: var(--btn-bg);
+            color: var(--text);
             transition: background-color 0.2s;
         }
         button:hover {
-            background-color: #7a93d1;
+            background-color: var(--btn-hover);
         }
         button.danger {
-            background-color: #ff5555;
+            background-color: var(--accent-red);
         }
         button.danger:hover {
-            background-color: #ff8888;
+            background-color: var(--accent-red);
+            filter: brightness(1.3);
         }
         .switch-row {
             display: flex;
@@ -90,55 +207,42 @@
             opacity: 0.8;
         }
 
-        /* Decisions view */
-        #decisionsView {
-            display: none;
-        }
-        #decisionsView.active {
-            display: block;
-        }
-        #mainView.hidden {
-            display: none;
-        }
-        .back-btn {
-            background-color: #44475a !important;
-            margin-bottom: 10px;
-        }
+        /* Decisions & Inventory inline sections */
         .decision-card {
-            background: #2d2d44;
+            background: var(--bg-card);
             border-radius: 8px;
             padding: 12px;
             margin-bottom: 12px;
-            border: 1px solid #44475a;
+            border: 1px solid var(--border);
         }
         .decision-card .merc-info {
             font-size: 11px;
-            color: #8be9fd;
+            color: var(--accent-cyan);
             margin-bottom: 6px;
         }
         .decision-card .msg-content {
             font-size: 13px;
-            color: #f8f8f2;
+            color: var(--text-secondary);
             margin-bottom: 10px;
             line-height: 1.4;
         }
         .decision-card .deadline {
             font-size: 11px;
-            color: #ffb86c;
+            color: var(--accent-orange);
             margin-bottom: 8px;
         }
         .option-row {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            background: #383a59;
+            background: var(--bg-option);
             border-radius: 6px;
             padding: 8px 10px;
             margin-bottom: 6px;
         }
         .option-label {
             font-weight: bold;
-            color: #f1fa8c;
+            color: var(--accent-yellow);
             font-size: 13px;
             flex: 1;
         }
@@ -148,24 +252,24 @@
             font-size: 11px;
         }
         .stat-risk {
-            color: #ff5555;
+            color: var(--accent-red);
         }
         .stat-loot {
-            color: #50fa7b;
+            color: var(--accent-green);
         }
         .option-selected {
-            border: 1px solid #50fa7b;
+            border: 1px solid var(--accent-green);
         }
         .no-decisions {
             text-align: center;
-            color: #6272a4;
+            color: var(--text-dim);
             padding: 20px;
             font-size: 13px;
         }
         .resolved-tag {
             display: inline-block;
-            background: #50fa7b;
-            color: #1e1e2f;
+            background: var(--accent-green);
+            color: var(--bg-primary);
             font-size: 10px;
             font-weight: bold;
             padding: 2px 6px;
@@ -174,8 +278,8 @@
         }
         .pending-tag {
             display: inline-block;
-            background: #ffb86c;
-            color: #1e1e2f;
+            background: var(--accent-orange);
+            color: var(--bg-primary);
             font-size: 10px;
             font-weight: bold;
             padding: 2px 6px;
@@ -183,36 +287,21 @@
             margin-left: 6px;
         }
 
-        /* Inventory view */
-        #inventoryView {
-            display: none;
-        }
-        #inventoryView.active {
-            display: block;
-        }
-        .inventory-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 10px;
-        }
-        .inventory-header h3 {
-            margin: 0;
-        }
+        /* Inventory items */
         .space-badge {
-            background: #44475a;
+            background: var(--border);
             border-radius: 6px;
             padding: 4px 10px;
             font-size: 12px;
-            color: #8be9fd;
+            color: var(--accent-cyan);
             font-weight: bold;
         }
         .item-card {
-            background: #2d2d44;
+            background: var(--bg-card);
             border-radius: 8px;
             padding: 10px;
             margin-bottom: 8px;
-            border: 1px solid #44475a;
+            border: 1px solid var(--border);
             display: flex;
             gap: 10px;
             align-items: flex-start;
@@ -222,7 +311,7 @@
             height: 48px;
             border-radius: 6px;
             object-fit: contain;
-            background: #1e1e2f;
+            background: var(--bg-primary);
             flex-shrink: 0;
         }
         .item-details {
@@ -232,7 +321,7 @@
         .item-name {
             font-size: 13px;
             font-weight: bold;
-            color: #f8f8f2;
+            color: var(--text-secondary);
             margin-bottom: 4px;
             word-wrap: break-word;
         }
@@ -249,16 +338,16 @@
             padding: 2px 5px;
             border-radius: 3px;
         }
-        .badge-sell { background: #50fa7b; color: #1e1e2f; }
-        .badge-craft { background: #8be9fd; color: #1e1e2f; }
-        .badge-use { background: #bd93f9; color: #1e1e2f; }
-        .badge-delete { background: #ff5555; color: #1e1e2f; }
-        .badge-no { background: #44475a; color: #6272a4; }
+        .badge-sell { background: var(--accent-green); color: var(--bg-primary); }
+        .badge-craft { background: var(--accent-cyan); color: var(--bg-primary); }
+        .badge-use { background: var(--accent-purple); color: var(--bg-primary); }
+        .badge-delete { background: var(--accent-red); color: var(--bg-primary); }
+        .badge-no { background: var(--border); color: var(--text-dim); }
         .tier-common { border-left: 3px solid #a0a0a0; }
-        .tier-rare { border-left: 3px solid #8be9fd; }
-        .tier-epic { border-left: 3px solid #bd93f9; }
-        .tier-legendary { border-left: 3px solid #f1fa8c; }
-        .tier-quest { border-left: 3px solid #ffb86c; }
+        .tier-rare { border-left: 3px solid var(--accent-cyan); }
+        .tier-epic { border-left: 3px solid var(--accent-purple); }
+        .tier-legendary { border-left: 3px solid var(--accent-yellow); }
+        .tier-quest { border-left: 3px solid var(--accent-orange); }
         .tier-tag {
             display: inline-block;
             font-size: 9px;
@@ -266,14 +355,14 @@
             padding: 2px 5px;
             border-radius: 3px;
         }
-        .tier-tag-common { background: #a0a0a0; color: #1e1e2f; }
-        .tier-tag-rare { background: #8be9fd; color: #1e1e2f; }
-        .tier-tag-epic { background: #bd93f9; color: #1e1e2f; }
-        .tier-tag-legendary { background: #f1fa8c; color: #1e1e2f; }
-        .tier-tag-quest { background: #ffb86c; color: #1e1e2f; }
+        .tier-tag-common { background: #a0a0a0; color: var(--bg-primary); }
+        .tier-tag-rare { background: var(--accent-cyan); color: var(--bg-primary); }
+        .tier-tag-epic { background: var(--accent-purple); color: var(--bg-primary); }
+        .tier-tag-legendary { background: var(--accent-yellow); color: var(--bg-primary); }
+        .tier-tag-quest { background: var(--accent-orange); color: var(--bg-primary); }
         .item-price {
             font-size: 11px;
-            color: #50fa7b;
+            color: var(--accent-green);
             margin-top: 2px;
         }
 
@@ -300,9 +389,9 @@
             margin-bottom: 0;
         }
         .refresh-btn-small {
-            background: #44475a !important;
+            background: var(--btn-small-bg) !important;
             border: none;
-            color: #f8f8f2;
+            color: var(--text-secondary);
             font-size: 14px;
             cursor: pointer;
             border-radius: 4px;
@@ -312,23 +401,23 @@
             line-height: 1;
         }
         .refresh-btn-small:hover {
-            background: #6272a4 !important;
+            background: var(--btn-small-hover) !important;
         }
 
         /* Daily Ops Timer */
         .daily-timer-box {
-            background: #2d2d44;
+            background: var(--bg-card);
             border-radius: 8px;
             padding: 10px;
             margin-bottom: 8px;
             text-align: center;
-            border: 1px solid #44475a;
+            border: 1px solid var(--border);
         }
         .daily-timer-value {
             font-size: 22px;
             font-weight: bold;
             font-family: 'Courier New', monospace;
-            color: #f8f8f2;
+            color: var(--text-secondary);
         }
 
         /* Expandable section */
@@ -343,14 +432,14 @@
         .expandable-header .expand-arrow {
             font-size: 12px;
             transition: transform 0.2s;
-            color: #6272a4;
+            color: var(--text-dim);
         }
         .expandable-header.open .expand-arrow {
             transform: rotate(90deg);
         }
         .expandable-header .expand-label {
             font-size: 12px;
-            color: #8be9fd;
+            color: var(--accent-cyan);
         }
         .expandable-body {
             display: none;
@@ -361,38 +450,38 @@
         }
         .detail-row {
             font-size: 11px;
-            color: #c0c0c0;
+            color: var(--text-muted);
             padding: 2px 0;
         }
         .detail-row span.label {
-            color: #6272a4;
+            color: var(--text-dim);
         }
 
         /* Market section */
         .market-rep-bar {
-            background: #44475a;
+            background: var(--border);
             border-radius: 4px;
             height: 8px;
             margin: 4px 0 8px 0;
             overflow: hidden;
         }
         .market-rep-fill {
-            background: #bd93f9;
+            background: var(--accent-purple);
             height: 100%;
             border-radius: 4px;
         }
         .market-category-title {
             font-size: 12px;
-            color: #bd93f9;
+            color: var(--accent-purple);
             margin: 8px 0 4px 0;
             font-weight: bold;
         }
         .market-item-card {
-            background: #2d2d44;
+            background: var(--bg-card);
             border-radius: 8px;
             padding: 8px;
             margin-bottom: 6px;
-            border: 1px solid #44475a;
+            border: 1px solid var(--border);
             display: flex;
             gap: 8px;
             align-items: flex-start;
@@ -402,7 +491,7 @@
             height: 40px;
             border-radius: 6px;
             object-fit: contain;
-            background: #1e1e2f;
+            background: var(--bg-primary);
             flex-shrink: 0;
         }
         .market-item-info {
@@ -412,16 +501,16 @@
         .market-item-name {
             font-size: 12px;
             font-weight: bold;
-            color: #f8f8f2;
+            color: var(--text-secondary);
         }
         .market-item-price {
             font-size: 11px;
-            color: #50fa7b;
+            color: var(--accent-green);
         }
         .market-item-bought {
             font-size: 10px;
             font-weight: bold;
-            color: #ff5555;
+            color: var(--accent-red);
             margin-left: 6px;
         }
 
@@ -434,7 +523,7 @@
         }
         .market-sub-label {
             font-size: 12px;
-            color: #8be9fd;
+            color: var(--accent-cyan);
             font-weight: bold;
         }
 
@@ -461,119 +550,436 @@
             margin-bottom: 6px;
         }
         .threshold-row span.th-label {
-            color: #c0c0c0;
+            color: var(--text-muted);
+        }
+
+        /* Alarm cards */
+        .alarm-card {
+            background: var(--section-bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 6px 8px;
+            margin-bottom: 6px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 11px;
+        }
+        .alarm-card.alarm-off {
+            opacity: 0.5;
+        }
+        .alarm-card .alarm-info {
+            flex: 1;
+            min-width: 0;
+        }
+        .alarm-card .alarm-name {
+            font-weight: bold;
+            font-size: 11px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .alarm-card .alarm-detail {
+            font-size: 10px;
+            color: var(--text-dim);
+        }
+        .alarm-card .alarm-actions {
+            display: flex;
+            gap: 4px;
+            align-items: center;
+            flex-shrink: 0;
+        }
+        .alarm-card .alarm-actions button {
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 12px;
+            padding: 2px;
+            color: var(--text-primary);
+        }
+        .alarm-card .alarm-actions button:hover {
+            opacity: 0.7;
+        }
+        .alarm-toggle-switch {
+            position: relative;
+            width: 32px;
+            height: 18px;
+            flex-shrink: 0;
+        }
+        .alarm-toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .alarm-toggle-switch .slider-track {
+            position: absolute;
+            cursor: pointer;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: var(--border);
+            border-radius: 18px;
+            transition: 0.2s;
+        }
+        .alarm-toggle-switch .slider-track:before {
+            position: absolute;
+            content: "";
+            height: 14px;
+            width: 14px;
+            left: 2px;
+            bottom: 2px;
+            background-color: var(--text-primary);
+            border-radius: 50%;
+            transition: 0.2s;
+        }
+        .alarm-toggle-switch input:checked + .slider-track {
+            background-color: var(--accent-green);
+        }
+        .alarm-toggle-switch input:checked + .slider-track:before {
+            transform: translateX(14px);
+        }
+        .alarm-form {
+            background: var(--section-bg);
+            border: 1px solid var(--accent-purple);
+            border-radius: 6px;
+            padding: 8px;
+            margin-top: 6px;
+        }
+        .alarm-form-title {
+            font-size: 11px;
+            font-weight: bold;
+            color: var(--accent-purple);
+            margin-bottom: 6px;
+        }
+        .no-alarms {
+            font-size: 11px;
+            color: var(--text-dim);
+            text-align: center;
+            padding: 8px 0;
+        }
+
+        /* Pin button */
+        .pin-btn {
+            font-size: 12px !important;
+            padding: 2px 5px !important;
+        }
+        .pin-btn.pinned {
+            background: var(--accent-purple) !important;
+            color: var(--bg-primary) !important;
+        }
+
+        /* Pinned Timers */
+        .pinned-timer-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: var(--bg-card);
+            border-radius: 6px;
+            padding: 6px 10px;
+            margin-bottom: 4px;
+            border: 1px solid var(--border);
+            font-size: 11px;
+        }
+        .pinned-timer-label {
+            color: var(--accent-cyan);
+            font-weight: bold;
+            flex: 1;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .pinned-timer-value {
+            color: var(--accent-orange);
+            font-family: 'Courier New', monospace;
+            font-weight: bold;
+            margin-left: 8px;
+            white-space: nowrap;
+        }
+        .pinned-auto-refresh {
+            display: flex;
+            align-items: center;
+            gap: 3px;
+            margin-left: 8px;
+            font-size: 10px;
+            color: var(--accent-green);
+            white-space: nowrap;
+        }
+        .pinned-auto-refresh input[type="checkbox"] {
+            width: auto;
+            margin: 0;
+            padding: 0;
+        }
+
+        /* Theme selector */
+        .header-row {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            margin-bottom: 10px;
+        }
+        .header-row h3 {
+            margin: 0;
+        }
+        .header-btns {
+            position: absolute;
+            right: 0;
+            top: 50%;
+            transform: translateY(-50%);
+            display: flex;
+            gap: 4px;
+        }
+        .header-icon-btn {
+            background: var(--btn-small-bg) !important;
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            font-size: 14px;
+            cursor: pointer;
+            border-radius: 4px;
+            padding: 3px 6px !important;
+            width: auto !important;
+            margin: 0 !important;
+            line-height: 1;
+        }
+        .header-icon-btn:hover {
+            background: var(--btn-small-hover) !important;
+        }
+        .header-icon-btn.spinning {
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        .last-updated {
+            font-size: 9px;
+            color: var(--text-dim);
+            margin-bottom: 4px;
+            font-style: italic;
+        }
+        .theme-dropdown {
+            display: none;
+            position: absolute;
+            right: 0;
+            top: 100%;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            z-index: 100;
+            min-width: 130px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+            overflow: hidden;
+        }
+        .theme-dropdown.open {
+            display: block;
+        }
+        .theme-option {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            cursor: pointer;
+            font-size: 12px;
+            color: var(--text-muted);
+            transition: background 0.15s;
+        }
+        .theme-option:hover {
+            background: var(--bg-option);
+            color: var(--text);
+        }
+        .theme-option.active {
+            color: var(--accent);
+            font-weight: bold;
+        }
+        .theme-swatch {
+            width: 12px;
+            height: 12px;
+            border-radius: 3px;
+            border: 1px solid var(--border);
+            flex-shrink: 0;
+        }
+
+        /* Expedition info card */
+        .expedition-card {
+            background: var(--bg-card);
+            border-radius: 8px;
+            padding: 10px;
+            margin-bottom: 6px;
+            border: 1px solid var(--border);
+        }
+        .expedition-card .exp-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 4px;
+        }
+        .expedition-card .exp-title {
+            font-size: 12px;
+            font-weight: bold;
+            color: var(--accent-cyan);
+        }
+        .expedition-card .exp-status {
+            font-size: 10px;
+            font-weight: bold;
+            padding: 2px 6px;
+            border-radius: 3px;
+            background: var(--accent-green);
+            color: var(--bg-primary);
+        }
+        .expedition-card .exp-status.running {
+            background: var(--accent-orange);
+        }
+        .expedition-card .exp-timer-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-top: 4px;
         }
     </style>
 </head>
 <body>
     <!-- Main View -->
     <div id="mainView">
-    <h3>🛰️ COR3 Helper</h3>
+    <div class="header-row">
+        <h3>🛰️ COR3 Helper</h3>
+        <div class="header-btns">
+            <button class="header-icon-btn" id="refreshAllBtn" title="Refresh all data">🔄</button>
+            <button class="header-icon-btn" id="themeToggleBtn" title="Change theme">🎨</button>
+        </div>
+        <div class="theme-dropdown" id="themeDropdown">
+            <div class="theme-option active" data-theme="default"><span class="theme-swatch" style="background:#1e1e2f;"></span> Default</div>
+            <div class="theme-option" data-theme="abyss"><span class="theme-swatch" style="background:#0a0e1a;"></span> Abyss</div>
+            <div class="theme-option" data-theme="void"><span class="theme-swatch" style="background:#000000;"></span> Void</div>
+            <div class="theme-option" data-theme="nebula"><span class="theme-swatch" style="background:#0d0b14;"></span> Nebula</div>
+            <div class="theme-option" data-theme="tactical"><span class="theme-swatch" style="background:#0c0f0a;"></span> Tactical</div>
+        </div>
+    </div>
+
+    <!-- Pinned Timers -->
+    <div class="section" id="pinnedTimersSection" style="display:none;">
+        <div class="section-title">📌 Pinned Timers</div>
+        <div id="pinnedTimersContainer"></div>
+    </div>
 
     <!-- Daily Ops Timer -->
     <div class="section">
-        <div class="section-title">📅 Daily Ops Timer</div>
-        <div class="daily-timer-box">
-            <div class="timer-label">Next Task In</div>
-            <div id="dailyTimerDisplay" class="daily-timer-value">--:--:--</div>
+        <div class="market-sub-header">
+            <span class="market-sub-label">📅 Daily Ops Timer</span>
+            <div style="display:flex;gap:4px;">
+                <button id="pinDailyBtn" class="refresh-btn-small pin-btn" title="Pin Daily Ops Timer">📌</button>
+                <button id="refreshDailyBtn" class="refresh-btn-small" title="Refresh Daily Ops">🔄</button>
+            </div>
         </div>
-        <div class="expandable-header" id="dailyDetailsToggle">
-            <span class="expand-arrow">▶</span>
-            <span class="expand-label">Details</span>
-        </div>
-        <div class="expandable-body" id="dailyDetailsBody">
-            <div class="detail-row"><span class="label">Claimed Today:</span> <span id="dailyClaimed">--</span></div>
-            <div class="detail-row"><span class="label">Current Streak:</span> <span id="dailyStreak">--</span></div>
-            <div class="detail-row"><span class="label">Difficulty:</span> <span id="dailyDifficulty">--</span></div>
-            <div class="detail-row"><span class="label">Streak Bonus:</span> <span id="dailyStreakBonus">--</span></div>
-        </div>
+        <div class="last-updated" id="dailyLastUpdated"></div>
+        <div style="font-size:11px;color:var(--accent-orange);margin-bottom:4px;" id="dailyTimerLine">⏳ Next Task: --:--:--</div>
+        <div class="detail-row"><span class="label">Claimed Today:</span> <span id="dailyClaimed">--</span></div>
+        <div class="detail-row"><span class="label">Current Streak:</span> <span id="dailyStreak">--</span></div>
+        <div class="detail-row"><span class="label">Difficulty:</span> <span id="dailyDifficulty">--</span></div>
+        <div class="detail-row"><span class="label">Streak Bonus:</span> <span id="dailyStreakBonus">--</span></div>
     </div>
 
     <!-- Markets -->
     <div class="section">
         <div class="section-title">🏪 Markets</div>
+        <div class="last-updated" id="coreMarketLastUpdated"></div>
         <div class="market-sub-header">
-            <span class="market-sub-label">🏠 CORE Market</span>
-            <button id="refreshMarketBtn" class="refresh-btn-small" title="Refresh CORE Market">🔄</button>
+            <span class="market-sub-label" id="coreMarketLabel">🏠 Market-1</span>
+            <div style="display:flex;gap:4px;">
+                <button id="pinCoreMarketBtn" class="refresh-btn-small pin-btn" title="Pin Market Timer">📌</button>
+                <button id="refreshMarketBtn" class="refresh-btn-small" title="Refresh Market">🔄</button>
+            </div>
         </div>
-        <div id="marketContainer"><div class="no-decisions">Loading CORE market data...</div></div>
-        <div style="border-top:1px solid #44475a;margin:10px 0;"></div>
+        <div id="marketContainer"><div class="no-decisions">No market data cached yet.</div></div>
+        <div style="border-top:1px solid var(--border);margin:10px 0;"></div>
         <div class="market-sub-header">
-            <span class="market-sub-label">🌑 BMI-ZEN Market</span>
-            <button id="refreshDarkMarketBtn" class="refresh-btn-small" title="Refresh BMI-ZEN Market">🔄</button>
+            <span class="market-sub-label" id="darkMarketLabel">🌑 Market-2</span>
+            <div style="display:flex;gap:4px;">
+                <button id="pinDarkMarketBtn" class="refresh-btn-small pin-btn" title="Pin Market Timer">📌</button>
+                <button id="refreshDarkMarketBtn" class="refresh-btn-small" title="Refresh Market">🔄</button>
+            </div>
         </div>
-        <div id="darkMarketContainer"><div class="no-decisions">Waiting for BMI-ZEN market...</div></div>
+        <div class="last-updated" id="darkMarketLastUpdated"></div>
+        <div id="darkMarketContainer"><div class="no-decisions">No market data cached yet.</div></div>
     </div>
 
-    <!-- Expedition Decisions -->
+    <!-- Expeditions -->
     <div class="section">
-        <div class="section-title">🎯 Expeditions</div>
-        <button id="checkDecisionsBtn">📋 Check Decisions</button>
-        <button id="openInventoryBtn">🎒 Inventory</button>
+        <div class="market-sub-header">
+            <span class="market-sub-label">🎯 Expeditions</span>
+            <div style="display:flex;gap:4px;">
+                <button id="refreshExpeditionsBtn" class="refresh-btn-small" title="Refresh Expeditions">🔄</button>
+            </div>
+        </div>
+        <div class="last-updated" id="expeditionLastUpdated"></div>
+        <div id="expeditionInfoContainer"><div class="no-decisions">No expedition data yet.</div></div>
+
+        <!-- Decisions (expandable) -->
+        <div class="expandable-header" id="decisionsSectionToggle">
+            <span class="expand-arrow">▶</span>
+            <span class="expand-label">📋 Decisions</span>
+        </div>
+        <div class="expandable-body" id="decisionsSectionBody">
+            <div id="decisionsContainer"></div>
+        </div>
     </div>
 
-    <!-- Alarm Settings -->
+    <!-- Inventory (expandable) -->
     <div class="section">
-        <div class="section-title">⏰ Timer Alarm</div>
-        <div class="switch-row">
-            <span>Enable Alarm</span>
-            <label>
-                <input type="checkbox" id="alarmToggle"> On
-            </label>
+        <div class="expandable-header" id="inventorySectionToggle">
+            <span class="expand-arrow">▶</span>
+            <span class="expand-label">🎒 Inventory <span id="spaceInfo" class="space-badge" style="font-size:9px;padding:2px 6px;">-- / --</span> <span id="totalValue" style="font-size:10px;color:var(--accent-green);font-weight:normal;"></span></span>
         </div>
-        <div class="alarm-row">
-            <span>Watch:</span>
-            <select id="alarmTimerSelect">
-                <option value="daily">Daily Ops Timer</option>
-                <option value="home_jobs">CORE Market Jobs Reset</option>
-                <option value="dark_jobs">BMI-ZEN Market Jobs Reset</option>
-            </select>
+        <div class="expandable-body" id="inventorySectionBody">
+            <div id="inventoryContainer"><div class="no-decisions">Click to expand and load inventory...</div></div>
         </div>
-        <div class="threshold-row">
-            <span class="th-label">Alert when remaining:</span>
-            <input type="number" id="alarmMinutes" min="0" max="59" value="1"> <span class="th-label">m</span>
-            <input type="number" id="alarmSeconds" min="0" max="59" value="0"> <span class="th-label">s</span>
+    </div>
+
+    <!-- Alarms Section -->
+    <div class="section">
+        <div class="market-sub-header">
+            <span class="market-sub-label">⏰ Alarms</span>
+            <div style="display:flex;gap:4px;">
+                <button id="stopAllAlarmsBtn" class="refresh-btn-small" title="Stop all sounding alarms" style="display:none;">🛑</button>
+                <button id="addAlarmBtn" class="refresh-btn-small" title="Add new alarm">➕</button>
+            </div>
         </div>
-        <div class="switch-row">
-            <span>Continuous (beep every 2s)</span>
-            <label>
-                <input type="checkbox" id="continuousToggle"> On
-            </label>
+        <div id="alarmList"></div>
+        <!-- Add/Edit alarm form (hidden by default) -->
+        <div id="alarmForm" class="alarm-form" style="display:none;">
+            <div class="alarm-form-title" id="alarmFormTitle">New Alarm</div>
+            <div class="alarm-row">
+                <span>Watch:</span>
+                <select id="alarmTimerSelect">
+                    <option value="daily">Daily Ops Timer</option>
+                    <option value="home_jobs">Market-1 Jobs Reset</option>
+                    <option value="dark_jobs">Market-2 Jobs Reset</option>
+                </select>
+            </div>
+            <div class="threshold-row">
+                <span class="th-label">Alert when remaining:</span>
+                <input type="number" id="alarmMinutes" min="0" max="59" value="1"> <span class="th-label">m</span>
+                <input type="number" id="alarmSeconds" min="0" max="59" value="0"> <span class="th-label">s</span>
+            </div>
+            <div class="switch-row">
+                <span>Continuous (beep every 2s)</span>
+                <label><input type="checkbox" id="alarmContinuous"> On</label>
+            </div>
+            <div class="slider-container">
+                <span>Volume:</span>
+                <input type="range" id="alarmVolume" min="0" max="100" value="50">
+                <span id="alarmVolumeLabel">50%</span>
+            </div>
+            <div style="display:flex;gap:6px;margin-top:4px;">
+                <button id="saveAlarmBtn">💾 Save</button>
+                <button id="cancelAlarmBtn" class="danger">Cancel</button>
+                <button id="testAlarmBtn" style="margin-left:auto;">🔊 Test</button>
+            </div>
         </div>
-        <div class="slider-container">
-            <span>Volume:</span>
-            <input type="range" id="volumeSlider" min="0" max="100" value="50">
-            <span id="volumeValue">50%</span>
-        </div>
-        <button id="testAlarmBtn">🔊 Test Alarm</button>
-        <button id="stopAlarmBtn" class="danger" disabled>🛑 Stop Alarm</button>
     </div>
 
     <div id="status">Status: Ready</div>
+
     </div><!-- end mainView -->
 
-    <!-- Decisions View -->
-    <div id="decisionsView">
-        <h3>🎯 Expedition Decisions</h3>
-        <div class="btn-row">
-            <button id="backToMainBtn" class="back-btn">⬅️ Back</button>
-            <button id="refreshDecisionsBtn">🔄 Refresh</button>
-        </div>
-        <div id="decisionsContainer"></div>
-    </div>
-    
-    <!-- Inventory View -->
-    <div id="inventoryView">
-        <div class="inventory-header">
-            <h3>🎒 Inventory <span id="totalValue" style="font-size:12px;color:#50fa7b;font-weight:normal;"></span></h3>
-            <span id="spaceInfo" class="space-badge">-- / --</span>
-        </div>
-        <div class="btn-row">
-            <button id="backFromInventoryBtn" class="back-btn">⬅️ Back</button>
-            <button id="refreshInventoryBtn">🔄 Refresh</button>
-        </div>
-        <div id="inventoryContainer"></div>
-    </div>
 
     <script src="popup.js"></script>
 </body>

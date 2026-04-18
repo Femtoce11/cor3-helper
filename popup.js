@@ -1,127 +1,353 @@
 // popup.js
 
-const alarmToggle = document.getElementById('alarmToggle');
+// --- Theme Selection ---
+const themeToggleBtn = document.getElementById('themeToggleBtn');
+const themeDropdown = document.getElementById('themeDropdown');
+const themeOptions = themeDropdown.querySelectorAll('.theme-option');
+
+function applyTheme(themeName) {
+    document.body.className = '';
+    if (themeName && themeName !== 'default') {
+        document.body.classList.add('theme-' + themeName);
+    }
+    themeOptions.forEach(opt => {
+        opt.classList.toggle('active', opt.dataset.theme === themeName);
+    });
+}
+
+// Load saved theme immediately
+chrome.storage.sync.get('selectedTheme', (data) => {
+    applyTheme(data.selectedTheme || 'default');
+});
+
+themeToggleBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    themeDropdown.classList.toggle('open');
+});
+
+themeOptions.forEach(opt => {
+    opt.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const theme = opt.dataset.theme;
+        applyTheme(theme);
+        await chrome.storage.sync.set({ selectedTheme: theme });
+        themeDropdown.classList.remove('open');
+    });
+});
+
+// Close dropdown when clicking elsewhere
+document.addEventListener('click', () => {
+    themeDropdown.classList.remove('open');
+});
+
+const statusDiv = document.getElementById('status');
+
+// --- Multi-Alarm System ---
+const alarmList = document.getElementById('alarmList');
+const alarmForm = document.getElementById('alarmForm');
+const alarmFormTitle = document.getElementById('alarmFormTitle');
+const addAlarmBtn = document.getElementById('addAlarmBtn');
+const saveAlarmBtn = document.getElementById('saveAlarmBtn');
+const cancelAlarmBtn = document.getElementById('cancelAlarmBtn');
+const testAlarmBtn = document.getElementById('testAlarmBtn');
+const stopAllAlarmsBtn = document.getElementById('stopAllAlarmsBtn');
 const alarmTimerSelect = document.getElementById('alarmTimerSelect');
 const alarmMinutes = document.getElementById('alarmMinutes');
 const alarmSeconds = document.getElementById('alarmSeconds');
-const continuousToggle = document.getElementById('continuousToggle');
-const volumeSlider = document.getElementById('volumeSlider');
-const volumeValue = document.getElementById('volumeValue');
-const testAlarmBtn = document.getElementById('testAlarmBtn');
-const stopAlarmBtn = document.getElementById('stopAlarmBtn');
-const statusDiv = document.getElementById('status');
+const alarmContinuous = document.getElementById('alarmContinuous');
+const alarmVolumeSlider = document.getElementById('alarmVolume');
+const alarmVolumeLabel = document.getElementById('alarmVolumeLabel');
 
-// Listen for alarm status from content script
-chrome.runtime.onMessage.addListener((request) => {
-    if (request.action === "alarmActiveStatus") {
-        stopAlarmBtn.disabled = !request.isActive;
-        statusDiv.textContent = request.isActive ? 'Alarm sounding...' : 'Ready';
-    }
+let alarms = []; // array of alarm objects
+let editingAlarmId = null; // null = new, string = editing existing
+
+const TIMER_LABELS = {
+    daily: 'Daily Ops Timer',
+    home_jobs: 'Market-1 Jobs Reset',
+    dark_jobs: 'Market-2 Jobs Reset'
+};
+
+alarmVolumeSlider.addEventListener('input', () => {
+    alarmVolumeLabel.textContent = alarmVolumeSlider.value + '%';
 });
 
-// --- Alarm Settings ---
-async function loadSettings() {
-    const data = await chrome.storage.sync.get([
-        'alarmEnabled', 'alarmVolume', 'continuousAlarm',
-        'alarmTimerSource', 'alarmThresholdMinutes', 'alarmThresholdSeconds'
-    ]);
-    alarmToggle.checked = data.alarmEnabled || false;
-    continuousToggle.checked = data.continuousAlarm || false;
-    alarmTimerSelect.value = data.alarmTimerSource || 'daily';
-    alarmMinutes.value = data.alarmThresholdMinutes !== undefined ? data.alarmThresholdMinutes : 1;
-    alarmSeconds.value = data.alarmThresholdSeconds !== undefined ? data.alarmThresholdSeconds : 0;
-    const vol = data.alarmVolume !== undefined ? data.alarmVolume : 50;
-    volumeSlider.value = vol;
-    volumeValue.textContent = vol + '%';
-    sendSettingsToContent();
+function generateAlarmId() {
+    return 'alarm_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
 }
-function sendSettingsToContent() {
-    const thresholdSec = (parseInt(alarmMinutes.value) || 0) * 60 + (parseInt(alarmSeconds.value) || 0);
+
+async function loadAlarms() {
+    const data = await chrome.storage.sync.get('alarms');
+    alarms = data.alarms || [];
+    renderAlarmList();
+    sendAlarmsToContent();
+}
+
+async function saveAlarms() {
+    await chrome.storage.sync.set({ alarms });
+    renderAlarmList();
+    sendAlarmsToContent();
+}
+
+function sendAlarmsToContent() {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         if (tabs[0]) {
             chrome.tabs.sendMessage(tabs[0].id, {
-                action: "updateSettings",
-                settings: {
-                    alarmEnabled: alarmToggle.checked,
-                    alarmVolume: parseInt(volumeSlider.value),
-                    continuousAlarm: continuousToggle.checked,
-                    alarmTimerSource: alarmTimerSelect.value,
-                    alarmThresholdSeconds: thresholdSec
-                }
+                action: "updateAlarms",
+                alarms: alarms
             }).catch(() => {});
         }
     });
 }
-loadSettings();
 
-alarmToggle.addEventListener('change', async () => {
-    await chrome.storage.sync.set({ alarmEnabled: alarmToggle.checked });
-    sendSettingsToContent();
-});
-alarmTimerSelect.addEventListener('change', async () => {
-    await chrome.storage.sync.set({ alarmTimerSource: alarmTimerSelect.value });
-    sendSettingsToContent();
-});
-alarmMinutes.addEventListener('change', async () => {
-    await chrome.storage.sync.set({ alarmThresholdMinutes: parseInt(alarmMinutes.value) || 0 });
-    sendSettingsToContent();
-});
-alarmSeconds.addEventListener('change', async () => {
-    await chrome.storage.sync.set({ alarmThresholdSeconds: parseInt(alarmSeconds.value) || 0 });
-    sendSettingsToContent();
-});
-continuousToggle.addEventListener('change', async () => {
-    await chrome.storage.sync.set({ continuousAlarm: continuousToggle.checked });
-    sendSettingsToContent();
-});
-volumeSlider.addEventListener('input', async () => {
-    const vol = volumeSlider.value;
-    volumeValue.textContent = vol + '%';
-    await chrome.storage.sync.set({ alarmVolume: parseInt(vol) });
-    sendSettingsToContent();
+function renderAlarmList() {
+    if (alarms.length === 0) {
+        alarmList.innerHTML = '<div class="no-alarms">No alarms configured. Click ➕ to add one.</div>';
+        return;
+    }
+    alarmList.innerHTML = alarms.map(a => {
+        const mins = Math.floor(a.thresholdSeconds / 60);
+        const secs = a.thresholdSeconds % 60;
+        const timeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+        return `
+        <div class="alarm-card ${a.enabled ? '' : 'alarm-off'}" data-id="${a.id}">
+            <label class="alarm-toggle-switch">
+                <input type="checkbox" ${a.enabled ? 'checked' : ''} data-action="toggle" data-id="${a.id}">
+                <span class="slider-track"></span>
+            </label>
+            <div class="alarm-info">
+                <div class="alarm-name">${TIMER_LABELS[a.timerSource] || a.timerSource}</div>
+                <div class="alarm-detail">⏱ ${timeStr} · 🔊 ${a.volume}%${a.continuous ? ' · 🔁' : ''}</div>
+            </div>
+            <div class="alarm-actions">
+                <button data-action="edit" data-id="${a.id}" title="Edit">✏️</button>
+                <button data-action="delete" data-id="${a.id}" title="Delete">🗑️</button>
+            </div>
+        </div>`;
+    }).join('');
+
+    // Bind events
+    alarmList.querySelectorAll('[data-action="toggle"]').forEach(el => {
+        el.addEventListener('change', async (e) => {
+            const alarm = alarms.find(a => a.id === e.target.dataset.id);
+            if (alarm) {
+                alarm.enabled = e.target.checked;
+                await saveAlarms();
+            }
+        });
+    });
+    alarmList.querySelectorAll('[data-action="edit"]').forEach(el => {
+        el.addEventListener('click', (e) => {
+            const alarm = alarms.find(a => a.id === e.target.dataset.id);
+            if (alarm) openAlarmForm(alarm);
+        });
+    });
+    alarmList.querySelectorAll('[data-action="delete"]').forEach(el => {
+        el.addEventListener('click', async (e) => {
+            alarms = alarms.filter(a => a.id !== e.target.dataset.id);
+            await saveAlarms();
+        });
+    });
+}
+
+function openAlarmForm(alarm = null) {
+    if (alarm) {
+        editingAlarmId = alarm.id;
+        alarmFormTitle.textContent = 'Edit Alarm';
+        alarmTimerSelect.value = alarm.timerSource;
+        alarmMinutes.value = Math.floor(alarm.thresholdSeconds / 60);
+        alarmSeconds.value = alarm.thresholdSeconds % 60;
+        alarmContinuous.checked = alarm.continuous;
+        alarmVolumeSlider.value = alarm.volume;
+        alarmVolumeLabel.textContent = alarm.volume + '%';
+    } else {
+        editingAlarmId = null;
+        alarmFormTitle.textContent = 'New Alarm';
+        alarmTimerSelect.value = 'daily';
+        alarmMinutes.value = 1;
+        alarmSeconds.value = 0;
+        alarmContinuous.checked = false;
+        alarmVolumeSlider.value = 50;
+        alarmVolumeLabel.textContent = '50%';
+    }
+    alarmForm.style.display = '';
+}
+
+function closeAlarmForm() {
+    alarmForm.style.display = 'none';
+    editingAlarmId = null;
+}
+
+addAlarmBtn.addEventListener('click', () => openAlarmForm());
+cancelAlarmBtn.addEventListener('click', () => closeAlarmForm());
+
+saveAlarmBtn.addEventListener('click', async () => {
+    const thresholdSec = (parseInt(alarmMinutes.value) || 0) * 60 + (parseInt(alarmSeconds.value) || 0);
+    if (thresholdSec <= 0) return;
+    const alarmData = {
+        timerSource: alarmTimerSelect.value,
+        thresholdSeconds: thresholdSec,
+        continuous: alarmContinuous.checked,
+        volume: parseInt(alarmVolumeSlider.value),
+        enabled: true
+    };
+    if (editingAlarmId) {
+        const idx = alarms.findIndex(a => a.id === editingAlarmId);
+        if (idx >= 0) {
+            alarms[idx] = { ...alarms[idx], ...alarmData };
+        }
+    } else {
+        alarms.push({ id: generateAlarmId(), ...alarmData });
+    }
+    await saveAlarms();
+    closeAlarmForm();
 });
 
 testAlarmBtn.addEventListener('click', () => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         if (tabs[0]) {
-            chrome.tabs.sendMessage(tabs[0].id, { action: "testAlarm" });
+            chrome.tabs.sendMessage(tabs[0].id, {
+                action: "testAlarm",
+                volume: parseInt(alarmVolumeSlider.value),
+                continuous: alarmContinuous.checked
+            });
         }
     });
 });
-stopAlarmBtn.addEventListener('click', () => {
+
+stopAllAlarmsBtn.addEventListener('click', () => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         if (tabs[0]) {
             chrome.tabs.sendMessage(tabs[0].id, { action: "stopAlarm" });
-            stopAlarmBtn.disabled = true;
+            stopAllAlarmsBtn.style.display = 'none';
         }
     });
 });
 
-// --- Expedition Decisions ---
-const mainView = document.getElementById('mainView');
-const decisionsView = document.getElementById('decisionsView');
-const decisionsContainer = document.getElementById('decisionsContainer');
-const checkDecisionsBtn = document.getElementById('checkDecisionsBtn');
-const backToMainBtn = document.getElementById('backToMainBtn');
-const refreshDecisionsBtn = document.getElementById('refreshDecisionsBtn');
+// Listen for alarm status from content script
+chrome.runtime.onMessage.addListener((request) => {
+    if (request.action === "alarmActiveStatus") {
+        stopAllAlarmsBtn.style.display = request.isActive ? '' : 'none';
+        statusDiv.textContent = request.isActive ? 'Alarm sounding...' : 'Ready';
+    }
+});
 
-function showDecisionsView() {
-    mainView.classList.add('hidden');
-    inventoryView.classList.remove('active');
-    decisionsView.classList.add('active');
-    loadDecisions();
+loadAlarms();
+
+// --- Refresh All ---
+const refreshAllBtn = document.getElementById('refreshAllBtn');
+const refreshDailyBtn = document.getElementById('refreshDailyBtn');
+const refreshExpeditionsBtn = document.getElementById('refreshExpeditionsBtn');
+
+// "Last updated" display elements
+const dailyLastUpdated = document.getElementById('dailyLastUpdated');
+const coreMarketLastUpdated = document.getElementById('coreMarketLastUpdated');
+const darkMarketLastUpdated = document.getElementById('darkMarketLastUpdated');
+const expeditionLastUpdated = document.getElementById('expeditionLastUpdated');
+
+function formatTimeAgo(ts) {
+    if (!ts) return '';
+    const diff = Date.now() - ts;
+    if (diff < 60000) return 'Updated just now';
+    const mins = Math.floor(diff / 60000);
+    if (mins < 60) return `Updated ${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    const remMins = mins % 60;
+    return `Updated ${hrs}h ${remMins}m ago`;
 }
 
-function showMainView() {
-    decisionsView.classList.remove('active');
-    mainView.classList.remove('hidden');
+function showLastUpdated(el, tsKey) {
+    chrome.storage.local.get(tsKey, (result) => {
+        const ts = result[tsKey];
+        el.textContent = ts ? formatTimeAgo(ts) : '';
+    });
+}
+
+// Update all "last updated" labels periodically
+function refreshAllTimestamps() {
+    showLastUpdated(dailyLastUpdated, 'dailyOpsUpdatedAt');
+    showLastUpdated(coreMarketLastUpdated, 'marketDataUpdatedAt');
+    showLastUpdated(darkMarketLastUpdated, 'darkMarketDataUpdatedAt');
+    showLastUpdated(expeditionLastUpdated, 'expeditionsDataUpdatedAt');
+}
+
+// --- Expedition Info + Decisions (inline) ---
+const expeditionInfoContainer = document.getElementById('expeditionInfoContainer');
+const decisionsContainer = document.getElementById('decisionsContainer');
+const decisionsSectionToggle = document.getElementById('decisionsSectionToggle');
+const decisionsSectionBody = document.getElementById('decisionsSectionBody');
+
+// Expedition timer end times keyed by expedition id
+let expeditionEndTimes = {};
+
+decisionsSectionToggle.addEventListener('click', () => {
+    decisionsSectionToggle.classList.toggle('open');
+    decisionsSectionBody.classList.toggle('open');
+});
+
+function renderExpeditionInfo(expeditions) {
+    expeditionInfoContainer.innerHTML = '';
+
+    if (!expeditions || expeditions.length === 0) {
+        expeditionInfoContainer.innerHTML = '<div class="no-decisions">No active expeditions.</div>';
+        return;
+    }
+
+    for (const exp of expeditions) {
+        // Store endTime for live timer ticking
+        if (exp.endTime) {
+            expeditionEndTimes[exp.id] = exp.endTime;
+        }
+
+        const card = document.createElement('div');
+        card.className = 'expedition-card';
+
+        const statusClass = exp.status === 'RUNNING' ? ' running' : '';
+        const mercName = exp.mercenary ? exp.mercenary.callsign : 'Unknown';
+        const insurance = exp.hasInsurance ? 'Yes' : 'No';
+
+        let timerHtml = '';
+        if (exp.endTime) {
+            timerHtml = `
+                <div class="exp-timer-row">
+                    <span style="font-size:11px;color:var(--accent-orange);">⏳ <span class="exp-timer" data-exp-id="${exp.id}">${formatTimeRemaining(exp.endTime)}</span></span>
+                    <button class="refresh-btn-small pin-btn pin-exp-btn" data-exp-id="${exp.id}" title="Pin Expedition Timer">📌</button>
+                </div>
+            `;
+        }
+
+        card.innerHTML = `
+            <div class="exp-header">
+                <span class="exp-title">📍 ${exp.locationName || 'Unknown'} — ${exp.zoneName || 'Unknown'}</span>
+                <span class="exp-status${statusClass}">${exp.status || 'UNKNOWN'}</span>
+            </div>
+            <div class="detail-row"><span class="label">Mercenary:</span> 🧑 ${mercName}</div>
+            <div class="detail-row"><span class="label">Total Cost:</span> 💰 ${exp.totalCost ? exp.totalCost.toLocaleString() : '--'}</div>
+            <div class="detail-row"><span class="label">Insurance:</span> ${insurance}</div>
+            <div class="detail-row"><span class="label">Risk Score:</span> ${exp.riskScore ?? '--'}</div>
+            ${timerHtml}
+        `;
+        expeditionInfoContainer.appendChild(card);
+    }
+
+    // Wire up pin buttons
+    expeditionInfoContainer.querySelectorAll('.pin-exp-btn').forEach(btn => {
+        const expId = btn.dataset.expId;
+        btn.classList.toggle('pinned', !!pinnedTimers['exp_' + expId]);
+        btn.addEventListener('click', async () => {
+            const key = 'exp_' + expId;
+            pinnedTimers[key] = !pinnedTimers[key];
+            btn.classList.toggle('pinned', !!pinnedTimers[key]);
+            await savePinnedState();
+            renderPinnedTimers();
+        });
+    });
 }
 
 function renderDecisions(decisions) {
     decisionsContainer.innerHTML = '';
 
     if (!decisions || decisions.length === 0) {
-        decisionsContainer.innerHTML = '<div class="no-decisions">No pending decisions found.<br>Make sure you have the cor3.gg tab open and expeditions are running.</div>';
+        decisionsContainer.innerHTML = '<div class="no-decisions">No pending decisions found.</div>';
         return;
     }
 
@@ -176,57 +402,61 @@ function renderDecisions(decisions) {
     }
 }
 
-async function loadDecisions() {
-    const { expeditionDecisions } = await chrome.storage.local.get('expeditionDecisions');
+async function loadExpeditions() {
+    const { expeditionsData, expeditionDecisions } = await chrome.storage.local.get(['expeditionsData', 'expeditionDecisions']);
+    renderExpeditionInfo(expeditionsData || []);
     renderDecisions(expeditionDecisions || []);
+    refreshAllTimestamps();
 }
 
-checkDecisionsBtn.addEventListener('click', () => {
-    showDecisionsView();
-});
-
-backToMainBtn.addEventListener('click', () => {
-    showMainView();
-});
-
-refreshDecisionsBtn.addEventListener('click', async () => {
-    // Clear stored decisions, request fresh data, then reload after a short delay
-    await chrome.storage.local.set({ expeditionDecisions: [] });
-    decisionsContainer.innerHTML = '<div class="no-decisions">Requesting data from server...</div>';
+async function requestExpeditions() {
+    expeditionInfoContainer.innerHTML = '<div class="no-decisions">Loading expedition data...</div>';
+    // Clear old data so poll detects fresh arrival
+    await chrome.storage.local.remove(['expeditionsData', 'expeditionDecisions']);
     try {
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
         await chrome.tabs.sendMessage(tab.id, { action: "requestExpeditions" });
-    } catch (e) {
-        // content script not reachable
-    }
-    // Wait a moment for the WS response to come back
-    setTimeout(() => loadDecisions(), 2000);
-});
+    } catch (e) { /* not reachable */ }
+    // Poll for expedition data
+    let loaded = false;
+    const poll = setInterval(async () => {
+        const { expeditionsData } = await chrome.storage.local.get('expeditionsData');
+        if (expeditionsData) {
+            clearInterval(poll);
+            if (loaded) return;
+            loaded = true;
+            await loadExpeditions();
+        }
+    }, 300);
+    // Safety timeout: show no data after 5s if nothing came
+    setTimeout(() => {
+        clearInterval(poll);
+        if (!loaded) {
+            loaded = true;
+            expeditionInfoContainer.innerHTML = '<div class="no-decisions">No active expeditions.</div>';
+            decisionsContainer.innerHTML = '<div class="no-decisions">No pending decisions found.</div>';
+        }
+    }, 5000);
+}
 
-// --- Inventory View ---
-const inventoryView = document.getElementById('inventoryView');
+refreshExpeditionsBtn.addEventListener('click', () => requestExpeditions());
+
+// --- Inventory (inline expandable) ---
 const inventoryContainer = document.getElementById('inventoryContainer');
-const openInventoryBtn = document.getElementById('openInventoryBtn');
-const backFromInventoryBtn = document.getElementById('backFromInventoryBtn');
-const refreshInventoryBtn = document.getElementById('refreshInventoryBtn');
+const inventorySectionToggle = document.getElementById('inventorySectionToggle');
+const inventorySectionBody = document.getElementById('inventorySectionBody');
 const spaceInfo = document.getElementById('spaceInfo');
+let inventoryLoaded = false;
 
-function showInventoryView() {
-    mainView.classList.add('hidden');
-    decisionsView.classList.remove('active');
-    inventoryView.classList.add('active');
-    requestAndLoadInventory();
-}
-
-async function hideInventoryView() {
-    inventoryView.classList.remove('active');
-    mainView.classList.remove('hidden');
-    // Leave stash room when backing out
-    try {
-        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        await chrome.tabs.sendMessage(tab.id, { action: "leaveStash" });
-    } catch (e) { /* content script not reachable */ }
-}
+inventorySectionToggle.addEventListener('click', async () => {
+    inventorySectionToggle.classList.toggle('open');
+    inventorySectionBody.classList.toggle('open');
+    // Load inventory on first expand
+    if (inventorySectionToggle.classList.contains('open') && !inventoryLoaded) {
+        inventoryLoaded = true;
+        await requestAndLoadInventory();
+    }
+});
 
 async function requestAndLoadInventory() {
     inventoryContainer.innerHTML = '<div class="no-decisions">Requesting inventory from server...</div>';
@@ -234,9 +464,7 @@ async function requestAndLoadInventory() {
     try {
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
         await chrome.tabs.sendMessage(tab.id, { action: "requestStash" });
-    } catch (e) {
-        // content script not reachable
-    }
+    } catch (e) { /* not reachable */ }
     // Wait for WS response (leave + rejoin with human delays), then load from storage
     setTimeout(() => loadInventory(), 2500);
 }
@@ -305,43 +533,31 @@ function renderInventory(data) {
     }
 }
 
-openInventoryBtn.addEventListener('click', () => showInventoryView());
-backFromInventoryBtn.addEventListener('click', () => hideInventoryView());
-refreshInventoryBtn.addEventListener('click', () => requestAndLoadInventory());
-
 // --- Daily Ops Timer ---
-const dailyTimerDisplay = document.getElementById('dailyTimerDisplay');
-const dailyDetailsToggle = document.getElementById('dailyDetailsToggle');
-const dailyDetailsBody = document.getElementById('dailyDetailsBody');
+const dailyTimerLine = document.getElementById('dailyTimerLine');
 const dailyClaimed = document.getElementById('dailyClaimed');
 const dailyStreak = document.getElementById('dailyStreak');
 const dailyDifficulty = document.getElementById('dailyDifficulty');
 const dailyStreakBonus = document.getElementById('dailyStreakBonus');
 
 let dailyNextTaskTime = null;
-let dailyTimerInterval = null;
-
-dailyDetailsToggle.addEventListener('click', () => {
-    dailyDetailsToggle.classList.toggle('open');
-    dailyDetailsBody.classList.toggle('open');
-});
 
 function updateDailyTimer() {
     if (!dailyNextTaskTime) {
-        dailyTimerDisplay.textContent = '--:--:--';
+        dailyTimerLine.textContent = '⏳ Next Task: --:--:--';
         return;
     }
     const now = Date.now();
     const diff = dailyNextTaskTime - now;
     if (diff <= 0) {
-        dailyTimerDisplay.textContent = '0h:0m:0s';
+        dailyTimerLine.textContent = '⏳ Next Task: 0h:0m:0s';
         return;
     }
     const totalSec = Math.floor(diff / 1000);
     const h = Math.floor(totalSec / 3600);
     const m = Math.floor((totalSec % 3600) / 60);
     const s = totalSec % 60;
-    dailyTimerDisplay.textContent = `${h}h:${m}m:${s}s`;
+    dailyTimerLine.textContent = `⏳ Next Task: ${h}h:${m}m:${s}s`;
 }
 
 async function fetchDailyOps() {
@@ -356,6 +572,7 @@ async function fetchDailyOps() {
             dailyDifficulty.textContent = data.difficulty ?? '--';
             dailyStreakBonus.textContent = data.streakBonus ?? '--';
             updateDailyTimer();
+            refreshAllTimestamps();
         } else {
             // Try from cached storage as fallback
             const { dailyOpsData } = await chrome.storage.local.get('dailyOpsData');
@@ -380,23 +597,43 @@ async function fetchDailyOps() {
                 dailyStreakBonus.textContent = dailyOpsData.streakBonus ?? '--';
                 updateDailyTimer();
             } else {
-                dailyTimerDisplay.textContent = '--:--:--';
+                dailyTimerLine.textContent = '⏳ Next Task: --:--:--';
             }
         } catch (e2) {
-            dailyTimerDisplay.textContent = '--:--:--';
+            dailyTimerLine.textContent = '⏳ Next Task: --:--:--';
         }
     }
 }
 
-// Fetch once on every popup open
-fetchDailyOps();
-dailyTimerInterval = setInterval(updateDailyTimer, 1000);
+// Load cached daily ops on popup open (no WS request)
+async function loadCachedDailyOps() {
+    try {
+        const { dailyOpsData } = await chrome.storage.local.get('dailyOpsData');
+        if (dailyOpsData) {
+            dailyNextTaskTime = dailyOpsData.nextTaskTime ? new Date(dailyOpsData.nextTaskTime).getTime() : null;
+            dailyClaimed.textContent = dailyOpsData.hasClaimedToday ? 'Yes' : 'No';
+            dailyStreak.textContent = dailyOpsData.currentStreak ?? '--';
+            dailyDifficulty.textContent = dailyOpsData.difficulty ?? '--';
+            dailyStreakBonus.textContent = dailyOpsData.streakBonus ?? '--';
+            updateDailyTimer();
+        }
+    } catch (e) {}
+}
+loadCachedDailyOps();
+
+refreshDailyBtn.addEventListener('click', () => fetchDailyOps());
 
 // --- Markets ---
 const marketContainer = document.getElementById('marketContainer');
 const darkMarketContainer = document.getElementById('darkMarketContainer');
 const refreshMarketBtn = document.getElementById('refreshMarketBtn');
 const refreshDarkMarketBtn = document.getElementById('refreshDarkMarketBtn');
+const coreMarketLabel = document.getElementById('coreMarketLabel');
+const darkMarketLabel = document.getElementById('darkMarketLabel');
+
+// Market names from WS data
+let coreMarketName = null;
+let darkMarketName = null;
 
 function formatTimeRemaining(dateStr) {
     if (!dateStr) return '--';
@@ -407,6 +644,20 @@ function formatTimeRemaining(dateStr) {
     const m = Math.floor((totalSec % 3600) / 60);
     const s = totalSec % 60;
     return `${h}h:${m}m:${s}s`;
+}
+
+function getRemainingSeconds(dateStr) {
+    if (!dateStr) return null;
+    const diff = new Date(dateStr).getTime() - Date.now();
+    return diff > 0 ? Math.floor(diff / 1000) : 0;
+}
+
+function updateMarketLabel(labelEl, wsName, placeholder, icon) {
+    if (wsName) {
+        labelEl.textContent = `${icon} ${wsName}`;
+    } else {
+        labelEl.textContent = `${icon} ${placeholder}`;
+    }
 }
 
 function renderMarketInto(container, data, labelPrefix, idPrefix) {
@@ -421,20 +672,19 @@ function renderMarketInto(container, data, labelPrefix, idPrefix) {
     const market = md.market;
     const rep = md.reputation;
 
-    // Market name
-    let html = `<div style="font-size:13px;font-weight:bold;color:#f8f8f2;margin-bottom:6px;">${market.marketName || labelPrefix}</div>`;
+    let html = '';
 
     // Credits
     if (md.userCredits !== undefined) {
-        html += `<div style="font-size:11px;color:#50fa7b;margin-bottom:4px;">💰 Credits: ${md.userCredits.toLocaleString()}</div>`;
+        html += `<div style="font-size:11px;color:var(--accent-green);margin-bottom:4px;">💰 Credits: ${md.userCredits.toLocaleString()}</div>`;
     }
 
     // Reputation section
     if (rep) {
         const pct = rep.requiredReputation > 0 ? Math.min(100, Math.floor((rep.progress / rep.requiredReputation) * 100)) : 0;
-        html += `<div style="font-size:11px;color:#c0c0c0;margin-bottom:2px;">Reputation — Level ${rep.level}</div>`;
+        html += `<div style="font-size:11px;color:var(--text-muted);margin-bottom:2px;">Reputation — Level ${rep.level}</div>`;
         html += `<div class="market-rep-bar"><div class="market-rep-fill" style="width:${pct}%"></div></div>`;
-        html += `<div style="font-size:10px;color:#6272a4;margin-bottom:4px;">`;
+        html += `<div style="font-size:10px;color:var(--text-dim);margin-bottom:4px;">`;
         html += `Progress: ${rep.progress}/${rep.requiredReputation} · `;
         html += `Level Locked: ${rep.isLevelLocked ? 'Yes' : 'No'} · `;
         html += `Max Level: ${rep.isMaxLevel ? 'Yes' : 'No'}`;
@@ -443,7 +693,7 @@ function renderMarketInto(container, data, labelPrefix, idPrefix) {
 
     // Next jobs reset timer
     if (md.nextJobsResetAt) {
-        html += `<div class="${idPrefix}-reset-timer" style="font-size:11px;color:#ffb86c;margin-bottom:8px;">⏳ Jobs Reset: ${formatTimeRemaining(md.nextJobsResetAt)}</div>`;
+        html += `<div class="${idPrefix}-reset-timer" style="font-size:11px;color:var(--accent-orange);margin-bottom:8px;">⏳ Jobs Reset: ${formatTimeRemaining(md.nextJobsResetAt)}</div>`;
     }
 
     // Items List (expandable)
@@ -509,16 +759,36 @@ let bmiNextJobsResetAt = null;
 
 function renderMarket(data) {
     if (data && data.nextJobsResetAt) coreNextJobsResetAt = data.nextJobsResetAt;
-    renderMarketInto(marketContainer, data, 'CORE Market', 'home');
+    // Update market name from WS data
+    if (data && data.market && data.market.marketName) {
+        coreMarketName = data.market.marketName;
+        updateMarketLabel(coreMarketLabel, coreMarketName, 'Market-1', '🏠');
+        // Update alarm dropdown option text
+        const opt = alarmTimerSelect.querySelector('option[value="home_jobs"]');
+        if (opt) opt.textContent = coreMarketName + ' Jobs Reset';
+        // Re-render pinned timers to update labels
+        renderPinnedTimers();
+    }
+    renderMarketInto(marketContainer, data, 'Market-1', 'home');
 }
 
 function renderDarkMarket(data, available) {
     if (available === false) {
-        darkMarketContainer.innerHTML = '<div class="no-decisions" style="color:#ff5555;">⚠️ BMI-ZEN Market is currently unavailable.<br>The endpoint server could not be reached.</div>';
+        darkMarketContainer.innerHTML = '<div class="no-decisions" style="color:var(--accent-red);">⚠️ Market-2 is currently unavailable.<br>The endpoint server could not be reached.</div>';
         return;
     }
     if (data && data.nextJobsResetAt) bmiNextJobsResetAt = data.nextJobsResetAt;
-    renderMarketInto(darkMarketContainer, data, 'BMI-ZEN Market', 'dark');
+    // Update market name from WS data
+    if (data && data.market && data.market.marketName) {
+        darkMarketName = data.market.marketName;
+        updateMarketLabel(darkMarketLabel, darkMarketName, 'Market-2', '🌑');
+        // Update alarm dropdown option text
+        const opt = alarmTimerSelect.querySelector('option[value="dark_jobs"]');
+        if (opt) opt.textContent = darkMarketName + ' Jobs Reset';
+        // Re-render pinned timers to update labels
+        renderPinnedTimers();
+    }
+    renderMarketInto(darkMarketContainer, data, 'Market-2', 'dark');
 }
 
 async function loadMarket() {
@@ -531,74 +801,378 @@ async function loadDarkMarket() {
     renderDarkMarket(darkMarketData, darkMarketAvailable);
 }
 
+// Request both markets — just sends get.options, no room joins needed
 async function requestMarketData() {
-    marketContainer.innerHTML = '<div class="no-decisions">Requesting CORE market data...</div>';
-    darkMarketContainer.innerHTML = '<div class="no-decisions">Waiting for BMI-ZEN market...</div>';
+    marketContainer.innerHTML = '<div class="no-decisions">Requesting market data...</div>';
+    darkMarketContainer.innerHTML = '<div class="no-decisions">Requesting market data...</div>';
+    await chrome.storage.local.remove(['marketData', 'darkMarketData', 'darkMarketAvailable']);
     try {
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        // Step 1: Request CORE market
         await chrome.tabs.sendMessage(tab.id, { action: "requestMarket" });
-        // Step 2: After CORE data arrives, leave market room, then request BMI-ZEN
-        setTimeout(async () => {
-            loadMarket();
-            try {
-                await chrome.tabs.sendMessage(tab.id, { action: "leaveMarketRoom" });
-                setTimeout(async () => {
-                    try {
-                        await chrome.tabs.sendMessage(tab.id, { action: "requestDarkMarket" });
-                    } catch (e) { /* not reachable */ }
-                    // BMI-ZEN market response comes async, load after timeout
-                    setTimeout(() => loadDarkMarket(), 4000);
-                }, 800);
-            } catch (e) { /* not reachable */ }
-        }, 3500);
-    } catch (e) {
-        // content script not reachable — try loading cached data
-        setTimeout(() => { loadMarket(); loadDarkMarket(); }, 500);
-    }
+        await chrome.tabs.sendMessage(tab.id, { action: "requestDarkMarket" });
+    } catch (e) { /* content script not reachable */ }
+    // Poll for both markets to arrive
+    return new Promise((resolve) => {
+        let coreLoaded = false, darkLoaded = false;
+        const poll = setInterval(async () => {
+            const data = await chrome.storage.local.get(['marketData', 'darkMarketData']);
+            if (!coreLoaded && data.marketData && data.marketData.market) {
+                coreLoaded = true;
+                renderMarket(data.marketData);
+                refreshAllTimestamps();
+            }
+            if (!darkLoaded && data.darkMarketData && data.darkMarketData.market) {
+                darkLoaded = true;
+                renderDarkMarket(data.darkMarketData, true);
+                refreshAllTimestamps();
+            }
+            if (coreLoaded && darkLoaded) {
+                clearInterval(poll);
+                resolve();
+            }
+        }, 500);
+        // Safety timeout: 10s
+        setTimeout(() => {
+            clearInterval(poll);
+            if (!coreLoaded) loadMarket();
+            if (!darkLoaded) loadDarkMarket();
+            refreshAllTimestamps();
+            resolve();
+        }, 10000);
+    });
 }
 
 async function refreshMarketData() {
-    marketContainer.innerHTML = '<div class="no-decisions">Refreshing CORE market data...</div>';
+    marketContainer.innerHTML = '<div class="no-decisions">Refreshing market data...</div>';
     try {
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
         await chrome.tabs.sendMessage(tab.id, { action: "refreshMarket" });
-        setTimeout(() => loadMarket(), 4000);
+        setTimeout(() => { loadMarket(); refreshAllTimestamps(); }, 3000);
     } catch (e) {
-        setTimeout(() => loadMarket(), 500);
+        setTimeout(() => { loadMarket(); refreshAllTimestamps(); }, 500);
     }
 }
 
 refreshMarketBtn.addEventListener('click', () => refreshMarketData());
 
 async function refreshDarkMarketData() {
-    darkMarketContainer.innerHTML = '<div class="no-decisions">Refreshing BMI-ZEN market data...</div>';
+    darkMarketContainer.innerHTML = '<div class="no-decisions">Refreshing market data...</div>';
     try {
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
         await chrome.tabs.sendMessage(tab.id, { action: "refreshDarkMarket" });
-        setTimeout(() => loadDarkMarket(), 4000);
+        setTimeout(() => { loadDarkMarket(); refreshAllTimestamps(); }, 3000);
     } catch (e) {
-        setTimeout(() => loadDarkMarket(), 500);
+        setTimeout(() => { loadDarkMarket(); refreshAllTimestamps(); }, 500);
     }
 }
 
 refreshDarkMarketBtn.addEventListener('click', () => refreshDarkMarketData());
 
-// On popup open: request market data (CORE first, then BMI-ZEN)
-requestMarketData();
-
-// Seed timer timestamps from cache immediately so they tick while WS responses arrive
-chrome.storage.local.get(['marketData', 'darkMarketData'], (result) => {
-    if (result.marketData && result.marketData.nextJobsResetAt) {
-        coreNextJobsResetAt = result.marketData.nextJobsResetAt;
+// On popup open: load cached market data (no WS requests)
+chrome.storage.local.get(['marketData', 'darkMarketData', 'darkMarketAvailable'], (result) => {
+    if (result.marketData) {
+        if (result.marketData.nextJobsResetAt) coreNextJobsResetAt = result.marketData.nextJobsResetAt;
+        if (result.marketData.market && result.marketData.market.marketName) {
+            coreMarketName = result.marketData.market.marketName;
+            updateMarketLabel(coreMarketLabel, coreMarketName, 'Market-1', '🏠');
+            const opt = alarmTimerSelect.querySelector('option[value="home_jobs"]');
+            if (opt) opt.textContent = coreMarketName + ' Jobs Reset';
+        }
+        renderMarket(result.marketData);
+    } else {
+        marketContainer.innerHTML = '<div class="no-decisions">No market data cached. Click 🔄 to refresh.</div>';
     }
-    if (result.darkMarketData && result.darkMarketData.nextJobsResetAt) {
-        bmiNextJobsResetAt = result.darkMarketData.nextJobsResetAt;
+    if (result.darkMarketData) {
+        if (result.darkMarketData.nextJobsResetAt) bmiNextJobsResetAt = result.darkMarketData.nextJobsResetAt;
+        if (result.darkMarketData.market && result.darkMarketData.market.marketName) {
+            darkMarketName = result.darkMarketData.market.marketName;
+            updateMarketLabel(darkMarketLabel, darkMarketName, 'Market-2', '🌑');
+            const opt = alarmTimerSelect.querySelector('option[value="dark_jobs"]');
+            if (opt) opt.textContent = darkMarketName + ' Jobs Reset';
+        }
+        renderDarkMarket(result.darkMarketData, result.darkMarketAvailable);
+    } else {
+        darkMarketContainer.innerHTML = '<div class="no-decisions">No market data cached. Click 🔄 to refresh.</div>';
     }
 });
 
-// Update market timers periodically using stored static timestamps
+// On popup open: load cached expeditions (no WS requests)
+loadExpeditions();
+
+// Show all "last updated" timestamps
+refreshAllTimestamps();
+
+// --- Refresh All Button ---
+let isRefreshing = false;
+refreshAllBtn.addEventListener('click', async () => {
+    if (isRefreshing) return;
+    isRefreshing = true;
+    refreshAllBtn.classList.add('spinning');
+    try {
+        // 1. Daily ops
+        await fetchDailyOps();
+        // 2. Markets (core then dark sequentially)
+        await requestMarketData();
+        // 3. Expeditions (after markets done)
+        await requestExpeditions();
+    } catch (e) {}
+    refreshAllBtn.classList.remove('spinning');
+    isRefreshing = false;
+    refreshAllTimestamps();
+});
+
+// --- Pinned Timers ---
+const pinnedTimersSection = document.getElementById('pinnedTimersSection');
+const pinnedTimersContainer = document.getElementById('pinnedTimersContainer');
+const pinDailyBtn = document.getElementById('pinDailyBtn');
+const pinCoreMarketBtn = document.getElementById('pinCoreMarketBtn');
+const pinDarkMarketBtn = document.getElementById('pinDarkMarketBtn');
+
+// State: which timers are pinned
+let pinnedTimers = { daily: false, home_jobs: false, dark_jobs: false };
+// State: auto-refresh for market job timers
+let autoRefresh = { home_jobs: false, dark_jobs: false };
+// Track if auto-refresh retry is pending
+let autoRefreshRetry = { home_jobs: null, dark_jobs: null };
+// Track last known timer values for zero-detection
+let lastTimerSeconds = { home_jobs: null, dark_jobs: null };
+
+async function loadPinnedState() {
+    const data = await chrome.storage.sync.get(['pinnedTimers', 'autoRefresh']);
+    if (data.pinnedTimers) pinnedTimers = data.pinnedTimers;
+    if (data.autoRefresh) autoRefresh = data.autoRefresh;
+    updatePinButtons();
+    renderPinnedTimers();
+}
+
+async function savePinnedState() {
+    await chrome.storage.sync.set({ pinnedTimers, autoRefresh });
+}
+
+function updatePinButtons() {
+    pinDailyBtn.classList.toggle('pinned', !!pinnedTimers.daily);
+    pinCoreMarketBtn.classList.toggle('pinned', !!pinnedTimers.home_jobs);
+    pinDarkMarketBtn.classList.toggle('pinned', !!pinnedTimers.dark_jobs);
+}
+
+function renderPinnedTimers() {
+    // Check if any timer is pinned (including expedition timers)
+    let anyPinned = pinnedTimers.daily || pinnedTimers.home_jobs || pinnedTimers.dark_jobs;
+    if (!anyPinned) {
+        for (const key of Object.keys(pinnedTimers)) {
+            if (key.startsWith('exp_') && pinnedTimers[key]) { anyPinned = true; break; }
+        }
+    }
+    pinnedTimersSection.style.display = anyPinned ? '' : 'none';
+    pinnedTimersContainer.innerHTML = '';
+
+    if (pinnedTimers.daily) {
+        const row = document.createElement('div');
+        row.className = 'pinned-timer-row';
+        row.innerHTML = `
+            <span class="pinned-timer-label">📅 Daily Ops</span>
+            <span class="pinned-timer-value" id="pinnedDailyValue">--:--:--</span>
+        `;
+        pinnedTimersContainer.appendChild(row);
+    }
+    if (pinnedTimers.home_jobs) {
+        const name = coreMarketName || 'Market-1';
+        const row = document.createElement('div');
+        row.className = 'pinned-timer-row';
+        row.innerHTML = `
+            <span class="pinned-timer-label">🏠 ${name} Jobs</span>
+            <span class="pinned-timer-value" id="pinnedCoreJobsValue">--:--:--</span>
+            <label class="pinned-auto-refresh" title="Auto-refresh jobs when timer hits 0">
+                <input type="checkbox" id="autoRefreshCore" ${autoRefresh.home_jobs ? 'checked' : ''}> Auto
+            </label>
+        `;
+        pinnedTimersContainer.appendChild(row);
+        row.querySelector('#autoRefreshCore').addEventListener('change', async (e) => {
+            autoRefresh.home_jobs = e.target.checked;
+            await savePinnedState();
+            sendAutoRefreshToContent();
+        });
+    }
+    if (pinnedTimers.dark_jobs) {
+        const name = darkMarketName || 'Market-2';
+        const row = document.createElement('div');
+        row.className = 'pinned-timer-row';
+        row.innerHTML = `
+            <span class="pinned-timer-label">🌑 ${name} Jobs</span>
+            <span class="pinned-timer-value" id="pinnedDarkJobsValue">--:--:--</span>
+            <label class="pinned-auto-refresh" title="Auto-refresh jobs when timer hits 0">
+                <input type="checkbox" id="autoRefreshDark" ${autoRefresh.dark_jobs ? 'checked' : ''}> Auto
+            </label>
+        `;
+        pinnedTimersContainer.appendChild(row);
+        row.querySelector('#autoRefreshDark').addEventListener('change', async (e) => {
+            autoRefresh.dark_jobs = e.target.checked;
+            await savePinnedState();
+            sendAutoRefreshToContent();
+        });
+    }
+
+    // Expedition pinned timers
+    for (const key of Object.keys(pinnedTimers)) {
+        if (!key.startsWith('exp_') || !pinnedTimers[key]) continue;
+        const expId = key.substring(4);
+        const endTime = expeditionEndTimes[expId];
+        // Try to get expedition name from stored data
+        let expLabel = 'Expedition';
+        // We'll resolve the name asynchronously, but for now use cached data
+        const row = document.createElement('div');
+        row.className = 'pinned-timer-row';
+        row.innerHTML = `
+            <span class="pinned-timer-label">🎯 <span class="pinned-exp-label" data-exp-id="${expId}">${expLabel}</span></span>
+            <span class="pinned-timer-value pinned-exp-timer" data-exp-id="${expId}">${endTime ? formatTimeRemaining(endTime) : '--:--:--'}</span>
+        `;
+        pinnedTimersContainer.appendChild(row);
+    }
+
+    // Resolve expedition names from storage
+    chrome.storage.local.get('expeditionsData', (result) => {
+        const exps = result.expeditionsData || [];
+        for (const exp of exps) {
+            if (exp.endTime) expeditionEndTimes[exp.id] = exp.endTime;
+            const labelEl = pinnedTimersContainer.querySelector(`.pinned-exp-label[data-exp-id="${exp.id}"]`);
+            if (labelEl) {
+                labelEl.textContent = `${exp.locationName || 'Expedition'} — ${exp.zoneName || ''}`;
+            }
+        }
+    });
+}
+
+function updatePinnedTimerValues() {
+    const pinnedDaily = document.getElementById('pinnedDailyValue');
+    if (pinnedDaily) {
+        if (!dailyNextTaskTime) {
+            pinnedDaily.textContent = '--:--:--';
+        } else {
+            const diff = dailyNextTaskTime - Date.now();
+            if (diff <= 0) {
+                pinnedDaily.textContent = '0h:0m:0s';
+            } else {
+                const totalSec = Math.floor(diff / 1000);
+                const h = Math.floor(totalSec / 3600);
+                const m = Math.floor((totalSec % 3600) / 60);
+                const s = totalSec % 60;
+                pinnedDaily.textContent = `${h}h:${m}m:${s}s`;
+            }
+        }
+    }
+    const pinnedCore = document.getElementById('pinnedCoreJobsValue');
+    if (pinnedCore) {
+        pinnedCore.textContent = coreNextJobsResetAt ? formatTimeRemaining(coreNextJobsResetAt) : '--:--:--';
+    }
+    const pinnedDark = document.getElementById('pinnedDarkJobsValue');
+    if (pinnedDark) {
+        pinnedDark.textContent = bmiNextJobsResetAt ? formatTimeRemaining(bmiNextJobsResetAt) : '--:--:--';
+    }
+    // Expedition pinned timers
+    document.querySelectorAll('.pinned-exp-timer').forEach(el => {
+        const expId = el.dataset.expId;
+        const endTime = expeditionEndTimes[expId];
+        el.textContent = endTime ? formatTimeRemaining(endTime) : '--:--:--';
+    });
+}
+
+pinDailyBtn.addEventListener('click', async () => {
+    pinnedTimers.daily = !pinnedTimers.daily;
+    await savePinnedState();
+    updatePinButtons();
+    renderPinnedTimers();
+});
+pinCoreMarketBtn.addEventListener('click', async () => {
+    pinnedTimers.home_jobs = !pinnedTimers.home_jobs;
+    await savePinnedState();
+    updatePinButtons();
+    renderPinnedTimers();
+});
+pinDarkMarketBtn.addEventListener('click', async () => {
+    pinnedTimers.dark_jobs = !pinnedTimers.dark_jobs;
+    await savePinnedState();
+    updatePinButtons();
+    renderPinnedTimers();
+});
+
+loadPinnedState();
+
+// --- Auto-Refresh Logic ---
+// Send auto-refresh settings to the content script so it can run even when popup is closed
+function sendAutoRefreshToContent() {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        if (tabs[0]) {
+            chrome.tabs.sendMessage(tabs[0].id, {
+                action: "updateAutoRefresh",
+                autoRefresh: autoRefresh
+            }).catch(() => {});
+        }
+    });
+}
+
+// On popup open, sync auto-refresh settings to content script
+chrome.storage.sync.get('autoRefresh', (data) => {
+    if (data.autoRefresh) autoRefresh = data.autoRefresh;
+    sendAutoRefreshToContent();
+});
+
+// Auto-refresh check in popup: when pinned market timer hits 0, trigger refresh
+function checkAutoRefreshFromPopup() {
+    if (autoRefresh.home_jobs && coreNextJobsResetAt) {
+        const sec = getRemainingSeconds(coreNextJobsResetAt);
+        if (sec !== null && sec <= 0) {
+            triggerAutoRefreshForMarket('home');
+        }
+    }
+    if (autoRefresh.dark_jobs && bmiNextJobsResetAt) {
+        const sec = getRemainingSeconds(bmiNextJobsResetAt);
+        if (sec !== null && sec <= 0) {
+            triggerAutoRefreshForMarket('dark');
+        }
+    }
+}
+
+function triggerAutoRefreshForMarket(which) {
+    const retryKey = which === 'home' ? 'home_jobs' : 'dark_jobs';
+    // Prevent multiple concurrent retries
+    if (autoRefreshRetry[retryKey]) return;
+
+    autoRefreshRetry[retryKey] = true;
+
+    // First attempt: refresh immediately
+    doMarketRefreshAction(which);
+
+    // Then after 10s, check if timer is still 0 and retry if needed
+    setTimeout(() => {
+        autoRefreshRetry[retryKey] = false;
+        const resetAt = which === 'home' ? coreNextJobsResetAt : bmiNextJobsResetAt;
+        const sec = getRemainingSeconds(resetAt);
+        if (sec !== null && sec <= 0) {
+            // Timer is still 0 — retry
+            triggerAutoRefreshForMarket(which);
+        }
+    }, 10000);
+}
+
+async function doMarketRefreshAction(which) {
+    try {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (which === 'home') {
+            await chrome.tabs.sendMessage(tab.id, { action: "refreshMarket" });
+            setTimeout(() => loadMarket(), 4000);
+        } else {
+            await chrome.tabs.sendMessage(tab.id, { action: "refreshDarkMarket" });
+            setTimeout(() => loadDarkMarket(), 4000);
+        }
+    } catch (e) { /* not reachable */ }
+}
+
+// Update market timers + daily timer + pinned timers + expedition timers periodically
 setInterval(() => {
+    // Daily timer
+    updateDailyTimer();
+
+    // Market timers inside market containers
     if (coreNextJobsResetAt) {
         const homeResetEl = marketContainer.querySelector('.home-reset-timer');
         if (homeResetEl) {
@@ -611,4 +1185,20 @@ setInterval(() => {
             darkResetEl.textContent = `⏳ Jobs Reset: ${formatTimeRemaining(bmiNextJobsResetAt)}`;
         }
     }
+
+    // Expedition timers inside expedition info cards
+    document.querySelectorAll('.exp-timer').forEach(el => {
+        const expId = el.dataset.expId;
+        const endTime = expeditionEndTimes[expId];
+        if (endTime) el.textContent = formatTimeRemaining(endTime);
+    });
+
+    // Pinned timer values
+    updatePinnedTimerValues();
+
+    // Auto-refresh check
+    checkAutoRefreshFromPopup();
 }, 1000);
+
+// Refresh "last updated" labels every 30s
+setInterval(() => refreshAllTimestamps(), 30000);

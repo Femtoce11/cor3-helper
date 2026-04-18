@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "COR3 Helper",
-  "version": "3.0",
+  "version": "1.0",
   "description": "Monitor markets, expeditions, daily ops, and get timer alerts for cor3.gg.",
   "permissions": [
     "storage",

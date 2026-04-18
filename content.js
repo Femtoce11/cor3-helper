@@ -3,6 +3,10 @@
 // --- Listen for decision data relayed from content-early.js (MAIN world) ---
 window.addEventListener('message', (event) => {
     if (event.source !== window) return;
+    const now = Date.now();
+    if (event.data && event.data.type === 'COR3_WS_EXPEDITIONS') {
+        chrome.storage.local.set({ expeditionsData: event.data.expeditions, expeditionsDataUpdatedAt: now });
+    }
     if (event.data && event.data.type === 'COR3_WS_DECISIONS') {
         const newDecisions = event.data.decisions;
         chrome.storage.local.get('expeditionDecisions', (stored) => {
@@ -17,41 +21,48 @@ window.addEventListener('message', (event) => {
         });
     }
     if (event.data && event.data.type === 'COR3_WS_STASH') {
-        chrome.storage.local.set({ stashData: event.data.stash });
+        chrome.storage.local.set({ stashData: event.data.stash, stashDataUpdatedAt: now });
     }
     if (event.data && event.data.type === 'COR3_WS_MARKET') {
-        chrome.storage.local.set({ marketData: event.data.market });
+        chrome.storage.local.set({ marketData: event.data.market, marketDataUpdatedAt: now });
     }
     if (event.data && event.data.type === 'COR3_WS_DARK_MARKET') {
-        chrome.storage.local.set({ darkMarketData: event.data.market, darkMarketAvailable: true });
+        chrome.storage.local.set({ darkMarketData: event.data.market, darkMarketAvailable: true, darkMarketDataUpdatedAt: now });
     }
     if (event.data && event.data.type === 'COR3_WS_DARK_MARKET_UNAVAILABLE') {
-        chrome.storage.local.set({ darkMarketData: null, darkMarketAvailable: false });
+        chrome.storage.local.set({ darkMarketData: null, darkMarketAvailable: false, darkMarketDataUpdatedAt: now });
     }
     if (event.data && event.data.type === 'COR3_BEARER_TOKEN') {
         chrome.storage.local.set({ bearerToken: event.data.token });
     }
+    // Auto-fetch daily ops on page load (triggered from content-early.js)
+    if (event.data && event.data.type === 'COR3_FETCH_DAILY_OPS') {
+        chrome.storage.local.get('bearerToken', (result) => {
+            const token = result.bearerToken;
+            if (!token) return;
+            fetch('https://svc-corie.cor3.gg/api/user-daily-claim', {
+                headers: { 'Authorization': token }
+            })
+            .then(r => r.ok ? r.json() : null)
+            .then(data => {
+                if (data) {
+                    chrome.storage.local.set({ dailyOpsData: data, dailyOpsUpdatedAt: Date.now() });
+                }
+            })
+            .catch(() => {});
+        });
+    }
 });
 
-let alarmEnabled = false;
-let alarmVolume = 50;
-let continuousAlarm = false;
-let alarmTimerSource = 'daily';
-let alarmThresholdSeconds = 60;
-let alarmTriggered = false;
+let alarms = []; // array of alarm objects from storage
+let alarmTriggered = {}; // keyed by alarm id
 let audioContext = null;
 let continuousInterval = null;
 let isAlarmActive = false;
 
-// Load settings
-chrome.storage.sync.get(['alarmEnabled', 'alarmVolume', 'continuousAlarm', 'alarmTimerSource', 'alarmThresholdMinutes', 'alarmThresholdSeconds'], (data) => {
-    alarmEnabled = data.alarmEnabled || false;
-    alarmVolume = data.alarmVolume !== undefined ? data.alarmVolume : 50;
-    continuousAlarm = data.continuousAlarm || false;
-    alarmTimerSource = data.alarmTimerSource || 'daily';
-    const mins = data.alarmThresholdMinutes !== undefined ? data.alarmThresholdMinutes : 1;
-    const secs = data.alarmThresholdSeconds !== undefined ? data.alarmThresholdSeconds : 0;
-    alarmThresholdSeconds = mins * 60 + secs;
+// Load alarms
+chrome.storage.sync.get('alarms', (data) => {
+    alarms = data.alarms || [];
 });
 
 function playAlarm(volumePercent) {
@@ -74,13 +85,13 @@ function playAlarm(volumePercent) {
     osc.stop(now + 0.5);
 }
 
-function startContinuousAlarm() {
+function startContinuousAlarm(volume) {
     if (continuousInterval) clearInterval(continuousInterval);
     isAlarmActive = true;
     chrome.runtime.sendMessage({ action: "alarmActiveStatus", isActive: true }).catch(()=>{});
-    playAlarm(alarmVolume);
+    playAlarm(volume);
     continuousInterval = setInterval(() => {
-        playAlarm(alarmVolume);
+        playAlarm(volume);
     }, 2000);
 }
 
@@ -93,9 +104,9 @@ function stopAlarm() {
     chrome.runtime.sendMessage({ action: "alarmActiveStatus", isActive: false }).catch(()=>{});
 }
 
-function getWatchedTimerRemainingSeconds() {
+function getTimerRemainingSeconds(timerSource) {
     return new Promise((resolve) => {
-        if (alarmTimerSource === 'daily') {
+        if (timerSource === 'daily') {
             chrome.storage.local.get('dailyOpsData', (result) => {
                 if (result.dailyOpsData && result.dailyOpsData.nextTaskTime) {
                     const diff = new Date(result.dailyOpsData.nextTaskTime).getTime() - Date.now();
@@ -104,7 +115,7 @@ function getWatchedTimerRemainingSeconds() {
                     resolve(null);
                 }
             });
-        } else if (alarmTimerSource === 'home_jobs') {
+        } else if (timerSource === 'home_jobs') {
             chrome.storage.local.get('marketData', (result) => {
                 if (result.marketData && result.marketData.nextJobsResetAt) {
                     const diff = new Date(result.marketData.nextJobsResetAt).getTime() - Date.now();
@@ -113,7 +124,7 @@ function getWatchedTimerRemainingSeconds() {
                     resolve(null);
                 }
             });
-        } else if (alarmTimerSource === 'dark_jobs') {
+        } else if (timerSource === 'dark_jobs') {
             chrome.storage.local.get('darkMarketData', (result) => {
                 if (result.darkMarketData && result.darkMarketData.nextJobsResetAt) {
                     const diff = new Date(result.darkMarketData.nextJobsResetAt).getTime() - Date.now();
@@ -128,51 +139,97 @@ function getWatchedTimerRemainingSeconds() {
     });
 }
 
-async function checkAlarm() {
-    if (!alarmEnabled || alarmThresholdSeconds <= 0) return;
-    const remaining = await getWatchedTimerRemainingSeconds();
-    if (remaining === null) return;
+async function checkAlarms() {
+    for (const alarm of alarms) {
+        if (!alarm.enabled || alarm.thresholdSeconds <= 0) continue;
+        const remaining = await getTimerRemainingSeconds(alarm.timerSource);
+        if (remaining === null) continue;
 
-    if (remaining <= alarmThresholdSeconds && remaining > 0 && !alarmTriggered) {
-        alarmTriggered = true;
-        if (continuousAlarm) {
-            startContinuousAlarm();
-        } else {
-            playAlarm(alarmVolume);
+        if (remaining <= alarm.thresholdSeconds && remaining > 0 && !alarmTriggered[alarm.id]) {
+            alarmTriggered[alarm.id] = true;
+            if (alarm.continuous) {
+                startContinuousAlarm(alarm.volume);
+            } else {
+                playAlarm(alarm.volume);
+            }
+        } else if (remaining > alarm.thresholdSeconds) {
+            alarmTriggered[alarm.id] = false;
         }
-    } else if (remaining > alarmThresholdSeconds) {
-        alarmTriggered = false;
     }
 }
 
-// Check alarm every second
-setInterval(() => checkAlarm(), 1000);
+// Check alarms every second
+setInterval(() => checkAlarms(), 1000);
+
+// --- Auto-Refresh for Market Job Timers ---
+let autoRefreshSettings = { home_jobs: false, dark_jobs: false };
+let autoRefreshRetryPending = { home_jobs: false, dark_jobs: false };
+
+// Load auto-refresh settings on startup
+chrome.storage.sync.get('autoRefresh', (data) => {
+    if (data.autoRefresh) autoRefreshSettings = data.autoRefresh;
+});
+
+function getMarketTimerSeconds(which) {
+    return new Promise((resolve) => {
+        const key = which === 'home_jobs' ? 'marketData' : 'darkMarketData';
+        chrome.storage.local.get(key, (result) => {
+            const data = result[key];
+            if (data && data.nextJobsResetAt) {
+                const diff = new Date(data.nextJobsResetAt).getTime() - Date.now();
+                resolve(diff > 0 ? Math.floor(diff / 1000) : 0);
+            } else {
+                resolve(null);
+            }
+        });
+    });
+}
+
+function doAutoRefreshMarket(which) {
+    if (which === 'home_jobs') {
+        window.postMessage({ type: 'COR3_REFRESH_MARKET' }, '*');
+    } else {
+        window.postMessage({ type: 'COR3_REFRESH_DARK_MARKET' }, '*');
+    }
+}
+
+async function checkAutoRefresh() {
+    for (const key of ['home_jobs', 'dark_jobs']) {
+        if (!autoRefreshSettings[key]) continue;
+        if (autoRefreshRetryPending[key]) continue;
+
+        const sec = await getMarketTimerSeconds(key);
+        if (sec !== null && sec <= 0) {
+            autoRefreshRetryPending[key] = true;
+            doAutoRefreshMarket(key);
+
+            // After 10s, re-check. If still 0, retry.
+            setTimeout(async () => {
+                autoRefreshRetryPending[key] = false;
+                const newSec = await getMarketTimerSeconds(key);
+                if (newSec !== null && newSec <= 0) {
+                    // Will be picked up by next checkAutoRefresh cycle
+                }
+            }, 10000);
+        }
+    }
+}
+
+// Check auto-refresh every second
+setInterval(() => checkAutoRefresh(), 1000);
 
 // Message handling
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    if (request.action === "updateSettings") {
-        if (request.settings.alarmEnabled !== undefined) alarmEnabled = request.settings.alarmEnabled;
-        if (request.settings.alarmVolume !== undefined) alarmVolume = request.settings.alarmVolume;
-        if (request.settings.continuousAlarm !== undefined) {
-            continuousAlarm = request.settings.continuousAlarm;
-            if (!continuousAlarm && isAlarmActive) {
-                stopAlarm();
-            }
-        }
-        if (request.settings.alarmTimerSource !== undefined) {
-            alarmTimerSource = request.settings.alarmTimerSource;
-            alarmTriggered = false; // reset trigger on source change
-        }
-        if (request.settings.alarmThresholdSeconds !== undefined) {
-            alarmThresholdSeconds = request.settings.alarmThresholdSeconds;
-            alarmTriggered = false; // reset trigger on threshold change
-        }
+    if (request.action === "updateAlarms") {
+        alarms = request.alarms || [];
+        alarmTriggered = {}; // reset triggers on update
         sendResponse({ success: true });
     } else if (request.action === "testAlarm") {
-        if (continuousAlarm) {
-            startContinuousAlarm();
+        const vol = request.volume !== undefined ? request.volume : 50;
+        if (request.continuous) {
+            startContinuousAlarm(vol);
         } else {
-            playAlarm(alarmVolume);
+            playAlarm(vol);
         }
         sendResponse({ success: true });
     } else if (request.action === "stopAlarm") {
@@ -196,11 +253,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     } else if (request.action === "refreshDarkMarket") {
         window.postMessage({ type: 'COR3_REFRESH_DARK_MARKET' }, '*');
         sendResponse({ success: true });
-    } else if (request.action === "leaveMarketRoom") {
-        window.postMessage({ type: 'COR3_LEAVE_MARKET_ROOM' }, '*');
-        sendResponse({ success: true });
     } else if (request.action === "leaveStash") {
         window.postMessage({ type: 'COR3_LEAVE_STASH' }, '*');
+        sendResponse({ success: true });
+    } else if (request.action === "updateAutoRefresh") {
+        if (request.autoRefresh) {
+            autoRefreshSettings = request.autoRefresh;
+        }
         sendResponse({ success: true });
     } else if (request.action === "fetchDailyOps") {
         // Fetch daily ops in page context using stored bearer token
@@ -216,7 +275,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             .then(r => r.ok ? r.json() : null)
             .then(data => {
                 if (data) {
-                    chrome.storage.local.set({ dailyOpsData: data });
+                    chrome.storage.local.set({ dailyOpsData: data, dailyOpsUpdatedAt: Date.now() });
                 }
                 sendResponse({ data: data });
             })

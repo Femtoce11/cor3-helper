@@ -74,6 +74,15 @@
                     }
                 });
 
+                // Auto-fetch all data when WS connects (page load/reload)
+                ws.addEventListener('open', function () {
+                    console.log('[COR3 Helper] WS connected — scheduling initial data fetch');
+                    // Wait for connection to stabilize, then fetch all data
+                    setTimeout(function () {
+                        window.__cor3InitialFetch && window.__cor3InitialFetch();
+                    }, 3000);
+                });
+
                 // Clean up closed sockets
                 ws.addEventListener('close', function () {
                     const idx = trackedSockets.indexOf(ws);
@@ -124,20 +133,22 @@
             }, '*');
         }
 
-        // Intercept market responses
+        // Intercept market responses — only relay actual market data (not "connected" acks)
         if (eventName === 'market' && payload && payload.data) {
-            // Determine which market this is based on the market id
             var mkt = payload.data.market;
-            if (mkt && mkt.id === '019d3ea4-85bd-7389-904d-908ba9194aa0') {
-                window.postMessage({
-                    type: 'COR3_WS_DARK_MARKET',
-                    market: payload.data
-                }, '*');
-            } else {
-                window.postMessage({
-                    type: 'COR3_WS_MARKET',
-                    market: payload.data
-                }, '*');
+            // Skip connection acknowledgments (action: "connected") — they don't contain real market data
+            if (mkt && mkt.marketName) {
+                if (mkt.id === '019d3ea4-85bd-7389-904d-908ba9194aa0') {
+                    window.postMessage({
+                        type: 'COR3_WS_DARK_MARKET',
+                        market: payload.data
+                    }, '*');
+                } else {
+                    window.postMessage({
+                        type: 'COR3_WS_MARKET',
+                        market: payload.data
+                    }, '*');
+                }
             }
         }
 
@@ -156,6 +167,12 @@
         // We're interested in "expeditions" responses that contain expedition data
         if (eventName === 'expeditions' && payload && payload.data) {
             const expeditions = Array.isArray(payload.data) ? payload.data : [payload.data];
+
+            // Relay full expedition data for expedition info display
+            window.postMessage({
+                type: 'COR3_WS_EXPEDITIONS',
+                expeditions: expeditions
+            }, '*');
 
             const decisionsFound = [];
 
@@ -193,17 +210,33 @@
     }
 
     // Send expedition request through any open tracked socket
+    // Joining the expedition room triggers the server to respond with get.active data.
+    // We track whether data already arrived to avoid sending a duplicate get.active.
     window.__cor3RequestExpeditions = function () {
-        const msg = '42["event",{"event":{"name":"expeditions","action":"get.config"}}]';
-        for (const ws of trackedSockets) {
-            if (ws.readyState === OrigWebSocket.OPEN) {
-                console.log('[COR3 Helper] Sending expeditions request via WS');
-                ws.send(msg);
-                return true;
+        var gotData = false;
+        // Listen for the response — if it arrives from room join alone, skip manual send
+        var onExpData = function (evt) {
+            if (evt.data && evt.data.type === 'COR3_WS_EXPEDITIONS') {
+                gotData = true;
+                window.removeEventListener('message', onExpData);
             }
-        }
-        console.log('[COR3 Helper] No open WebSocket found, tracked:', trackedSockets.length);
-        return false;
+        };
+        window.addEventListener('message', onExpData);
+
+        enterRooms(['expeditions']).then(function () {
+            // Wait a bit — if data already arrived from room join, skip the manual send
+            setTimeout(function () {
+                window.removeEventListener('message', onExpData);
+                if (!gotData) {
+                    var msg = '42["event",{"event":{"name":"expeditions","action":"get.active"}}]';
+                    wsSend(msg);
+                    console.log('[COR3 Helper] Sent expeditions get.active (no auto-response from room join)');
+                } else {
+                    console.log('[COR3 Helper] Expedition data arrived from room join — skipped manual get.active');
+                }
+            }, 2000);
+        });
+        return true;
     };
 
     // Helper: get a random human-like delay (400–900ms)
@@ -287,120 +320,58 @@
         return true;
     };
 
-    // HOME Market: join network-map (parent) then market (child), then send get.options
+    // HOME Market: just send get.options (no room joins needed)
     window.__cor3RequestMarket = function () {
-        var getOptions = '42["event",{"event":{"name":"market","action":"get.options"},"data":{"marketId":"019d3ea4-85bd-7389-904d-8f7c85841134"}}]';
-
-        enterRooms(['network-map', 'market']).then(function () {
-            console.log('[COR3 Helper] Requesting HOME market options');
-            wsSend(getOptions);
-        });
+        var msg = '42["event",{"event":{"name":"market","action":"get.options"},"data":{"marketId":"019d3ea4-85bd-7389-904d-8f7c85841134"}}]';
+        console.log('[COR3 Helper] Requesting HOME market options');
+        wsSend(msg);
         return true;
     };
 
-    // D4RK Market: join network-map, set endpoint, join market, send get.options
-    // The endpoint set can fail — we listen for the response via COR3_WS_ENDPOINT_RESULT
-    var darkEndpointPending = false;
-
+    // D4RK Market: set endpoint first (no room join), then send get.options
     window.__cor3RequestDarkMarket = function () {
         var setEndpoint = '42["event",{"event":{"name":"network-map","action":"set.endpoint"},"data":{"serverId":"019d29c5-4b37-79bf-b23e-304d8ea03c15"}}]';
         var getOptions = '42["event",{"event":{"name":"market","action":"get.options"},"data":{"marketId":"019d3ea4-85bd-7389-904d-908ba9194aa0"}}]';
-
-        // We need network-map room to set endpoint
-        // First, leave market room if joined (from HOME market)
-        var p = Promise.resolve();
-        if (joinedRooms.has('market')) {
-            p = p.then(function () {
-                leaveRoom('market');
-                return delay(humanDelay());
-            });
-        }
-        // Make sure we're in network-map
-        if (!joinedRooms.has('network-map')) {
-            p = p.then(function () {
-                sendJoin('network-map');
-                return delay(humanDelay());
-            });
-        }
-
-        // Set the endpoint server
-        p.then(function () {
-            console.log('[COR3 Helper] Setting D4RK endpoint server');
-            darkEndpointPending = true;
-            wsSend(setEndpoint);
-            return delay(1500); // wait for endpoint response
-        }).then(function () {
-            if (!darkEndpointPending) {
-                // Already handled by the response listener
-                return;
-            }
-            // Timeout: assume failure if no response came
-            darkEndpointPending = false;
-            window.postMessage({
-                type: 'COR3_WS_DARK_MARKET_UNAVAILABLE'
-            }, '*');
-        });
+        console.log('[COR3 Helper] Setting D4RK endpoint (no room join), then requesting options');
+        wsSend(setEndpoint);
+        setTimeout(function () {
+            wsSend(getOptions);
+        }, 1500);
         return true;
     };
 
-    // Listen for endpoint result and continue D4RK market flow
-    window.addEventListener('message', function (event) {
-        if (event.source !== window) return;
-        if (event.data && event.data.type === 'COR3_WS_ENDPOINT_RESULT') {
-            if (!darkEndpointPending) return;
-            darkEndpointPending = false;
-
-            if (!event.data.success) {
-                console.log('[COR3 Helper] D4RK endpoint failed');
-                window.postMessage({ type: 'COR3_WS_DARK_MARKET_UNAVAILABLE' }, '*');
-                return;
-            }
-
-            // Endpoint set successfully — now join market room and request options
-            var getOptions = '42["event",{"event":{"name":"market","action":"get.options"},"data":{"marketId":"019d3ea4-85bd-7389-904d-908ba9194aa0"}}]';
-            delay(humanDelay()).then(function () {
-                sendJoin('market');
-                return delay(humanDelay());
-            }).then(function () {
-                console.log('[COR3 Helper] Requesting D4RK market options');
-                wsSend(getOptions);
-            });
-        }
-    });
-
-    // Market leave: child first (market), then parent (network-map)
-    window.__cor3LeaveMarket = function () {
-        return leaveRoomsInOrder(['market', 'network-map']);
-    };
-
-    // Leave only the market room (keep network-map for D4RK)
-    window.__cor3LeaveMarketRoom = function () {
-        return leaveRoomsInOrder(['market']);
-    };
-
-    // Market refresh: leave child→parent, wait, then re-enter parent→child
+    // Market refresh: just re-send get.options
     window.__cor3RefreshMarket = function () {
-        window.__cor3LeaveMarket().then(function () {
-            return delay(humanDelay());
-        }).then(function () {
-            window.__cor3RequestMarket();
-        });
+        window.__cor3RequestMarket();
         return true;
     };
 
-    // D4RK Market refresh: leave market room, then run the full D4RK request flow
+    // D4RK Market refresh: just re-send get.options
     window.__cor3RefreshDarkMarket = function () {
-        var p = Promise.resolve();
-        if (joinedRooms.has('market')) {
-            p = p.then(function () {
-                leaveRoom('market');
-                return delay(humanDelay());
-            });
-        }
-        p.then(function () {
-            window.__cor3RequestDarkMarket();
-        });
+        window.__cor3RequestDarkMarket();
         return true;
+    };
+
+    // Auto-fetch all data on page load (called when WS opens)
+    var initialFetchDone = false;
+    window.__cor3InitialFetch = function () {
+        if (initialFetchDone) return;
+        initialFetchDone = true;
+        console.log('[COR3 Helper] Running initial data fetch (page load)');
+
+        // Trigger daily ops fetch via content script
+        window.postMessage({ type: 'COR3_FETCH_DAILY_OPS' }, '*');
+
+        // Fetch both markets — Market-1 is instant, Market-2 needs endpoint set first
+        window.__cor3RequestMarket();
+        setTimeout(function () {
+            window.__cor3RequestDarkMarket();
+        }, 1000);
+
+        // Fetch expeditions after a short delay
+        setTimeout(function () {
+            window.__cor3RequestExpeditions();
+        }, 2000);
     };
 
     // Listen for requests from content script
@@ -423,9 +394,6 @@
         }
         if (event.data && event.data.type === 'COR3_REFRESH_DARK_MARKET') {
             window.__cor3RefreshDarkMarket();
-        }
-        if (event.data && event.data.type === 'COR3_LEAVE_MARKET_ROOM') {
-            window.__cor3LeaveMarketRoom();
         }
         if (event.data && event.data.type === 'COR3_LEAVE_STASH') {
             leaveRoom('stash');
