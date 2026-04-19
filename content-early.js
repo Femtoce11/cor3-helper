@@ -398,6 +398,18 @@
         if (event.data && event.data.type === 'COR3_LEAVE_STASH') {
             leaveRoom('stash');
         }
+        if (event.data && event.data.type === 'COR3_STOP_DECRYPT_SOLVER') {
+            window.__solverAbort = true;
+            console.log('[COR3 Helper] Decrypt solver stop signal sent.');
+        }
+        if (event.data && event.data.type === 'COR3_START_DECRYPT_SOLVER') {
+            // If solver is already running, do nothing
+            if (window.__solverActive && !window.__solverAbort) return;
+            // If solver was stopped, reset flags and re-inject will handle it
+            window.__solverAbort = false;
+            window.__solverActive = false;
+            console.log('[COR3 Helper] Decrypt solver restart signal — ready for re-injection.');
+        }
     });
 
     console.log('[COR3 Helper] WebSocket interceptor installed at document_start');

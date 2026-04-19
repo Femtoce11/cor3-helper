@@ -230,6 +230,34 @@ async function checkAutoRefresh() {
 // Check auto-refresh every second
 setInterval(() => checkAutoRefresh(), 1000);
 
+// --- Auto Decrypt Solver ---
+let decryptSolverInjected = false;
+
+function injectDecryptSolver() {
+    if (decryptSolverInjected) {
+        // Solver already injected, just signal restart
+        window.postMessage({ type: 'COR3_START_DECRYPT_SOLVER' }, '*');
+        return;
+    }
+    decryptSolverInjected = true;
+    const script = document.createElement('script');
+    script.src = chrome.runtime.getURL('decrypt-solver.js');
+    script.onload = () => script.remove();
+    (document.head || document.documentElement).appendChild(script);
+}
+
+function stopDecryptSolver() {
+    window.postMessage({ type: 'COR3_STOP_DECRYPT_SOLVER' }, '*');
+    decryptSolverInjected = false;
+}
+
+// Auto-start solver if it was enabled before page load
+chrome.storage.sync.get('autoDecryptEnabled', (data) => {
+    if (data.autoDecryptEnabled) {
+        injectDecryptSolver();
+    }
+});
+
 // Message handling
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "updateAlarms") {
@@ -271,6 +299,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     } else if (request.action === "updateAutoRefresh") {
         if (request.autoRefresh) {
             autoRefreshSettings = request.autoRefresh;
+        }
+        sendResponse({ success: true });
+    } else if (request.action === "toggleDecryptSolver") {
+        if (request.enabled) {
+            injectDecryptSolver();
+        } else {
+            stopDecryptSolver();
         }
         sendResponse({ success: true });
     } else if (request.action === "fetchDailyOps") {

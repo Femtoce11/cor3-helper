@@ -9,11 +9,13 @@ A Chrome extension that enhances the [cor3.gg](https://cor3.gg) experience by mo
 - **Daily Ops Timer** — Countdown to your next daily ops task with extra information
 - **Multi-Alarm System** — Create multiple configurable alarms for any timer (daily ops, market job resets). Each alarm has its own threshold, volume, continuous mode, and on/off toggle
 - **Pinned Timers** — Pin important timers to the top of the popup for quick access
+- **Auto Decrypt Hacking** — Automatically solves decryption hacks when enabled. Just toggle it on and the extension handles the rest
 - **Auto-Job-Refresh** — Market job timers automatically refresh when they reach zero, so jobs get refreshed even with the popup closed. This gives users more jobs per day by triggering them earlier and giving enough time to finish
 - **Inventory Viewer** — Browse your stash with item details and total value
 - **Expedition Decisions** — View details related to pending expedition decisions directly from the popup
 - **Cache-First Design** — Data loads instantly from cache on popup open. Use the 🔄 Refresh All button or per-section refresh buttons to fetch fresh data
 - **Theme Support** — Multiple color themes to match your preference
+- **Check for Updates** — Compare your installed version against the latest on GitHub with one click
 - **Lightweight** — Intercepts existing WebSocket traffic; no extra API calls beyond what the game already sends
 
 ## Installation
@@ -43,6 +45,8 @@ A Chrome extension that enhances the [cor3.gg](https://cor3.gg) experience by mo
 - **Alarms** — Click ➕ in the Alarms section to create a new alarm. Choose a timer source, set a threshold, and configure volume/continuous beeping. Toggle alarms on/off or edit/delete them anytime.
 - **Pin timers** to keep them visible at the top of the popup.
 - **Auto job refresh** feature can be used after pinning timers and clicking the "Auto" checkbox next to it.
+- **Auto Decrypt Hacking** — Toggle the switch to enable. It automatically solves decryption hacks whenever one appears.
+- **Check for Updates** — Click the button at the bottom of the popup to see if a new version is available on GitHub.
 
 ## Files
 
@@ -55,6 +59,7 @@ A Chrome extension that enhances the [cor3.gg](https://cor3.gg) experience by mo
 | `content.js` | Injected at `document_idle` — relays data to storage, handles alarm checking, auto-refresh |
 | `background.js` | Service worker for extension lifecycle |
 | `ws-interceptor.js` | WebSocket interceptor helper |
+| `decrypt-solver.js` | Auto-solver for decryption hacking minigame (injected into page when enabled) |
 
 ## Requirements
 

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "COR3 Helper",
-  "version": "1.0",
+  "version": "1.1.0",
   "description": "Monitor markets, expeditions, daily ops, and get timer alerts for cor3.gg.",
   "permissions": [
     "storage",
@@ -15,7 +15,8 @@
   "host_permissions": [
     "https://cor3.gg/*",
     "https://os.cor3.gg/*",
-    "https://svc-corie.cor3.gg/*"
+    "https://svc-corie.cor3.gg/*",
+    "https://raw.githubusercontent.com/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -50,7 +51,8 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "ws-interceptor.js"
+        "ws-interceptor.js",
+        "decrypt-solver.js"
       ],
       "matches": [
         "<all_urls>"

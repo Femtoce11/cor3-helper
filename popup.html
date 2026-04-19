@@ -410,6 +410,31 @@
             background: var(--btn-small-hover) !important;
         }
 
+        /* Auto Decrypt Hacking toggle */
+        .auto-decrypt-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: var(--bg-card);
+            border-radius: 8px;
+            padding: 8px 12px;
+            margin-bottom: 8px;
+            border: 1px solid var(--border);
+            font-size: 12px;
+        }
+        .auto-decrypt-row .decrypt-label {
+            color: var(--accent-green);
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .auto-decrypt-row .decrypt-status {
+            font-size: 10px;
+            color: var(--text-dim);
+            font-style: italic;
+        }
+
         /* Daily Ops Timer */
         .daily-timer-box {
             background: var(--bg-card);
@@ -864,6 +889,19 @@
         <div id="pinnedTimersContainer"></div>
     </div>
 
+    <!-- Auto Decrypt Hacking -->
+    <div class="section">
+        <div class="auto-decrypt-row">
+            <span class="decrypt-label">&#x1F513; Auto Decrypt Hacking</span>
+            <div style="display:flex;align-items:center;gap:8px;">
+                <span class="decrypt-status" id="decryptStatus">Off</span>
+                <label class="alarm-toggle-switch">
+                    <input type="checkbox" id="autoDecryptToggle">
+                    <span class="slider-track"></span>
+                </label>
+            </div>
+        </div>
+    </div>
     <!-- Daily Ops Timer -->
     <div class="section">
         <div class="market-sub-header">
@@ -875,10 +913,7 @@
         </div>
         <div class="last-updated" id="dailyLastUpdated"></div>
         <div style="font-size:11px;color:var(--accent-orange);margin-bottom:4px;" id="dailyTimerLine">⏳ Next Task: --:--:--</div>
-        <div class="detail-row"><span class="label">Claimed Today:</span> <span id="dailyClaimed">--</span></div>
-        <div class="detail-row"><span class="label">Current Streak:</span> <span id="dailyStreak">--</span></div>
-        <div class="detail-row"><span class="label">Difficulty:</span> <span id="dailyDifficulty">--</span></div>
-        <div class="detail-row"><span class="label">Streak Bonus:</span> <span id="dailyStreakBonus">--</span></div>
+        <div style="font-size:10px;color:var(--text-dim);margin-bottom:4px;">Claimed: <span id="dailyClaimed">--</span> · Streak: <span id="dailyStreak">--</span> · Difficulty: <span id="dailyDifficulty">--</span> · Bonus: <span id="dailyStreakBonus">--</span></div>
     </div>
 
     <!-- Markets -->
@@ -982,6 +1017,12 @@
     </div>
 
     <div id="status">Status: Ready</div>
+
+    <!-- Check for Updates -->
+    <div style="margin-top:8px;text-align:center;">
+        <button id="checkUpdateBtn" style="width:auto;padding:6px 14px;font-size:11px;">&#x1F504; Check for Updates</button>
+        <div id="updateResult" style="font-size:10px;color:var(--text-dim);margin-top:4px;"></div>
+    </div>
 
 </div><!-- end mainView -->
 

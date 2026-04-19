@@ -1302,3 +1302,62 @@ setInterval(() => {
 
 // Refresh "last updated" labels every 30s
 setInterval(() => refreshAllTimestamps(), 30000);
+
+// --- Auto Decrypt Hacking ---
+const autoDecryptToggle = document.getElementById('autoDecryptToggle');
+const decryptStatus = document.getElementById('decryptStatus');
+
+function updateDecryptStatusLabel(enabled) {
+    decryptStatus.textContent = enabled ? 'Active' : 'Off';
+    decryptStatus.style.color = enabled ? 'var(--accent-green)' : 'var(--text-dim)';
+}
+
+// Load saved state on popup open
+chrome.storage.sync.get('autoDecryptEnabled', (data) => {
+    const enabled = !!data.autoDecryptEnabled;
+    autoDecryptToggle.checked = enabled;
+    updateDecryptStatusLabel(enabled);
+});
+
+autoDecryptToggle.addEventListener('change', async () => {
+    const enabled = autoDecryptToggle.checked;
+    await chrome.storage.sync.set({ autoDecryptEnabled: enabled });
+    updateDecryptStatusLabel(enabled);
+
+    // Send toggle message to content script
+    const tab = await getCor3Tab();
+    if (tab) {
+        chrome.tabs.sendMessage(tab.id, {
+            action: "toggleDecryptSolver",
+            enabled: enabled
+        }).catch(() => {});
+    }
+});
+
+// --- Check for Updates ---
+const checkUpdateBtn = document.getElementById('checkUpdateBtn');
+const updateResult = document.getElementById('updateResult');
+
+checkUpdateBtn.addEventListener('click', async () => {
+    updateResult.textContent = 'Checking...';
+    updateResult.style.color = 'var(--text-dim)';
+    try {
+        const localManifest = chrome.runtime.getManifest();
+        const localVersion = localManifest.version;
+        const resp = await fetch('https://raw.githubusercontent.com/Femtoce11/cor3-helper/main/manifest.json', { cache: 'no-store' });
+        if (!resp.ok) throw new Error('Failed to fetch remote manifest');
+        const remoteManifest = await resp.json();
+        const remoteVersion = remoteManifest.version;
+
+        if (remoteVersion !== localVersion) {
+            updateResult.innerHTML = `Update available! <b>v${localVersion}</b> → <b>v${remoteVersion}</b><br><a href="https://github.com/Femtoce11/cor3-helper" target="_blank" style="color:var(--accent-cyan);">Download from GitHub</a><br><span style="font-size:9px;color:var(--text-muted);">Download ZIP, extract, and reload on chrome://extensions</span>`;
+            updateResult.style.color = 'var(--accent-orange)';
+        } else {
+            updateResult.textContent = `You're up to date! (v${localVersion})`;
+            updateResult.style.color = 'var(--accent-green)';
+        }
+    } catch (e) {
+        updateResult.textContent = 'Could not check for updates. Check your connection.';
+        updateResult.style.color = 'var(--accent-red)';
+    }
+});
