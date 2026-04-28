@@ -80,6 +80,7 @@ var webVersion = null;
                         webVersion = parsedUrl.searchParams.get('v');
                     }
                     console.log('[COR3 Helper] Captured web version from translation.json:', webVersion);
+                    window.__cor3WebVersion = webVersion;
                 } catch (e) {
                     console.log('[COR3 Helper] Error parsing version:', e);
                 }
@@ -96,6 +97,7 @@ var webVersion = null;
                         resp.clone().json().then(function (data) {
                             if (data && data.systemVersion !== undefined) {
                                 console.log('[COR3 Helper] Captured system version from api/users/me:', data.systemVersion);
+                                window.__cor3SystemVersion = data.systemVersion;
                                 window.postMessage({ type: 'COR3_SYSTEM_VERSION', version: data.systemVersion }, '*');
                                 if (webVersion) {
                                     window.postMessage({ type: 'COR3_WEB_VERSION', version: webVersion }, '*');
@@ -205,6 +207,11 @@ var webVersion = null;
     function handleWsMessage(rawData, socket) {
         if (typeof rawData !== 'string') return;
 
+        // Log inbound WS message to content.js for storage
+        if (rawData.startsWith('42')) {
+            window.postMessage({ type: 'COR3_WS_LOG', direction: 'received', message: rawData }, '*');
+        }
+
         // Socket.IO v4 messages start with "42[" for event frames
         if (!rawData.startsWith('42')) return;
 
@@ -272,13 +279,16 @@ var webVersion = null;
                     window.__cor3RequestExpeditionConfig();
                 }, 500);
             } else if (window.__cor3CachedMercIds) {
-                // Config already available, configure each merc
+                // Config already available, configure each merc sequentially with human delays
                 var ids = window.__cor3ExpConfigIds;
-                window.__cor3CachedMercIds.forEach(function (mercId, idx) {
+                var mercIds = window.__cor3CachedMercIds.slice();
+                (function configureNext(i) {
+                    if (i >= mercIds.length) return;
                     setTimeout(function () {
-                        window.__cor3RequestMercConfigure(mercId, null, ids.locationConfigId, ids.zoneConfigId, ids.objectiveId);
-                    }, (idx + 1) * 800);
-                });
+                        window.__cor3RequestMercConfigure(mercIds[i], null, ids.locationConfigId, ids.zoneConfigId, ids.objectiveId);
+                        configureNext(i + 1);
+                    }, humanDelay() + 400);
+                })(0);
             }
             return;
         }
@@ -298,14 +308,17 @@ var webVersion = null;
                 type: 'COR3_WS_EXPEDITION_CONFIG',
                 data: payload.data
             }, '*');
-            // If mercenaries are cached, auto-configure each
+            // If mercenaries are cached, auto-configure each sequentially with human delays
             if (window.__cor3CachedMercIds && window.__cor3ExpConfigIds) {
                 var ids = window.__cor3ExpConfigIds;
-                window.__cor3CachedMercIds.forEach(function (mercId, idx) {
+                var mercIds = window.__cor3CachedMercIds.slice();
+                (function configureNext(i) {
+                    if (i >= mercIds.length) return;
                     setTimeout(function () {
-                        window.__cor3RequestMercConfigure(mercId, null, ids.locationConfigId, ids.zoneConfigId, ids.objectiveId);
-                    }, (idx + 1) * 800);
-                });
+                        window.__cor3RequestMercConfigure(mercIds[i], null, ids.locationConfigId, ids.zoneConfigId, ids.objectiveId);
+                        configureNext(i + 1);
+                    }, humanDelay() + 400);
+                })(0);
             }
             return;
         }
@@ -321,19 +334,57 @@ var webVersion = null;
 
         // Intercept collect.all response
         if (eventName === 'expeditions' && payload && payload.event && payload.event.action === 'collect.all') {
-            window.postMessage({
-                type: 'COR3_WS_COLLECTED_ALL',
-                data: payload.data
-            }, '*');
+            // Check for stash full error
+            if (payload.error && payload.error.message === 'stash.error.insufficient_capacity') {
+                window.postMessage({
+                    type: 'COR3_WS_STASH_FULL',
+                    error: payload.error.message,
+                    requestId: payload.requestId
+                }, '*');
+            } else {
+                window.postMessage({
+                    type: 'COR3_WS_COLLECTED_ALL',
+                    data: payload.data
+                }, '*');
+            }
             return;
         }
 
         // Intercept launch response
         if (eventName === 'expeditions' && payload && payload.event && payload.event.action === 'launch') {
+            // Check for launch errors
+            if (payload.error && payload.error.message === 'Maximum 1 active expedition allowed') {
+                console.log('[COR3 Helper] Expedition launch failed: Maximum 1 active expedition allowed');
+                window.postMessage({
+                    type: 'COR3_WS_EXPEDITION_LAUNCH_ERROR',
+                    error: payload.error.message,
+                    retryAfter: 120000 // 2 minutes in milliseconds
+                }, '*');
+                // Schedule retry after 2 minutes
+                setTimeout(function() {
+                    console.log('[COR3 Helper] Retrying expedition launch after 2 minutes');
+                    window.postMessage({
+                        type: 'COR3_WS_EXPEDITION_RETRY_LAUNCH',
+                        retryData: payload.requestId
+                    }, '*');
+                }, 120000);
+                return;
+            }
+
+            // Successful launch
             window.postMessage({
                 type: 'COR3_WS_EXPEDITION_LAUNCHED',
                 data: payload.data
             }, '*');
+            // Clear old expedition decisions when new expedition starts
+            window.postMessage({
+                type: 'COR3_WS_DECISIONS',
+                decisions: [] // Clear decisions by sending empty array
+            }, '*');
+            // Immediately request fresh expedition data to update UI and reset 30-second timer
+            setTimeout(function() {
+                window.__cor3RequestExpeditions();
+            }, 1000 + Math.floor(Math.random() * 500));
             return;
         }
 
@@ -364,11 +415,8 @@ var webVersion = null;
                         type: 'COR3_WS_MARKET',
                         market: payload.data
                     }, '*');
-                    // Store HOME market ID and auto-fetch mercenaries after market-1 data arrives
+                    // Store HOME market ID (mercenary fetch removed — now handled by Refresh All)
                     window.__cor3LastMarketId = mkt.id;
-                    setTimeout(function () {
-                        window.__cor3RequestMercenaries(mkt.id);
-                    }, 2000);
                 }
             }
         }
@@ -393,6 +441,12 @@ var webVersion = null;
                     }, '*');
                 }
             }
+        }
+
+        // Handle expedition update events for listening-based updates
+        if (eventName === 'expeditions' && payload && payload.event && payload.event.action === 'update') {
+            console.log('[COR3 Helper] Expedition update event detected - data will flow through existing handlers');
+            return;
         }
 
         // We're interested in "expeditions" responses that contain expedition data
@@ -450,6 +504,10 @@ var webVersion = null;
             }
         }
     }
+
+    // Global variables to store versions as fallback
+    window.__cor3WebVersion = null;
+    window.__cor3SystemVersion = null;
 
     // Send expedition request through any open tracked socket
     // Joining the expedition room triggers the server to respond with get.active data.
@@ -579,6 +637,9 @@ var webVersion = null;
 
     // Send a WS message on the active socket (most recently received messages)
     function wsSend(msg) {
+        // Log outbound WS message to content.js for storage
+        window.postMessage({ type: 'COR3_WS_LOG', direction: 'sent', message: msg }, '*');
+
         // Prefer the activeSocket if it's still open
         if (activeSocket && activeSocket.readyState === OrigWebSocket.OPEN) {
             activeSocket.send(msg);
@@ -741,16 +802,12 @@ var webVersion = null;
             window.__cor3RequestArchivedExpeditions();
         }, 8000);
 
-        // Mercenaries are now auto-fetched after market-1 data arrives (see handleWsMessage)
+        // Mercenaries are fetched via Refresh All in popup or on explicit request
     };
 
-    // Auto-poll expeditions every 30 seconds to catch decisions
-    setInterval(function () {
-        if (trackedSockets.length > 0) {
-            var msg = '42["event",{"event":{"name":"expeditions","action":"get.active"}}]';
-            wsSend(msg);
-        }
-    }, 30000);
+    window.__cor3KeepAlive = function () {
+        console.log('[COR3 Helper] Keeping service worker alive!');
+    };
 
     // Periodic socket health check: clean up dead sockets and detect stale connections
     setInterval(function () {
@@ -814,7 +871,12 @@ var webVersion = null;
             window.__cor3RequestExpeditionConfig();
         }
         if (event.data && event.data.type === 'COR3_LAUNCH_EXPEDITION') {
+            // Store launch data for potential retry
             window.__cor3LaunchExpedition(event.data.config);
+        }
+        if (event.data && event.data.type === 'COR3_RELAUNCH_EXPEDITION') {
+            console.log('[COR3 Helper] Relaunching expedition with stored data');
+            window.__cor3LaunchExpedition(event.data.data);
         }
         if (event.data && event.data.type === 'COR3_OPEN_CONTAINER') {
             window.__cor3OpenContainer(event.data.expeditionId);
@@ -835,6 +897,9 @@ var webVersion = null;
             // If solver was stopped, reset flags and re-inject will handle it
             window.__solverAbort = false;
             window.__solverActive = false;
+        }
+        if (event.data && event.data.type === 'COR3_KEEP_ALIVE') {
+            window.__cor3KeepAlive();
         }
     });
 

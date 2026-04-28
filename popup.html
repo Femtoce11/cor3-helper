@@ -138,12 +138,42 @@
             color: var(--accent);
         }
         .section {
-            margin-bottom: 15px;
+            margin-bottom: 10px;
             border-top: 1px solid var(--border);
             padding-top: 10px;
         }
+        .sub-section {
+            margin-bottom: 10px;
+        }
+        .toggles-section {
+            margin-bottom: 10px;
+            border-top: 1px solid var(--border);
+            padding-top: 8px;
+        }
         .section-title {
             font-size: 14px;
+            margin-bottom: 8px;
+            color: var(--accent-purple);
+        }
+        .alarm-section-title {
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            color: var(--accent-purple);
+        }
+        .daily-section-symbol {
+            display: flex;
+            font-size: 20px;
+            color: #ffffff;
+            margin-bottom: 9px;
+        }
+        .daily-section-title {
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
             margin-bottom: 8px;
             color: var(--accent-purple);
         }
@@ -420,6 +450,7 @@
         .outcome-full { background: var(--accent-green); color: var(--bg-primary); }
         .outcome-partial { background: var(--accent-orange); color: var(--bg-primary); }
         .outcome-fail { background: var(--accent-red); color: var(--bg-primary); }
+        .outcome-death { background: #ff0000; color: var(--bg-primary); }
         .archived-exp-info { font-size: 10px; color: var(--text-muted); line-height: 1.5; }
         .container-items { margin-top: 6px; }
 
@@ -591,14 +622,22 @@
         .expandable-header .expand-arrow {
             font-size: 12px;
             transition: transform 0.2s;
-            color: var(--text-dim);
+            color: var(--accent-yellow);
         }
         .expandable-header.open .expand-arrow {
             transform: rotate(90deg);
         }
+        .expandable-header .expand-arrow-sub {
+            font-size: 12px;
+            transition: transform 0.2s;
+            color: var(--accent-cyan);
+        }
+        .expandable-header.open .expand-arrow-sub {
+            transform: rotate(90deg);
+        }
         .expandable-header .expand-label {
             font-size: 12px;
-            color: var(--accent-cyan);
+            color: var(--accent-yellow);
         }
         .expandable-body {
             display: none;
@@ -871,7 +910,7 @@
         /* Theme selector */
         .header-row {
             display: flex;
-            align-items: center;
+            align-items: self-end;
             justify-content: space-between;
             margin-bottom: 10px;
             position: relative;
@@ -975,6 +1014,7 @@
         .outcome-full { background: var(--accent-green); color: var(--bg-primary); }
         .outcome-partial { background: var(--accent-orange); color: var(--bg-primary); }
         .outcome-fail { background: var(--accent-red); color: var(--bg-primary); }
+        .outcome-death { background: #ff0000; color: var(--bg-primary); }
         .archived-exp-info { font-size: 10px; color: var(--text-muted); margin-bottom: 4px; }
         .expedition-card {
             background: var(--bg-card);
@@ -1011,13 +1051,54 @@
             justify-content: space-between;
             margin-top: 4px;
         }
+
+        /* System Message Notifications Toggle */
+        .system-message-toggle {
+            position: relative;
+            display: inline-block;
+            width: 40px;
+            height: 20px;
+        }
+        .system-message-toggle input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .system-message-toggle .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: var(--border);
+            border-radius: 20px;
+            transition: 0.2s;
+        }
+        .system-message-toggle .slider:before {
+            position: absolute;
+            content: "";
+            height: 16px;
+            width: 16px;
+            left: 2px;
+            bottom: 2px;
+            background-color: var(--text);
+            border-radius: 50%;
+            transition: 0.2s;
+        }
+        .system-message-toggle input:checked + .slider {
+            background-color: var(--accent-green);
+        }
+        .system-message-toggle input:checked + .slider:before {
+            transform: translateX(20px);
+        }
     </style>
 </head>
 <body>
 <!-- Main View -->
 <div id="mainView">
     <div class="header-row">
-        <h3>🛰️ COR3 Helper</h3>
+        <h3><svg width="20" height="20" viewBox="0 0 150 150" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle;margin-right:4px;"><path d="M75 0C33.5752 0 0 33.5752 0 75C0 116.425 33.5752 150 75 150C116.425 150 150 116.425 150 75C150 33.5752 116.425 0 75 0ZM40.7212 84.9165L65.6992 109.894C67.3483 111.544 69.5251 112.445 71.8338 112.445H78.1882C80.5189 112.445 82.6957 111.544 84.3228 109.894L106.882 87.3351C108.641 85.5761 110.994 84.5866 113.5 84.5866C116.007 84.5866 118.338 85.5541 120.119 87.3351L121.68 88.8962C123.439 90.6552 124.428 93.0079 124.428 95.5145C124.428 98.0211 123.461 100.352 121.68 102.133L102.704 121.108C100.88 122.933 98.4828 123.835 96.0862 123.835C93.6895 123.835 91.2929 122.933 89.4679 121.108L89.314 120.954C87.6649 119.305 85.4881 118.404 83.1794 118.404H66.7546C64.4239 118.404 62.2471 119.305 60.6201 120.954L60.4881 121.086C56.8382 124.736 50.9235 124.736 47.2735 121.086L28.2982 102.111C26.5391 100.352 25.5497 97.9991 25.5497 95.4925C25.5497 92.9859 26.5171 90.6552 28.2982 88.8742L29.6614 87.511C31.3105 85.8619 32.212 83.6851 32.212 81.3764V68.6895C32.212 66.3588 31.3105 64.1821 29.6614 62.555L28.2982 61.1917C26.5391 59.4327 25.5497 57.08 25.5497 54.5734C25.5497 52.0668 26.5171 49.7362 28.2982 47.9552L47.2735 28.9798C50.9235 25.3298 56.8382 25.3298 60.4881 28.9798L60.6201 29.1117C62.2691 30.7608 64.4459 31.6623 66.7546 31.6623H83.1794C85.5101 31.6623 87.6869 30.7608 89.314 29.1117L89.4679 28.9578C93.1178 25.3078 99.0325 25.3078 102.682 28.9578L121.658 47.9332C123.417 49.6922 124.406 52.0449 124.406 54.5515C124.406 57.0581 123.439 59.3887 121.658 61.1698L120.097 62.7309C118.338 64.4899 115.985 65.4793 113.478 65.4793C110.972 65.4793 108.641 64.5119 106.86 62.7309L84.3448 40.1715C82.6957 38.5224 80.5189 37.6209 78.2102 37.6209H71.8558C69.5251 37.6209 67.3483 38.5224 65.7212 40.1715L40.7212 65.1495C39.0721 66.7986 38.1706 68.9754 38.1706 71.2841V78.7819C38.1706 81.0906 39.0721 83.2894 40.7212 84.9165Z" fill="#76C1D1"/></svg> COR3 Helper</h3>
         <div class="header-btns">
             <button class="header-icon-btn" id="popOutBtn" title="Open in separate window"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></button>
             <button class="header-icon-btn" id="sidePanelBtn" title="Open as side panel"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="15" y1="3" x2="15" y2="21"/></svg></button>
@@ -1039,8 +1120,13 @@
         <div id="pinnedTimersContainer"></div>
     </div>
 
-    <!-- Auto Decrypt Hacking -->
-    <div class="section">
+    <!-- Toggles -->
+    <div class="toggles-section">
+        <div style="display: flex; gap: 4px;">
+            <span class="daily-section-symbol">֎</span>
+            <span class="daily-section-title">Automation/QoL Toggles</span>
+        </div>
+        <!-- Auto Decrypt Hacking -->
         <div class="auto-decrypt-row">
             <span class="decrypt-label">&#x1F513; Auto Decrypt Hacking</span>
             <div style="display:flex;align-items:center;gap:8px;">
@@ -1064,11 +1150,45 @@
             </div>
         </div>
         <div id="dailyHackLog" style="display:none;font-size:10px;margin-top:6px;padding:6px 8px;background:var(--bg-card);border-radius:6px;border:1px solid var(--border);color:var(--accent-cyan);"></div>
+        <!-- System Message Notifications -->
+        <div class="auto-decrypt-row" style="margin-top:8px;">
+            <span class="decrypt-label">🔕 Disable system message</span>
+            <div style="display:flex;align-items:center;gap:8px;">
+                <span class="decrypt-status" id="systemMessageStatus">Off</span>
+                <label class="alarm-toggle-switch">
+                    <input type="checkbox" id="disableSystemMessagesToggle">
+                    <span class="slider-track"></span>
+                </label>
+            </div>
+        </div>
+        <!-- Background Elements Toggle -->
+        <div class="auto-decrypt-row" style="margin-top:8px;">
+            <span class="decrypt-label">🎨 Disable desktop glitch/wave</span>
+            <div style="display:flex;align-items:center;gap:8px;">
+                <span class="decrypt-status" id="backgroundStatus">Off</span>
+                <label class="alarm-toggle-switch">
+                    <input type="checkbox" id="disableBackgroundToggle">
+                    <span class="slider-track"></span>
+                </label>
+            </div>
+        </div>
+        <!-- Network Fog Toggle -->
+        <div class="auto-decrypt-row" style="margin-top:8px;">
+            <span class="decrypt-label">🎨 Disable network fog</span>
+            <div style="display:flex;align-items:center;gap:8px;">
+                <span class="decrypt-status" id="networkFogStatus">Off</span>
+                <label class="alarm-toggle-switch">
+                    <input type="checkbox" id="disableNetworkFogToggle">
+                    <span class="slider-track"></span>
+                </label>
+            </div>
+        </div>
     </div>
+
     <!-- Daily Ops -->
     <div class="section">
-        <div class="market-sub-header">
-            <span class="market-sub-label">📅 Daily Ops</span>
+        <div class="daily-section-title">
+            <span>📅 Daily Ops</span>
             <div style="display:flex;gap:4px;">
                 <button id="pinDailyBtn" class="refresh-btn-small pin-btn" title="Pin Daily Ops">📌</button>
                 <button id="refreshDailyBtn" class="refresh-btn-small" title="Refresh Daily Ops">🔄</button>
@@ -1076,31 +1196,35 @@
         </div>
         <div class="last-updated" id="dailyLastUpdated"></div>
         <div style="font-size:11px;color:var(--accent-orange);margin-bottom:4px;" id="dailyTimerLine">⏳ Next Task: --:--:--</div>
+        <div style="font-size:10px;margin-bottom:4px;display:none;" id="dailyStatusLine"></div>
         <div style="font-size:10px;color:var(--text-dim);margin-bottom:4px;">Claimed: <span id="dailyClaimed">--</span> · Streak: <span id="dailyStreak">--</span> · Difficulty: <span id="dailyDifficulty">--</span> · Bonus: <span id="dailyStreakBonus">--</span></div>
     </div>
 
     <!-- Markets -->
     <div class="section">
         <div class="section-title">🏪 Markets</div>
-        <div class="market-sub-header">
-            <span class="market-sub-label" id="coreMarketLabel">🏠 Market-1</span>
-            <div style="display:flex;gap:4px;">
-                <button id="pinCoreMarketBtn" class="refresh-btn-small pin-btn" title="Pin Market Timer">📌</button>
-                <button id="refreshMarketBtn" class="refresh-btn-small" title="Refresh Market">🔄</button>
+        <div class="sub-section">
+            <div class="market-sub-header">
+                <span class="market-sub-label" id="coreMarketLabel">🏠 Market-1</span>
+                <div style="display:flex;gap:4px;">
+                    <button id="pinCoreMarketBtn" class="refresh-btn-small pin-btn" title="Pin Market Timer">📌</button>
+                    <button id="refreshMarketBtn" class="refresh-btn-small" title="Refresh Market">🔄</button>
+                </div>
             </div>
+            <div class="last-updated" id="coreMarketLastUpdated"></div>
+            <div id="marketContainer"><div class="no-decisions">No market data cached yet.</div></div>
         </div>
-        <div class="last-updated" id="coreMarketLastUpdated"></div>
-        <div id="marketContainer"><div class="no-decisions">No market data cached yet.</div></div>
-        <div style="border-top:1px solid var(--border);margin:10px 0;"></div>
-        <div class="market-sub-header">
-            <span class="market-sub-label" id="darkMarketLabel">🌑 Market-2</span>
-            <div style="display:flex;gap:4px;">
-                <button id="pinDarkMarketBtn" class="refresh-btn-small pin-btn" title="Pin Market Timer">📌</button>
-                <button id="refreshDarkMarketBtn" class="refresh-btn-small" title="Refresh Market">🔄</button>
+        <div class="sub-section">
+            <div class="market-sub-header">
+                <span class="market-sub-label" id="darkMarketLabel">🌑 Market-2</span>
+                <div style="display:flex;gap:4px;">
+                    <button id="pinDarkMarketBtn" class="refresh-btn-small pin-btn" title="Pin Market Timer">📌</button>
+                    <button id="refreshDarkMarketBtn" class="refresh-btn-small" title="Refresh Market">🔄</button>
+                </div>
             </div>
+            <div class="last-updated" id="darkMarketLastUpdated"></div>
+            <div id="darkMarketContainer"><div class="no-decisions">No market data cached yet.</div></div>
         </div>
-        <div class="last-updated" id="darkMarketLastUpdated"></div>
-        <div id="darkMarketContainer"><div class="no-decisions">No market data cached yet.</div></div>
     </div>
 
     <!-- Expeditions (contains active expeditions, decisions, inventory, mercenaries) -->
@@ -1119,8 +1243,8 @@
 
         <!-- Decisions (expandable) -->
         <div class="expandable-header" id="decisionsSectionToggle">
-            <span class="expand-arrow">▶</span>
-            <span class="expand-label">📋 Decisions <span id="decisionsCount" style="font-size:9px;color:var(--text-dim);"></span></span>
+            <span class="expand-arrow-sub">▶</span>
+            <span class="market-sub-label">📋 Decisions <span id="decisionsCount" style="font-size:9px;color:var(--text-dim);"></span></span>
         </div>
         <div class="last-updated" id="decisionLastUpdated"></div>
         <div class="expandable-body" id="decisionsSectionBody">
@@ -1156,8 +1280,8 @@
         <!-- Inventory (expandable) -->
         <div class="market-sub-header" style="margin-top:8px;">
             <div class="expandable-header" id="inventorySectionToggle" style="flex:1;">
-                <span class="expand-arrow">▶</span>
-                <span class="expand-label">🎒 Inventory <span id="spaceInfo" class="space-badge" style="font-size:9px;padding:2px 6px;">-- / --</span> <span id="totalValue" style="font-size:10px;color:var(--accent-green);font-weight:normal;"></span></span>
+                <span class="expand-arrow-sub">▶</span>
+                <span class="market-sub-label">🎒 Inventory <span id="spaceInfo" class="space-badge" style="font-size:9px;padding:2px 6px;">-- / --</span> <span id="totalValue" style="font-size:10px;color:var(--accent-green);font-weight:normal;"></span></span>
             </div>
             <button id="refreshInventoryBtn" class="refresh-btn-small" title="Refresh Inventory">🔄</button>
         </div>
@@ -1169,8 +1293,8 @@
         <!-- Mercenaries (expandable) -->
         <div class="market-sub-header" style="margin-top:8px;">
             <div class="expandable-header" id="mercenariesSectionToggle" style="flex:1;">
-                <span class="expand-arrow">▶</span>
-                <span class="expand-label">⚔️ Mercenaries</span>
+                <span class="expand-arrow-sub">▶</span>
+                <span class="market-sub-label">⚔️ Mercenaries</span>
             </div>
             <button id="refreshMercenariesBtn" class="refresh-btn-small" title="Refresh Mercenaries">🔄</button>
         </div>
@@ -1197,16 +1321,17 @@
             <div id="mercenaryConfigRow" style="display:none;font-size:10px;color:var(--text-dim);margin-bottom:6px;">
                 Selected: <span id="selectedMercenaryName" style="color:var(--accent-cyan);font-weight:bold;">None</span>
             </div>
+            <div id="mercStashWarning" style="display:none;background:rgba(255,160,0,0.15);border:1px solid var(--accent-orange);border-radius:6px;padding:6px 10px;margin-bottom:6px;font-size:10px;color:var(--accent-orange);">
+                ⚠️ Stash is full — auto-send mercenary disabled. Clear stash and re-enable auto-send to resume.
+            </div>
             <div id="mercenariesContainer"><div class="no-decisions">Loading mercenaries...</div></div>
         </div>
-    </div>
 
-    <!-- Archived Expeditions -->
-    <div class="section">
+        <!-- Archived Expeditions -->
         <div class="market-sub-header">
             <div class="expandable-header" id="archivedExpSectionToggle" style="flex:1;">
-                <span class="expand-arrow">▶</span>
-                <span class="expand-label">📦 Archived Expeditions</span>
+                <span class="expand-arrow-sub">▶</span>
+                <span class="market-sub-label">📦 Archived Expeditions</span>
             </div>
             <button id="refreshArchivedBtn" class="refresh-btn-small" title="Refresh Archived">🔄</button>
         </div>
@@ -1218,8 +1343,8 @@
 
     <!-- Alarms Section -->
     <div class="section">
-        <div class="market-sub-header">
-            <span class="market-sub-label">⏰ Alarms</span>
+        <div class="alarm-section-title">
+            <span>⏰ Alarms</span>
             <div style="display:flex;gap:4px;">
                 <button id="stopAllAlarmsBtn" class="refresh-btn-small" title="Stop all sounding alarms" style="display:none;">🛑</button>
                 <button id="addAlarmBtn" class="refresh-btn-small" title="Add new alarm">➕</button>
@@ -1260,10 +1385,14 @@
         </div>
     </div>
 
+
     <!-- Version Info -->
     <div style="border-top:1px solid var(--border);margin-top:8px;padding-top:8px;">
         <div id="versionInfoSection" class="version-info-section" style="display:none;"></div>
-        <div id="websiteUpdatedNotice" style="display:none;font-size:10px;color:var(--accent-orange);text-align:center;margin-top:4px;"></div>
+        <div id="webVersionNotice" style="display:none;font-size:10px;color:var(--accent-orange);text-align:center;margin-top:4px;"></div>
+        <div id="webVersionData" style="display:none;font-size:10px;color:var(--accent-orange);text-align:center;margin-top:4px;"></div>
+        <div id="systemVersionNotice" style="display:none;font-size:10px;color:var(--accent-orange);text-align:center;margin-top:4px;"></div>
+        <div id="systemVersionData" style="display:none;font-size:10px;color:var(--accent-orange);text-align:center;margin-top:4px;"></div>
     </div>
 
     <!-- Check for Updates -->
@@ -1277,6 +1406,7 @@
 </div><!-- end mainView -->
 
 
+<script src="errors.js"></script>
 <script src="popup.js"></script>
 </body>
 </html>

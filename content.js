@@ -10,6 +10,12 @@ window.addEventListener('message', (event) => {
     if (event.source !== window) return;
     if (!isContextValid()) return; // Extension was reloaded/updated
     const now = Date.now();
+
+    // WS message logging (sent/received from content-early.js)
+    if (event.data && event.data.type === 'COR3_WS_LOG') {
+        cor3LogWsMessage(event.data.direction, event.data.message);
+    }
+
     if (event.data && event.data.type === 'COR3_WS_EXPEDITIONS') {
         chrome.storage.local.set({ expeditionsData: event.data.expeditions, expeditionsDataUpdatedAt: now });
         // Check for completed expeditions to trigger auto-send flow
@@ -21,6 +27,39 @@ window.addEventListener('message', (event) => {
     }
     if (event.data && event.data.type === 'COR3_WS_STASH') {
         chrome.storage.local.set({ stashData: event.data.stash, stashDataUpdatedAt: now });
+
+        // Check if auto-send was disabled due to full stash and if we now have space
+        chrome.storage.sync.get('autoSendMerc', (settings) => {
+            if (settings.autoSendMerc &&
+                settings.autoSendMerc.disabledReason === 'stash_full' &&
+                !settings.autoSendMerc.enabled) {
+
+                const stash = event.data.stash;
+                let hasSpace = false;
+                let spaceNeeded = 2; // Require at least 2 spaces for safety
+
+                if (stash && stash.maxCapacity && stash.currentUsage !== undefined) {
+                    const availableSpace = stash.maxCapacity - stash.currentUsage;
+                    hasSpace = availableSpace >= spaceNeeded;
+                }
+
+                if (hasSpace) {
+                    console.log('[COR3 Helper] Stash has space again, re-enabling auto-send mercenary');
+                    chrome.storage.sync.set({
+                        autoSendMerc: {
+                            ...settings.autoSendMerc,
+                            enabled: true,
+                            disabledReason: null
+                        }
+                    });
+                    // Notify user
+                    window.postMessage({
+                        type: 'COR3_AUTO_SEND_REENABLED',
+                        message: 'Stash space available. Auto-send mercenary re-enabled.'
+                    }, '*');
+                }
+            }
+        });
     }
     if (event.data && event.data.type === 'COR3_WS_MARKET') {
         chrome.storage.local.set({ marketData: event.data.market, marketDataUpdatedAt: now });
@@ -66,14 +105,85 @@ window.addEventListener('message', (event) => {
             chrome.storage.local.set({ mercConfigData: configs, mercConfigUpdatedAt: now });
         });
     }
-    // Auto-send: container opened — proceed to collect all
+    // Auto-send: container opened — check inventory space before collecting all
     if (event.data && event.data.type === 'COR3_WS_CONTAINER_OPENED') {
         if (autoSendInProgress && autoSendExpeditionId) {
-            console.log('[COR3 Helper] Auto-send: Container opened, collecting all...');
-            setTimeout(() => {
-                window.postMessage({ type: 'COR3_COLLECT_ALL', expeditionId: autoSendExpeditionId }, '*');
-            }, 1000 + Math.floor(Math.random() * 500));
+            console.log('[COR3 Helper] Auto-send: Container opened, checking inventory space...');
+            const containerData = event.data.data;
+
+            // Calculate space needed based on container contents
+            let spaceNeeded = 2; // Default fallback
+            if (containerData && containerData.items && Array.isArray(containerData.items)) {
+                spaceNeeded = containerData.items.length;
+                console.log('[COR3 Helper] Container contains', spaceNeeded, 'items');
+            } else if (containerData && containerData.containerItems && Array.isArray(containerData.containerItems)) {
+                spaceNeeded = containerData.containerItems.length;
+                console.log('[COR3 Helper] Container contains', spaceNeeded, 'items (containerItems)');
+            }
+
+            // Check stash data to ensure we have enough space
+            chrome.storage.local.get('stashData', (result) => {
+                const stash = result.stashData;
+                let hasSpace = true;
+
+                if (stash && stash.maxCapacity && stash.currentUsage !== undefined) {
+                    const availableSpace = stash.maxCapacity - stash.currentUsage;
+                    hasSpace = availableSpace >= spaceNeeded;
+                    console.log('[COR3 Helper] Inventory check:', availableSpace, 'available, need', spaceNeeded);
+                }
+
+                if (hasSpace) {
+                    console.log('[COR3 Helper] Auto-send: Sufficient space, collecting all...');
+                    setTimeout(() => {
+                        window.postMessage({ type: 'COR3_COLLECT_ALL', expeditionId: autoSendExpeditionId }, '*');
+                    }, 1000 + Math.floor(Math.random() * 500));
+                } else {
+                    console.log('[COR3 Helper] Auto-send: Insufficient space, disabling auto-container-claim');
+                    // Disable auto-send temporarily due to full stash
+                    chrome.storage.sync.get('autoSendMerc', (settings) => {
+                        if (settings.autoSendMerc) {
+                            chrome.storage.sync.set({
+                                autoSendMerc: {
+                                    ...settings.autoSendMerc,
+                                    enabled: false,
+                                    disabledReason: 'stash_full'
+                                }
+                            });
+                        }
+                    });
+                    // Notify user with specific space information
+                    const availableSpace = stash ? stash.maxCapacity - stash.currentUsage : 0;
+                    window.postMessage({
+                        type: 'COR3_STASH_FULL_WARNING',
+                        message: `Stash is full. Need ${spaceNeeded} spaces but only ${availableSpace} available. Clear stash before claiming more items. Auto-send mercenary disabled.`
+                    }, '*');
+                    autoSendInProgress = false;
+                }
+            });
         }
+    }
+    // Handle stash full error from collect.all
+    if (event.data && event.data.type === 'COR3_WS_STASH_FULL') {
+        console.log('[COR3 Helper] Stash full error detected, disabling auto-send mercenary');
+        // Disable auto-send temporarily due to full stash
+        chrome.storage.sync.get('autoSendMerc', (settings) => {
+            if (settings.autoSendMerc) {
+                chrome.storage.sync.set({
+                    autoSendMerc: {
+                        ...settings.autoSendMerc,
+                        enabled: false,
+                        disabledReason: 'stash_full'
+                    }
+                });
+            }
+        });
+        // Notify user
+        window.postMessage({
+            type: 'COR3_STASH_FULL_WARNING',
+            message: 'Stash is full. Clear stash before claiming more items. Auto-send mercenary disabled.'
+        }, '*');
+        autoSendInProgress = false;
+        autoSendExpeditionId = null;
     }
     // Auto-send: collected all — proceed to get mercenaries and launch
     if (event.data && event.data.type === 'COR3_WS_COLLECTED_ALL') {
@@ -87,7 +197,7 @@ window.addEventListener('message', (event) => {
             // Now get mercenaries and launch selected one
             setTimeout(() => {
                 window.postMessage({ type: 'COR3_REQUEST_MERCENARIES' }, '*');
-            }, 1500 + Math.floor(Math.random() * 500));
+            }, 2500 + Math.floor(Math.random() * 1000));
             // Wait for mercenaries data, then launch
             autoSendAwaitingMercenaries = true;
         }
@@ -171,13 +281,16 @@ window.addEventListener('message', (event) => {
                 };
                 console.log('[COR3 Helper] Auto-send: launching expedition with mercenary:', selectedMerc.callsign);
                 setTimeout(() => {
+                    chrome.storage.local.set({ lastExpeditionLaunchData: launchConfig });
                     window.postMessage({ type: 'COR3_LAUNCH_EXPEDITION', config: launchConfig }, '*');
                     // Refresh mercenaries after launch to update UI
                     setTimeout(() => {
-                        window.postMessage({ type: 'COR3_REQUEST_MERCENARIES' }, '*');
                         window.postMessage({ type: 'COR3_REQUEST_EXPEDITIONS' }, '*');
+                    }, 1000);
+                    setTimeout(() => {
+                        window.postMessage({ type: 'COR3_REQUEST_MERCENARIES' }, '*');
                         autoSendInProgress = false;
-                    }, 3000);
+                    }, 2000);
                 }, 1500 + Math.floor(Math.random() * 500));
             });
         }
@@ -185,6 +298,33 @@ window.addEventListener('message', (event) => {
     // Auto-send: expedition launched confirmation
     if (event.data && event.data.type === 'COR3_WS_EXPEDITION_LAUNCHED') {
         console.log('[COR3 Helper] Expedition launched successfully');
+    }
+    // Handle expedition launch error
+    if (event.data && event.data.type === 'COR3_WS_EXPEDITION_LAUNCH_ERROR') {
+        console.log('[COR3 Helper] Expedition launch error:', event.data.error);
+        // Store error for UI display
+        chrome.storage.local.set({
+            expeditionLaunchError: {
+                error: event.data.error,
+                retryAfter: event.data.retryAfter,
+                timestamp: Date.now()
+            }
+        });
+        // Clear any previous successful launch message
+        chrome.storage.local.remove('expeditionLaunched');
+    }
+    // Handle expedition launch retry
+    if (event.data && event.data.type === 'COR3_WS_EXPEDITION_RETRY_LAUNCH') {
+        console.log('[COR3 Helper] Retrying expedition launch');
+        chrome.storage.local.get('lastExpeditionLaunchData', (result) => {
+            if (result.lastExpeditionLaunchData) {
+                // Retry the expedition launch with the same data
+                window.postMessage({
+                    type: 'COR3_RELAUNCH_EXPEDITION',
+                    data: result.lastExpeditionLaunchData
+                }, '*');
+            }
+        });
     }
     // Relay daily hack log messages to storage for popup to read
     if (event.data && event.data.type === 'COR3_DAILY_HACK_LOG') {
@@ -246,6 +386,23 @@ function checkAutoSendOnExpeditionData(expeditions) {
     chrome.storage.sync.get('autoSendMerc', (settings) => {
         if (!settings.autoSendMerc || !settings.autoSendMerc.enabled) return;
         if (!settings.autoSendMerc.mercenaryId && !settings.autoSendMerc.autoChooseMerc) return;
+
+        // Check for no active expeditions case
+        const hasActiveExpeditions = expeditions.length > 0;
+        if (!hasActiveExpeditions) {
+            console.log('[COR3 Helper] Auto-send: No active expeditions, proceeding directly to mercenary launch');
+            // Directly proceed to mercenary launch flow
+            autoSendInProgress = true;
+            autoSendExpeditionId = null;
+            // Get mercenaries and launch selected one
+            setTimeout(() => {
+                window.postMessage({ type: 'COR3_REQUEST_MERCENARIES' }, '*');
+            }, 1000 + Math.floor(Math.random() * 500));
+            // Wait for mercenaries data, then launch
+            autoSendAwaitingMercenaries = true;
+            return;
+        }
+
         // Look for a COMPLETED expedition that hasn't been fully collected yet
         for (const exp of expeditions) {
             if (exp.status === 'COMPLETED' && !exp.completedAt) {
@@ -557,6 +714,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     } else if (request.action === "leaveStash") {
         window.postMessage({ type: 'COR3_LEAVE_STASH' }, '*');
         sendResponse({ success: true });
+    } else if (request.action === "keepWorkerAlive") {
+        window.postMessage({ type: 'COR3_KEEP_ALIVE' }, '*');
+        sendResponse({ success: true });
     } else if (request.action === "updateAutoRefresh") {
         if (request.autoRefresh) {
             autoRefreshSettings = request.autoRefresh;
@@ -596,6 +756,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         window.postMessage({ type: 'COR3_REQUEST_EXPEDITION_CONFIG', mercenaryId: request.mercenaryId }, '*');
         sendResponse({ success: true });
     } else if (request.action === "launchExpedition") {
+        chrome.storage.local.set({ lastExpeditionLaunchData: request.config });
         window.postMessage({ type: 'COR3_LAUNCH_EXPEDITION', config: request.config }, '*');
         sendResponse({ success: true });
     } else if (request.action === "openContainer") {
@@ -627,8 +788,257 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 }
                 sendResponse({ data: data });
             })
-            .catch(e => sendResponse({ error: e.message || 'fetch failed' }));
+            .catch(e => { cor3LogError('content.js', e, { action: 'fetchDailyOps' }); sendResponse({ error: e.message || 'fetch failed' }); });
         });
         return true; // keep channel open for async sendResponse
+    } else if (request.action === "disableSystemMessages") {
+        // Disable system message notifications
+        chrome.storage.sync.get('disableSystemMessages', (result) => {
+            if (!result.disableSystemMessages) {
+                chrome.storage.sync.set({ disableSystemMessages: true });
+                // Apply system message hiding
+                hideSystemMessages();
+                console.log('[COR3 Helper] System messages disabled');
+            }
+            sendResponse({ success: true });
+        });
+    } else if (request.action === "enableSystemMessages") {
+        // Enable system message notifications
+        chrome.storage.sync.set({ disableSystemMessages: false });
+        // Show system messages again
+        showSystemMessages();
+        console.log('[COR3 Helper] System messages enabled');
+        sendResponse({ success: true });
+    } else if (request.action === "disableBackground") {
+        // Disable background elements (delete them)
+        chrome.storage.sync.set({ disableBackground: true });
+        deleteBackgroundElements();
+        console.log('[COR3 Helper] Background elements deleted');
+        sendResponse({ success: true });
+    } else if (request.action === "enableBackground") {
+        // Enable background elements (just clear the setting, they will be restored on page reload)
+        chrome.storage.sync.set({ disableBackground: false });
+        console.log('[COR3 Helper] Background elements will be restored on page reload');
+        sendResponse({ success: true });
+    } else if (request.action === "disableNetworkFog") {
+        chrome.storage.sync.set({ disableNetworkFog: true });
+        startNetworkFogObserver();
+        hideNetworkFogVideos();
+        console.log('[COR3 Helper] Network fog disabled');
+        sendResponse({ success: true });
+    } else if (request.action === "enableNetworkFog") {
+        chrome.storage.sync.set({ disableNetworkFog: false });
+        stopNetworkFogObserver();
+        showNetworkFogVideos();
+        console.log('[COR3 Helper] Network fog re-enabled');
+        sendResponse({ success: true });
+    } else if (request.action === "getVersionFallbacks") {
+        // Return version fallbacks from global variables
+        sendResponse({
+            webVersion: window.__cor3WebVersion,
+            systemVersion: window.__cor3SystemVersion
+        });
+    }
+});
+
+// --- System Message Notifications ---
+function hideSystemMessages() {
+    // Hide system message notifications on the page
+    // This targets common system message selectors in the cor3.gg interface
+    const systemMessageSelectors = [
+        '[class*="system-message"]',
+        '[class*="notification"]',
+        '[class*="alert"]',
+        '[id*="system-message"]',
+        '[id*="notification"]',
+        '.toast-container',
+        '.notification-container',
+        '[role="alert"]'
+    ];
+
+    systemMessageSelectors.forEach(selector => {
+        try {
+            const elements = document.querySelectorAll(selector);
+            elements.forEach(el => {
+                if (el && el.style) {
+                    el.style.display = 'none';
+                    el.setAttribute('data-cor3-hidden', 'true');
+                }
+            });
+        } catch (e) {
+            // Ignore errors for selectors that might not exist
+        }
+    });
+
+    // Also hide any system messages that might appear later
+    observeAndHideSystemMessages();
+}
+
+function showSystemMessages() {
+    // Show previously hidden system message notifications
+    const hiddenElements = document.querySelectorAll('[data-cor3-hidden="true"]');
+    hiddenElements.forEach(el => {
+        if (el && el.style) {
+            el.style.display = '';
+            el.removeAttribute('data-cor3-hidden');
+        }
+    });
+
+    // Stop observing for new system messages
+    if (systemMessageObserver) {
+        systemMessageObserver.disconnect();
+        systemMessageObserver = null;
+    }
+}
+
+let systemMessageObserver = null;
+
+function observeAndHideSystemMessages() {
+    if (systemMessageObserver) return;
+
+    systemMessageObserver = new MutationObserver((mutations) => {
+        mutations.forEach((mutation) => {
+            mutation.addedNodes.forEach((node) => {
+                if (node.nodeType === Node.ELEMENT_NODE) {
+                    // Check if this element or its children are system messages
+                    const systemMessageSelectors = [
+                        '[class*="system-message"]',
+                        '[class*="notification"]',
+                        '[class*="alert"]',
+                        '[id*="system-message"]',
+                        '[id*="notification"]',
+                        '.toast-container',
+                        '.notification-container',
+                        '[role="alert"]'
+                    ];
+
+                    systemMessageSelectors.forEach(selector => {
+                        if (node.matches && node.matches(selector)) {
+                            node.style.display = 'none';
+                            node.setAttribute('data-cor3-hidden', 'true');
+                        }
+
+                        // Also check children
+                        try {
+                            const children = node.querySelectorAll(selector);
+                            children.forEach(child => {
+                                child.style.display = 'none';
+                                child.setAttribute('data-cor3-hidden', 'true');
+                            });
+                        } catch (e) {
+                            // Ignore errors
+                        }
+                    });
+                }
+            });
+        });
+    });
+
+    // Observe the entire document for new elements
+    systemMessageObserver.observe(document.body, {
+        childList: true,
+        subtree: true
+    });
+}
+
+// --- Background Elements Functions ---
+function deleteBackgroundElements() {
+    // Delete the specific background elements mentioned by the user
+    const backgroundElements = [
+        '#app-background',
+        '#glitch-background',
+        '#video-glitch',
+        '#video-waves'
+    ];
+
+    backgroundElements.forEach(selector => {
+        try {
+            const element = document.querySelector(selector);
+            if (element) {
+                element.remove();
+                console.log('[COR3 Helper] Deleted background element:', selector);
+            }
+        } catch (e) {
+            // Ignore errors for elements that might not exist
+        }
+    });
+}
+
+// Apply system message hiding on page load if setting is enabled
+chrome.storage.sync.get('disableSystemMessages', (result) => {
+    if (result.disableSystemMessages) {
+        // Wait a bit for the page to load
+        setTimeout(() => {
+            hideSystemMessages();
+        }, 1000);
+    }
+});
+
+// Apply background elements deletion on page load if setting is enabled
+chrome.storage.sync.get('disableBackground', (result) => {
+    if (result.disableBackground) {
+        // Wait a bit for the page to load
+        setTimeout(() => {
+            deleteBackgroundElements();
+        }, 1000);
+    }
+});
+
+// --- Network Fog Functions ---
+let networkFogObserver = null;
+
+function isNetworkMapVisible() {
+    const divs = document.querySelectorAll('div');
+    for (const div of divs) {
+        if (div.textContent.trim() === 'Network map') return true;
+    }
+    return false;
+}
+
+function hideNetworkFogVideos() {
+    const videos = document.querySelectorAll('video');
+    videos.forEach(v => {
+        const src = v.getAttribute('src') || '';
+        if (src.includes('/video/network-map/fog.mp4') || src.includes('/video/network-map/fog_layer_2.mp4')) {
+            v.style.display = 'none';
+            v.pause();
+            v.setAttribute('data-cor3-fog-hidden', 'true');
+        }
+    });
+}
+
+function showNetworkFogVideos() {
+    const hiddenVideos = document.querySelectorAll('[data-cor3-fog-hidden="true"]');
+    hiddenVideos.forEach(v => {
+        v.style.display = '';
+        v.removeAttribute('data-cor3-fog-hidden');
+        v.play().catch(() => {});
+    });
+}
+
+function startNetworkFogObserver() {
+    if (networkFogObserver) return;
+    networkFogObserver = new MutationObserver(() => {
+        if (isNetworkMapVisible()) {
+            hideNetworkFogVideos();
+        }
+    });
+    networkFogObserver.observe(document.body, { childList: true, subtree: true });
+}
+
+function stopNetworkFogObserver() {
+    if (networkFogObserver) {
+        networkFogObserver.disconnect();
+        networkFogObserver = null;
+    }
+}
+
+// Apply network fog hiding on page load if setting is enabled
+chrome.storage.sync.get('disableNetworkFog', (result) => {
+    if (result.disableNetworkFog) {
+        setTimeout(() => {
+            hideNetworkFogVideos();
+            startNetworkFogObserver();
+        }, 1000);
     }
 });

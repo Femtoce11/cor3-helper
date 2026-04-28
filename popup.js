@@ -362,8 +362,35 @@ decisionsSectionToggle.addEventListener('click', () => {
 function renderExpeditionInfo(expeditions) {
     expeditionInfoContainer.innerHTML = '';
 
+    // Check for expedition launch errors
+    chrome.storage.local.get('expeditionLaunchError', (result) => {
+        if (result.expeditionLaunchError) {
+            const error = result.expeditionLaunchError;
+            const now = Date.now();
+            const retryAfter = error.retryAfter || 120000;
+            const timeUntilRetry = Math.max(0, retryAfter - (now - error.timestamp));
+
+            if (timeUntilRetry > 0) {
+                const retryMinutes = Math.ceil(timeUntilRetry / 60000);
+                const errorHtml = `
+                    <div class="warning-banner" style="background:rgba(255,165,0,0.15);border-color:var(--accent-orange);color:var(--accent-orange);">
+                        <div style="font-weight:bold;margin-bottom:4px;">⚠️ Expedition Launch Failed</div>
+                        <div style="font-size:10px;">${error.error}</div>
+                        <div style="font-size:10px;margin-top:4px;">Retrying in ${retryMinutes} minute${retryMinutes !== 1 ? 's' : ''}...</div>
+                    </div>
+                `;
+                expeditionInfoContainer.innerHTML = errorHtml;
+            } else {
+                // Clear expired error
+                chrome.storage.local.remove('expeditionLaunchError');
+            }
+        }
+    });
+
     if (!expeditions || expeditions.length === 0) {
-        expeditionInfoContainer.innerHTML = '<div class="no-decisions">No active expeditions.</div>';
+        if (!expeditionInfoContainer.innerHTML) {
+            expeditionInfoContainer.innerHTML = '<div class="no-decisions">No active expeditions.</div>';
+        }
         return;
     }
 
@@ -432,7 +459,7 @@ function getRiskModifier() {
 function calcOptionScore(opt, expeditionRiskScore) {
     const lootMod = getLootModifier();
     const riskMod = getRiskModifier();
-    return (opt.lootModifier * lootMod) + ((opt.riskModifier * riskMod) * (((expeditionRiskScore + Math.abs(opt.riskModifier)) / 10) || 1)) ;
+    return Math.round((opt.lootModifier * lootMod) + ((opt.riskModifier * riskMod) * (((expeditionRiskScore + Math.abs(opt.riskModifier)) / 10) || 1))) ;
 }
 function updateModifierDisplayValues() {
     const lootDisp = document.getElementById('modLootDisplay');
@@ -549,8 +576,9 @@ function renderDecisions(decisions) {
 
 // Auto-choose logic — track decisions we already auto-chose to avoid re-sending
 const autoChosenDecisions = new Set();
-
+var counter = 0;
 async function checkAutoChoose(decisions) {
+    console.log("popup.js - function checkAutoChoose");
     const autoChoose = document.getElementById('autoChooseCheckbox');
     if (!autoChoose || !autoChoose.checked) return;
     if (!decisions || decisions.length === 0) return;
@@ -560,6 +588,7 @@ async function checkAutoChoose(decisions) {
         if (autoChosenDecisions.has(d.messageId)) continue; // already sent
         const dl = new Date(d.decisionDeadline);
         const remaining = dl - Date.now();
+        chrome.storage.local.set({ popupConsoleLog: "remaining time for decision -> " + remaining + " Counter: " + counter });
         if (remaining <= 0) continue; // expired
         if (remaining > 60000) continue; // wait until < 1 minute remaining
 
@@ -601,6 +630,24 @@ async function loadExpeditions() {
     refreshAllTimestamps();
     // check auto-choose
     checkAutoChoose(expeditionDecisions || []);
+
+    // Refresh expedition error display every 30 seconds
+    setInterval(() => {
+        chrome.storage.local.get('expeditionLaunchError', (result) => {
+            if (result.expeditionLaunchError) {
+                const error = result.expeditionLaunchError;
+                const now = Date.now();
+                const retryAfter = error.retryAfter || 120000;
+                const timeUntilRetry = Math.max(0, retryAfter - (now - error.timestamp));
+
+                if (timeUntilRetry <= 0) {
+                    // Clear expired error and refresh display
+                    chrome.storage.local.remove('expeditionLaunchError');
+                    loadExpeditions();
+                }
+            }
+        });
+    }, 30000);
 }
 
 // --- Modifier edit/save/cancel/toggle ---
@@ -663,6 +710,7 @@ modifiersEnabledToggle.addEventListener('change', () => {
 });
 
 autoChooseCheckbox.addEventListener('change', () => {
+    console.log("autoChooseCheckbox.checked -> " + autoChooseCheckbox.checked);
     chrome.storage.sync.set({
         decisionModifiers: {
             loot: savedLootMod,
@@ -826,6 +874,7 @@ function renderInventory(data) {
 
 // --- Daily Ops Timer ---
 const dailyTimerLine = document.getElementById('dailyTimerLine');
+const dailyStatusLine = document.getElementById('dailyStatusLine');
 const dailyClaimed = document.getElementById('dailyClaimed');
 const dailyStreak = document.getElementById('dailyStreak');
 const dailyDifficulty = document.getElementById('dailyDifficulty');
@@ -878,31 +927,65 @@ async function displayDailyOpsData(data) {
 }
 
 async function fetchDailyOps() {
+""    // Show loading state in status line (don't overwrite timer)
+    dailyStatusLine.style.display = '';
+    dailyStatusLine.innerHTML = '<span style="color:var(--accent-cyan);">⏳ Refreshing daily ops...</span>';
+
     try {
         const tab = await getCor3Tab();
-        if (!tab) throw new Error('No cor3.gg tab');
-        const response = await chrome.tabs.sendMessage(tab.id, { action: "fetchDailyOps" });
-        if (response && response.error && (response.error === 'token_expired' || response.error.includes('Invalid access token'))) {
-            dailyTimerLine.innerHTML = '<span style="color:var(--accent-red);font-size:10px;">⚠️ Access token expired. Page refresh required.</span>';
+        if (!tab) {
+            dailyStatusLine.style.display = '';
+            dailyStatusLine.innerHTML = '<span style="color:var(--accent-red);">⚠️ No cor3.gg tab found</span>';
             return;
         }
+
+        console.log('[COR3 Helper] Sending fetchDailyOps message to content script');
+        const response = await chrome.tabs.sendMessage(tab.id, { action: "fetchDailyOps" });
+
+        if (response && response.error && (response.error === 'token_expired' || response.error.includes('Invalid access token'))) {
+            dailyStatusLine.style.display = '';
+            dailyStatusLine.innerHTML = '<span style="color:var(--accent-red);">⚠️ Access token expired. Page refresh required.</span>';
+            return;
+        }
+
         if (response && response.data) {
+            console.log('[COR3 Helper] Daily ops data received:', response.data);
             await displayDailyOpsData(response.data);
+            dailyStatusLine.style.display = 'none';
             refreshAllTimestamps();
+        } else if (response === undefined) {
+            // Content script didn't respond - likely not loaded
+            console.log('[COR3 Helper] No response from content script, trying cached data');
+            const { dailyOpsData } = await chrome.storage.local.get('dailyOpsData');
+            if (dailyOpsData) {
+                await displayDailyOpsData(dailyOpsData);
+                dailyStatusLine.style.display = '';
+                dailyStatusLine.innerHTML = '<span style="color:var(--accent-orange);">⚠️ Using cached data (content script not responding)</span>';
+            } else {
+                dailyStatusLine.style.display = '';
+                dailyStatusLine.innerHTML = '<span style="color:var(--accent-red);">⚠️ No data available. Refresh the page.</span>';
+            }
         } else {
+            // Response was empty or null
             const { dailyOpsData } = await chrome.storage.local.get('dailyOpsData');
             if (dailyOpsData) await displayDailyOpsData(dailyOpsData);
         }
     } catch (e) {
+        console.error('[COR3 Helper] Daily ops fetch error:', e);
+        cor3LogError('popup.js', e, { action: 'fetchDailyOps' });
         try {
             const { dailyOpsData } = await chrome.storage.local.get('dailyOpsData');
             if (dailyOpsData) {
                 await displayDailyOpsData(dailyOpsData);
+                dailyStatusLine.style.display = '';
+                dailyStatusLine.innerHTML = '<span style="color:var(--accent-orange);">⚠️ Using cached data (error occurred)</span>';
             } else {
-                dailyTimerLine.textContent = '⏳ Next Task: --:--:--';
+                dailyStatusLine.style.display = '';
+                dailyStatusLine.innerHTML = '<span style="color:var(--accent-red);">⚠️ Failed to load daily ops</span>';
             }
         } catch (e2) {
-            dailyTimerLine.textContent = '⏳ Next Task: --:--:--';
+            dailyStatusLine.style.display = '';
+            dailyStatusLine.innerHTML = '<span style="color:var(--accent-red);">⚠️ Failed to load daily ops</span>';
         }
     }
 }
@@ -912,7 +995,8 @@ async function loadCachedDailyOps() {
     try {
         const { dailyOpsData, dailyOpsError } = await chrome.storage.local.get(['dailyOpsData', 'dailyOpsError']);
         if (dailyOpsError === 'token_expired') {
-            dailyTimerLine.innerHTML = '<span style="color:var(--accent-red);font-size:10px;">⚠️ Access token expired. Page refresh required.</span>';
+            dailyStatusLine.style.display = '';
+            dailyStatusLine.innerHTML = '<span style="color:var(--accent-red);">⚠️ Access token expired. Page refresh required.</span>';
         }
         if (dailyOpsData) await displayDailyOpsData(dailyOpsData);
     } catch (e) {}
@@ -994,7 +1078,7 @@ function renderMarketInto(container, data, labelPrefix, idPrefix) {
 
     // Next jobs reset timer
     if (md.nextJobsResetAt) {
-        html += `<div class="${idPrefix}-reset-timer" style="font-size:11px;color:var(--accent-orange);margin-bottom:8px;">⏳ Jobs Reset: ${formatTimeRemaining(md.nextJobsResetAt)} · Jobs: ${availableJobs}/${jobCount}</div>`;
+        html += `<div class="${idPrefix}-reset-timer" style="font-size:11px;color:var(--accent-orange);margin-bottom:8px;">⏳ Jobs Reset: ${formatTimeRemaining(md.nextJobsResetAt)}</div>`;
     } else if (jobCount > 0) {
         html += `<div style="font-size:11px;color:var(--accent-orange);margin-bottom:8px;">Jobs: ${availableJobs}/${jobCount}</div>`;
     }
@@ -1237,6 +1321,9 @@ async function refreshMarketData() {
     try {
         const tab = await getCor3Tab();
         if (!tab) throw new Error('No cor3.gg tab');
+        console.log("Market refresh step 1");
+        console.log(tab);
+        console.log(tab.id);
         await chrome.tabs.sendMessage(tab.id, { action: "refreshMarket" });
         setTimeout(() => { loadMarket(); refreshAllTimestamps(); }, 3000);
     } catch (e) {
@@ -1298,28 +1385,176 @@ refreshAllTimestamps();
 
 // --- Refresh All Button ---
 let isRefreshing = false;
+let refreshQueue = [];
+let isProcessingQueue = false;
+
+// Human-like delay helper
+function humanDelay(min = 400, max = 900) {
+    return new Promise(r => setTimeout(r, min + Math.floor(Math.random() * (max - min))));
+}
+
+// Wait for a storage key to appear (polling), with timeout
+function waitForStorageKey(key, timeoutMs = 8000) {
+    return new Promise((resolve) => {
+        let done = false;
+        const poll = setInterval(async () => {
+            const data = await chrome.storage.local.get(key);
+            if (data[key]) { clearInterval(poll); if (!done) { done = true; resolve(true); } }
+        }, 400);
+        setTimeout(() => { clearInterval(poll); if (!done) { done = true; resolve(false); } }, timeoutMs);
+    });
+}
+
+// Individual refresh helpers that return promises resolving when done
+async function refreshMarket1Only() {
+    marketContainer.innerHTML = '<div class="no-decisions">Refreshing Market-1...</div>';
+    await chrome.storage.local.remove('marketData');
+    try {
+        const tab = await getCor3Tab();
+        if (tab) await chrome.tabs.sendMessage(tab.id, { action: "refreshMarket" });
+    } catch (e) {}
+    await waitForStorageKey('marketData', 8000);
+    await loadMarket();
+    refreshAllTimestamps();
+}
+
+async function setDarkMarketEndpoint() {
+    // Set endpoint is part of requestDarkMarket, but we split: first just set the endpoint
+    // The content-early.js __cor3RequestDarkMarket sets endpoint then sends get.options after 1.5s
+    // We trigger the full dark market request and wait
+    darkMarketContainer.innerHTML = '<div class="no-decisions">Setting Market-2 endpoint...</div>';
+}
+
+async function refreshMarket2Only() {
+    darkMarketContainer.innerHTML = '<div class="no-decisions">Refreshing Market-2...</div>';
+    await chrome.storage.local.remove(['darkMarketData', 'darkMarketAvailable']);
+    try {
+        const tab = await getCor3Tab();
+        if (tab) await chrome.tabs.sendMessage(tab.id, { action: "refreshDarkMarket" });
+    } catch (e) {}
+    await waitForStorageKey('darkMarketData', 10000);
+    await loadDarkMarket();
+    refreshAllTimestamps();
+}
+
+async function refreshExpeditionsOnly() {
+    expeditionInfoContainer.innerHTML = '<div class="no-decisions">Loading expedition data...</div>';
+    await chrome.storage.local.remove(['expeditionsData', 'expeditionDecisions']);
+    try {
+        const tab = await getCor3Tab();
+        if (tab) await chrome.tabs.sendMessage(tab.id, { action: "requestExpeditions" });
+    } catch (e) {}
+    await waitForStorageKey('expeditionsData', 8000);
+    await loadExpeditions();
+    refreshAllTimestamps();
+    resetExpeditionUpdateTimer();
+}
+
+async function refreshInventoryOnly() {
+    inventoryContainer.innerHTML = '<div class="no-decisions">Requesting inventory...</div>';
+    spaceInfo.textContent = '-- / --';
+    try {
+        const tab = await getCor3Tab();
+        if (tab) await chrome.tabs.sendMessage(tab.id, { action: "requestStash" });
+    } catch (e) {}
+    await waitForStorageKey('stashData', 5000);
+    await loadInventory();
+    refreshAllTimestamps();
+}
+
+async function refreshArchivedOnly() {
+    archivedExpContainer.innerHTML = '<div class="no-decisions">Loading archived expeditions...</div>';
+    try {
+        const tab = await getCor3Tab();
+        if (tab) await chrome.tabs.sendMessage(tab.id, { action: "requestArchivedExpeditions" });
+    } catch (e) {}
+    await waitForStorageKey('archivedExpeditionsData', 5000);
+    await loadArchivedExpeditions();
+    refreshAllTimestamps();
+}
+
+async function refreshMercenariesOnly() {
+    mercenariesContainer.innerHTML = '<div class="no-decisions">Loading mercenaries...</div>';
+    try {
+        const tab = await getCor3Tab();
+        if (tab) await chrome.tabs.sendMessage(tab.id, { action: "requestMercenaries" });
+    } catch (e) {}
+    await waitForStorageKey('mercenariesData', 5000);
+    await loadMercenaries();
+    refreshAllTimestamps();
+}
+
 refreshAllBtn.addEventListener('click', async () => {
     if (isRefreshing) return;
     isRefreshing = true;
     refreshAllBtn.classList.add('spinning');
+
     try {
         // 1. Daily ops
-        await fetchDailyOps();
-        // 2. Markets (core then dark sequentially)
-        await requestMarketData();
-        // 3. Expeditions (after markets done)
-        await requestExpeditions();
-        // 4. Archived expeditions
-        requestArchivedExpeditions();
-        // 5. Inventory
-        requestAndLoadInventory();
-        // 6. Mercenaries
-        requestMercenaries();
-    } catch (e) {}
+        await executeRefreshStep('dailyOps', fetchDailyOps);
+        await humanDelay();
+
+        // 2. Market-1
+        await executeRefreshStep('market1', refreshMarket1Only);
+        await humanDelay();
+
+        // 3. Set endpoint for Market-2
+        await executeRefreshStep('setDarkEndpoint', setDarkMarketEndpoint);
+        await humanDelay();
+
+        // 4. Market-2
+        await executeRefreshStep('market2', refreshMarket2Only);
+        await humanDelay();
+
+        // 5. Expeditions
+        await executeRefreshStep('expeditions', refreshExpeditionsOnly);
+        await humanDelay();
+
+        // 6. Decisions (already updated with expedition data from step 5)
+        // Decisions are loaded as part of loadExpeditions, just ensure they are re-rendered
+        await executeRefreshStep('decisions', async () => {
+            const { expeditionDecisions } = await chrome.storage.local.get('expeditionDecisions');
+            renderDecisions(expeditionDecisions || []);
+        });
+        await humanDelay();
+
+        // 7. Inventory
+        await executeRefreshStep('inventory', refreshInventoryOnly);
+        await humanDelay();
+
+        // 8. Archived Expeditions
+        await executeRefreshStep('archived', refreshArchivedOnly);
+        await humanDelay();
+
+        // 9. Mercenary data
+        await executeRefreshStep('mercenaries', refreshMercenariesOnly);
+
+    } catch (e) {
+        console.error('[COR3 Helper] Refresh All error:', e);
+        cor3LogError('popup.js', e, { action: 'refreshAll' });
+    }
+
     refreshAllBtn.classList.remove('spinning');
     isRefreshing = false;
     refreshAllTimestamps();
 });
+
+async function executeRefreshStep(name, operation) {
+    try {
+        console.log(`[COR3 Helper] Refresh All: Starting ${name}`);
+        await operation();
+        console.log(`[COR3 Helper] Refresh All: Completed ${name}`);
+    } catch (error) {
+        console.error(`[COR3 Helper] Refresh All: Failed ${name}:`, error);
+    }
+}
+
+function resetExpeditionUpdateTimer() {
+    // Reset the 30-second expedition data pull timer
+    const now = Date.now();
+    chrome.storage.local.set({ expeditionsDataUpdatedAt: now });
+    console.log('[COR3 Helper] Expedition update timer reset');
+}
 
 // --- Pinned Timers ---
 const pinnedTimersSection = document.getElementById('pinnedTimersSection');
@@ -1624,6 +1859,8 @@ setInterval(() => {
 // Refresh "last updated" labels every 30s
 setInterval(() => refreshAllTimestamps(), 30000);
 
+// Expedition polling is now handled by background.js (works even when popup is closed)
+
 // --- Real-time auto-update: listen for storage changes from WS data arriving ---
 chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
@@ -1640,6 +1877,19 @@ chrome.storage.onChanged.addListener((changes, area) => {
     }
     if (changes.mercenariesData || changes.mercConfigData) {
         loadMercenaries();
+    }
+});
+
+// Listen for autoSendMerc changes from content script (e.g. stash full disabling auto-send)
+chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'sync') return;
+    if (changes.autoSendMerc && changes.autoSendMerc.newValue) {
+        const settings = changes.autoSendMerc.newValue;
+        updateMercStashWarning(settings);
+        // Sync toggle state if content script disabled auto-send
+        if (autoSendMercenaryToggle) {
+            autoSendMercenaryToggle.checked = !!settings.enabled;
+        }
     }
 });
 
@@ -1733,37 +1983,109 @@ async function displayVersionInfo() {
     if (!versionSection) return;
     const extVersion = chrome.runtime.getManifest().version;
     const { webVersion, systemVersion } = await chrome.storage.local.get(['webVersion', 'systemVersion']);
+
+    // Fallback: try to get versions from content script globals if storage fails
+    let finalWebVersion = webVersion;
+    let finalSystemVersion = systemVersion;
+
+    if (!webVersion || !systemVersion) {
+        try {
+            const tab = await getCor3Tab();
+            if (tab) {
+                const response = await chrome.tabs.sendMessage(tab.id, { action: "getVersionFallbacks" });
+                if (response) {
+                    if (!finalWebVersion && response.webVersion) {
+                        finalWebVersion = response.webVersion;
+                    }
+                    if (!finalSystemVersion && response.systemVersion) {
+                        finalSystemVersion = response.systemVersion;
+                    }
+                }
+            }
+        } catch (e) {
+            console.log('[COR3 Helper] Could not get version fallbacks:', e);
+        }
+    }
+
     let parts = [`Extension: v${extVersion}`];
-    if (webVersion) parts.push(`Web: ${webVersion}`);
-    if (systemVersion) parts.push(`System: ${systemVersion}`);
+    if (finalWebVersion) parts.push(`Web: ${finalWebVersion}`);
+    if (finalSystemVersion) parts.push(`System: ${finalSystemVersion}`);
     versionSection.innerHTML = parts.join(' · ');
     versionSection.style.display = 'block';
 }
 displayVersionInfo();
 
+// Helper function to compare version strings (e.g., "1.17.0" < "1.17.5")
+// Handles suffixes like "v1.17.23-spin" — a suffix (e.g. "-spin") means a higher
+// version than the same numeric part without a suffix.
+function compareVersions(v1, v2) {
+    if (!v1 || !v2) return 0;
+
+    // Strip leading "v" and split numeric part from suffix
+    const parse = (v) => {
+        const stripped = String(v).replace(/^v/, '');
+        const match = stripped.match(/^([\d.]+)(.*)$/);
+        if (!match) return { parts: [0], suffix: stripped };
+        return {
+            parts: match[1].split('.').map(n => parseInt(n) || 0),
+            suffix: match[2] || '' // e.g. "-spin", "" if none
+        };
+    };
+
+    const a = parse(v1);
+    const b = parse(v2);
+
+    const maxLength = Math.max(a.parts.length, b.parts.length);
+    for (let i = 0; i < maxLength; i++) {
+        const num1 = a.parts[i] || 0;
+        const num2 = b.parts[i] || 0;
+        if (num1 < num2) return -1;
+        if (num1 > num2) return 1;
+    }
+
+    // Numeric parts are equal — a suffix means higher than no suffix
+    const hasSuffix1 = a.suffix.length > 0;
+    const hasSuffix2 = b.suffix.length > 0;
+    if (!hasSuffix1 && hasSuffix2) return -1; // v1 < v2
+    if (hasSuffix1 && !hasSuffix2) return 1;  // v1 > v2
+    if (hasSuffix1 && hasSuffix2) return a.suffix.localeCompare(b.suffix);
+
+    return 0;
+}
+
 // Auto-check GitHub for web/system version differences on popup load
 async function autoCheckWebsiteUpdated() {
-    const notice = document.getElementById('websiteUpdatedNotice');
-    if (!notice) return;
+    const webVersionNotice = document.getElementById('webVersionNotice');
+    const webVersionData = document.getElementById('webVersionData');
+    const systemVersionNotice = document.getElementById('systemVersionNotice');
+    const systemVersionData = document.getElementById('systemVersionData');
+    if (!webVersionNotice || !webVersionData || !systemVersionNotice || !systemVersionData) return;
     try {
         const resp = await fetch('https://raw.githubusercontent.com/Femtoce11/cor3-helper/main/versions.json', { cache: 'no-store' });
         if (!resp.ok) return;
         const remote = await resp.json();
         const { webVersion, systemVersion } = await chrome.storage.local.get(['webVersion', 'systemVersion']);
 
-        let updated = false;
-        const localWeb = webVersion ? String(webVersion).replace(/^v/, '') : null;
-        const remoteWeb = remote.web ? String(remote.web).replace(/^v/, '') : null;
-        if (remoteWeb && localWeb && remoteWeb !== localWeb) updated = true;
-        const localSys = systemVersion ? String(systemVersion).trim() : null;
-        const remoteSys = remote.system ? String(remote.system).trim() : null;
-        if (remoteSys && localSys && remoteSys !== localSys) updated = true;
+        // Check web version - only warn if local is less than remote
+        if (webVersion && remote.web) {
+            const comparison = compareVersions(webVersion, remote.web);
+            if (comparison > 0) {
+                webVersionNotice.innerHTML = '⚠️ Website is recently updated';
+                webVersionNotice.style.display = 'block';
+                webVersionData.innerHTML = "Old version -> " + remote.web;
+                webVersionData.style.display = 'block';
+            }
+        }
 
-        if (updated) {
-            notice.textContent = '⚠️ Website is recently updated';
-            notice.style.display = 'block';
-        } else {
-            notice.style.display = 'none';
+        // Check system version - only warn if local is less than remote
+        if (systemVersion && remote.system) {
+            const comparison = compareVersions(systemVersion, remote.system);
+            if (comparison < 0) {
+                systemVersionNotice.innerHTML = '⚠️ You are lagging behind in progress!';
+                systemVersionNotice.style.display = 'block';
+                webVersionData.innerHTML = "Aim for " + remote.system + " system version!";
+                webVersionData.style.display = 'block';
+            }
         }
     } catch (e) { /* silent */ }
 }
@@ -1829,7 +2151,8 @@ function renderArchivedExpeditions(data) {
         const outcome = (exp.outcome || exp.status || 'COMPLETED').toUpperCase();
         let outcomeClass = 'outcome-full';
         if (outcome.includes('PARTIAL')) outcomeClass = 'outcome-partial';
-        else if (outcome.includes('FAIL') || outcome.includes('LOSS')) outcomeClass = 'outcome-fail';
+        else if (outcome.includes('FAIL')) outcomeClass = 'outcome-fail';
+        else if (outcome.includes('DEATH')) outcomeClass = 'outcome-death';
 
         let html = `<div class="archived-exp-header">`;
         html += `<span class="archived-exp-merc">🧑 ${mercName}</span>`;
@@ -1891,9 +2214,19 @@ const autoSendMercenaryToggle = document.getElementById('autoSendMercenaryToggle
 const autoChooseMercToggle = document.getElementById('autoChooseMercToggle');
 const mercenaryConfigRow = document.getElementById('mercenaryConfigRow');
 const selectedMercenaryName = document.getElementById('selectedMercenaryName');
+const mercStashWarning = document.getElementById('mercStashWarning');
 
 let selectedMercenaryId = null;
 let mercRestTimers = {};
+
+function updateMercStashWarning(settings) {
+    if (!mercStashWarning) return;
+    if (settings && settings.disabledReason === 'stash_full' && !settings.enabled) {
+        mercStashWarning.style.display = '';
+    } else {
+        mercStashWarning.style.display = 'none';
+    }
+}
 
 mercenariesSectionToggle.addEventListener('click', () => {
     mercenariesSectionToggle.classList.toggle('open');
@@ -1915,6 +2248,7 @@ if (refreshMercenariesBtn) {
 
 // Load/save auto-send settings
 chrome.storage.sync.get('autoSendMerc', (data) => {
+    console.log("data.autoSendMerc -> " + data.autoSendMerc);
     if (data.autoSendMerc) {
         autoSendMercenaryToggle.checked = !!data.autoSendMerc.enabled;
         if (autoChooseMercToggle) autoChooseMercToggle.checked = !!data.autoSendMerc.autoChooseMerc;
@@ -1923,21 +2257,36 @@ chrome.storage.sync.get('autoSendMerc', (data) => {
             mercenaryConfigRow.style.display = '';
             if (selectedMercenaryName) selectedMercenaryName.textContent = data.autoSendMerc.mercenaryName || selectedMercenaryId;
         }
+        updateMercStashWarning(data.autoSendMerc);
     }
 });
 
 function saveAutoSendMercSettings() {
-    chrome.storage.sync.set({
-        autoSendMerc: {
-            enabled: autoSendMercenaryToggle.checked,
-            autoChooseMerc: autoChooseMercToggle ? autoChooseMercToggle.checked : false,
-            mercenaryId: selectedMercenaryId,
-            mercenaryName: selectedMercenaryName ? selectedMercenaryName.textContent : ''
-        }
+    console.log("autoChooseMercToggle -> " + autoChooseMercToggle);
+    // Read existing settings first to preserve disabledReason
+    chrome.storage.sync.get('autoSendMerc', (data) => {
+        const existing = data.autoSendMerc || {};
+        const isEnabling = autoSendMercenaryToggle.checked;
+        chrome.storage.sync.set({
+            autoSendMerc: {
+                enabled: isEnabling,
+                autoChooseMerc: autoChooseMercToggle ? autoChooseMercToggle.checked : false,
+                mercenaryId: selectedMercenaryId,
+                mercenaryName: selectedMercenaryName ? selectedMercenaryName.textContent : '',
+                // Clear disabledReason only when user re-enables; otherwise preserve it
+                disabledReason: isEnabling ? null : (existing.disabledReason || null)
+            }
+        });
     });
 }
 
-autoSendMercenaryToggle.addEventListener('change', () => saveAutoSendMercSettings());
+autoSendMercenaryToggle.addEventListener('change', () => {
+    saveAutoSendMercSettings();
+    // If user re-enables, clear stash warning
+    if (autoSendMercenaryToggle.checked) {
+        updateMercStashWarning(null); // hide warning
+    }
+});
 
 if (autoChooseMercToggle) {
     autoChooseMercToggle.addEventListener('change', () => {
@@ -2067,8 +2416,16 @@ function renderMercenaries(data) {
     }
 }
 
-// Auto-load mercenaries from cache on popup open
-loadMercenaries();
+// Auto-load mercenaries from cache on popup open; if empty, fetch fresh
+(async () => {
+    const { mercenariesData } = await chrome.storage.local.get('mercenariesData');
+    if (mercenariesData) {
+        loadMercenaries();
+    } else {
+        // No cached data — request fresh mercenary data
+        requestMercenaries();
+    }
+})();
 
 // Update mercenary rest timers every second
 setInterval(() => {
@@ -2100,41 +2457,202 @@ checkUpdateBtn.addEventListener('click', async () => {
         const localManifest = chrome.runtime.getManifest();
         const localExtVersion = localManifest.version;
 
-        // Fetch remote versions.json for all version comparisons
-        const resp = await fetch('https://raw.githubusercontent.com/Femtoce11/cor3-helper/main/versions.json', { cache: 'no-store' });
-        if (!resp.ok) throw new Error('Failed to fetch remote versions');
-        const remote = await resp.json();
+        // Fetch remote versions.json for web/system version comparisons
+        const versionsResp = await fetch('https://raw.githubusercontent.com/Femtoce11/cor3-helper/main/versions.json', { cache: 'no-store' });
+        if (!versionsResp.ok) throw new Error('Failed to fetch remote versions');
+        const remote = await versionsResp.json();
+
+        // Fetch remote manifest.json for extension version comparison
+        let remoteExtVersion = null;
+        try {
+            const manifestResp = await fetch('https://raw.githubusercontent.com/Femtoce11/cor3-helper/main/manifest.json', { cache: 'no-store' });
+            if (manifestResp.ok) {
+                const remoteManifest = await manifestResp.json();
+                remoteExtVersion = remoteManifest.version || null;
+            }
+        } catch (e) { /* silent — extension update check will be skipped */ }
 
         const { webVersion, systemVersion } = await chrome.storage.local.get(['webVersion', 'systemVersion']);
 
         let messages = [];
-        // Compare extension version
-        if (remote.extension && remote.extension !== localExtVersion) {
-            messages.push(`Extension: <b>v${localExtVersion}</b> → <b>v${remote.extension}</b>`);
-        }
-        // Compare web version
-        const localWeb = webVersion ? String(webVersion).replace(/^v/, '') : null;
-        const remoteWeb = remote.web ? String(remote.web).replace(/^v/, '') : null;
-        if (remoteWeb && localWeb && remoteWeb !== localWeb) {
-            messages.push(`Web: <b>${webVersion}</b> → <b>v${remoteWeb}</b>`);
-        }
-        // Compare system version
-        const localSys = systemVersion ? String(systemVersion).trim() : null;
-        const remoteSys = remote.system ? String(remote.system).trim() : null;
-        if (remoteSys && localSys && remoteSys !== localSys) {
-            messages.push(`System: <b>${localSys}</b> → <b>${remoteSys}</b>`);
+        let extBehind = false;
+
+        // Compare extension version — only report if local is behind remote
+        if (remoteExtVersion && compareVersions(localExtVersion, remoteExtVersion) < 0) {
+            messages.push(`Extension: <b>v${localExtVersion}</b> → <b>v${remoteExtVersion}</b>`);
+            extBehind = true;
         }
 
         if (messages.length > 0) {
-            updateResult.innerHTML = `Updates detected:<br>${messages.join('<br>')}<br><a href="https://github.com/Femtoce11/cor3-helper" target="_blank" style="color:var(--accent-cyan);">Download from GitHub</a><br><span style="font-size:9px;color:var(--text-muted);">Download ZIP, extract, and reload on chrome://extensions</span>`;
+            let html = `Updates detected:<br>${messages.join('<br>')}`;
+            // Only show install instructions if extension is behind
+            if (extBehind) {
+                html += `<br><a href="https://github.com/Femtoce11/cor3-helper" target="_blank" style="color:var(--accent-cyan);">Download from GitHub</a><br><span style="font-size:9px;color:var(--text-muted);">Download ZIP, extract, and reload on chrome://extensions</span>`;
+            }
+            updateResult.innerHTML = html;
             updateResult.style.color = 'var(--accent-orange)';
         } else {
-            updateResult.textContent = `You're up to date! (ext v${localExtVersion}${localWeb ? ', web v' + localWeb : ''}${localSys ? ', sys ' + localSys : ''})`;
+            const localWeb = webVersion || null;
+            const localSys = systemVersion || null;
+            updateResult.textContent = `You're up to date!`;
             updateResult.style.color = 'var(--accent-green)';
         }
     } catch (e) {
         console.error('[COR3 Helper] Check for updates error:', e);
+        cor3LogError('popup.js', e, { action: 'checkForUpdates' });
         updateResult.textContent = 'Could not check for updates. Check your connection.';
         updateResult.style.color = 'var(--accent-red)';
     }
 });
+
+// --- System Message Notifications Toggle ---
+const disableSystemMessagesToggle = document.getElementById('disableSystemMessagesToggle');
+const systemMessageStatus = document.getElementById('systemMessageStatus');
+
+// --- Background Elements Toggle ---
+const disableBackgroundToggle = document.getElementById('disableBackgroundToggle');
+const backgroundStatus = document.getElementById('backgroundStatus');
+
+// --- Network Fog Toggle ---
+const disableNetworkFogToggle = document.getElementById('disableNetworkFogToggle');
+const networkFogStatus = document.getElementById('networkFogStatus');
+
+function updateNetworkFogStatus() {
+    if (!disableNetworkFogToggle || !networkFogStatus) return;
+    const isEnabled = disableNetworkFogToggle.checked;
+    networkFogStatus.textContent = isEnabled ? 'On' : 'Off';
+}
+
+// Load saved settings
+chrome.storage.sync.get(['disableSystemMessages', 'disableBackground', 'disableNetworkFog'], (result) => {
+    if (disableSystemMessagesToggle) {
+        disableSystemMessagesToggle.checked = result.disableSystemMessages || false;
+        updateSystemMessageStatus();
+    }
+    if (disableBackgroundToggle) {
+        disableBackgroundToggle.checked = result.disableBackground || false;
+        updateBackgroundStatus();
+    }
+    if (disableNetworkFogToggle) {
+        disableNetworkFogToggle.checked = result.disableNetworkFog || false;
+        updateNetworkFogStatus();
+    }
+});
+
+// Handle system message toggle changes
+if (disableSystemMessagesToggle) {
+    disableSystemMessagesToggle.addEventListener('change', async () => {
+        const isEnabled = disableSystemMessagesToggle.checked;
+
+        // Save setting
+        chrome.storage.sync.set({ disableSystemMessages: isEnabled });
+
+        // Update status
+        updateSystemMessageStatus();
+
+        // Apply change immediately
+        if (isEnabled) {
+            // Disable system messages
+            try {
+                const tab = await getCor3Tab();
+                if (tab) {
+                    await chrome.tabs.sendMessage(tab.id, { action: "disableSystemMessages" });
+                    console.log('[COR3 Helper] System messages disabled');
+                }
+            } catch (e) {
+                console.error('[COR3 Helper] Failed to disable system messages:', e);
+                cor3LogError('popup.js', e, { action: 'disableSystemMessages' });
+            }
+        } else {
+            // Re-enable system messages - may require page restart
+            systemMessageStatus.textContent = 'System messages re-enabled. Page restart may be required.';
+            systemMessageStatus.style.color = 'var(--accent-orange)';
+
+            try {
+                const tab = await getCor3Tab();
+                if (tab) {
+                    await chrome.tabs.sendMessage(tab.id, { action: "enableSystemMessages" });
+                    console.log('[COR3 Helper] System messages re-enabled');
+                }
+            } catch (e) {
+                console.error('[COR3 Helper] Failed to re-enable system messages:', e);
+                cor3LogError('popup.js', e, { action: 'enableSystemMessages' });
+                systemMessageStatus.textContent = 'System messages re-enabled. Page restart required to apply changes.';
+                systemMessageStatus.style.color = 'var(--accent-orange)';
+            }
+        }
+    });
+}
+
+// Handle background toggle changes
+if (disableBackgroundToggle) {
+    disableBackgroundToggle.addEventListener('change', async () => {
+        const isEnabled = disableBackgroundToggle.checked;
+
+        // Save setting
+        chrome.storage.sync.set({ disableBackground: isEnabled });
+
+        // Update status
+        updateBackgroundStatus();
+
+        // Apply change immediately
+        try {
+            const tab = await getCor3Tab();
+            if (tab) {
+                if (isEnabled) {
+                    // Delete background elements immediately when enabled
+                    await chrome.tabs.sendMessage(tab.id, { action: "disableBackground" });
+                    console.log('[COR3 Helper] Background elements deleted immediately');
+                } else {
+                    // Just clear the setting for disable - elements will be restored on reload
+                    await chrome.tabs.sendMessage(tab.id, { action: "enableBackground" });
+                    console.log('[COR3 Helper] Background elements will be restored on reload');
+                }
+            }
+        } catch (e) {
+            console.error('[COR3 Helper] Failed to toggle background elements:', e);
+            cor3LogError('popup.js', e, { action: 'toggleBackground' });
+        }
+    });
+}
+
+function updateSystemMessageStatus() {
+    if (!disableSystemMessagesToggle || !systemMessageStatus) return;
+
+    const isEnabled = disableSystemMessagesToggle.checked;
+    systemMessageStatus.textContent = isEnabled ? 'On' : 'Off';
+}
+
+function updateBackgroundStatus() {
+    if (!disableBackgroundToggle || !backgroundStatus) return;
+
+    const isEnabled = disableBackgroundToggle.checked;
+    backgroundStatus.textContent = isEnabled ? 'On' : 'Off';
+}
+
+// Handle network fog toggle changes
+if (disableNetworkFogToggle) {
+    disableNetworkFogToggle.addEventListener('change', async () => {
+        const isEnabled = disableNetworkFogToggle.checked;
+        chrome.storage.sync.set({ disableNetworkFog: isEnabled });
+        updateNetworkFogStatus();
+        try {
+            const tab = await getCor3Tab();
+            if (tab) {
+                if (isEnabled) {
+                    await chrome.tabs.sendMessage(tab.id, { action: "disableNetworkFog" });
+                } else {
+                    await chrome.tabs.sendMessage(tab.id, { action: "enableNetworkFog" });
+                }
+            }
+        } catch (e) {
+            console.error('[COR3 Helper] Failed to toggle network fog:', e);
+            cor3LogError('popup.js', e, { action: 'toggleNetworkFog' });
+        }
+    });
+}
+
+// Initialize status on load
+updateSystemMessageStatus();
+updateBackgroundStatus();
+updateNetworkFogStatus();
