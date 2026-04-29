@@ -81,6 +81,7 @@ var webVersion = null;
                     }
                     console.log('[COR3 Helper] Captured web version from translation.json:', webVersion);
                     window.__cor3WebVersion = webVersion;
+                    window.postMessage({ type: 'COR3_WEB_VERSION', version: webVersion }, '*');
                 } catch (e) {
                     console.log('[COR3 Helper] Error parsing version:', e);
                 }
@@ -902,6 +903,20 @@ var webVersion = null;
             window.__cor3KeepAlive();
         }
     });
+
+    // Re-post version data after content.js is loaded (document_idle).
+    // The initial postMessage calls may fire before content.js listener is ready.
+    function repostVersions() {
+        if (window.__cor3WebVersion) {
+            window.postMessage({ type: 'COR3_WEB_VERSION', version: window.__cor3WebVersion }, '*');
+        }
+        if (window.__cor3SystemVersion) {
+            window.postMessage({ type: 'COR3_SYSTEM_VERSION', version: window.__cor3SystemVersion }, '*');
+        }
+    }
+    // Delay enough for content.js (document_idle) to be listening
+    setTimeout(repostVersions, 3000);
+    setTimeout(repostVersions, 8000);
 
     console.log('[COR3 Helper] WebSocket interceptor installed');
 })();
