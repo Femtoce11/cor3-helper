@@ -473,6 +473,37 @@
             gap: 10px;
             align-items: flex-start;
         }
+        .item-action-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-top: 4px;
+            width: stretch;
+        }
+        .item-action-row .sell-btn {
+            font-size: 10px !important;
+            padding: 2px 6px !important;
+            background: var(--btn-small-bg);
+            border: none;
+            color: var(--accent-orange);
+            border-radius: 4px;
+            cursor: pointer;
+            line-height: 1;
+        }
+        .item-action-row .sell-btn:hover {
+            background: var(--btn-small-hover);
+        }
+        .item-action-row .sell-btn:disabled {
+            opacity: 0.4;
+            cursor: default;
+        }
+        .item-action-row .sell-btn.sell-confirm {
+            background: rgba(40, 167, 69, 0.8);
+            color: #fff;
+        }
+        .item-action-row .sell-btn.sell-confirm:hover {
+            background: rgba(40, 167, 69, 1);
+        }
         .item-card img {
             width: 48px;
             height: 48px;
@@ -529,6 +560,7 @@
             font-size: 11px;
             color: var(--accent-green);
             margin-top: 2px;
+            width: stretch;
         }
 
         /* Inline button row for Back + Refresh */

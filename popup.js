@@ -861,7 +861,10 @@ function renderInventory(data) {
         if (item.canUse) badgesHtml += '<span class="badge badge-use">USE</span>';
 
         const priceHtml = item.canSell && item.sellPrice
-            ? `<div class="item-price">💰 ${item.sellPrice.toLocaleString()}</div>`
+            ? `<div class="item-action-row">
+                    <div class="item-price">💰 ${item.sellPrice.toLocaleString()}</div>
+                    <button class="sell-btn" data-item-id="${item.id}" data-item-name="${item.name}" title="Sell 1x ${item.name}">💰 Sell</button>
+               </div>`
             : '';
 
         const imgSrc = item.imageUrl || '';
@@ -879,6 +882,45 @@ function renderInventory(data) {
         `;
         inventoryContainer.appendChild(card);
     }
+
+    // Wire up sell buttons with two-click confirm pattern
+    inventoryContainer.querySelectorAll('.sell-btn').forEach(btn => {
+        let confirmTimeout = null;
+        btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const itemId = btn.dataset.itemId;
+
+            // First click: switch to confirm state
+            if (!btn.classList.contains('sell-confirm')) {
+                btn.classList.add('sell-confirm');
+                btn.textContent = '✓ Confirm';
+                // Auto-reset after 3 seconds if user doesn't confirm
+                confirmTimeout = setTimeout(() => {
+                    btn.classList.remove('sell-confirm');
+                    btn.textContent = '💰 Sell';
+                }, 3000);
+                return;
+            }
+
+            // Second click: execute sell
+            if (confirmTimeout) clearTimeout(confirmTimeout);
+            btn.classList.remove('sell-confirm');
+            btn.disabled = true;
+            btn.textContent = '⏳';
+            try {
+                const tab = await getCor3Tab();
+                if (tab) {
+                    await chrome.tabs.sendMessage(tab.id, {
+                        action: 'sellItem',
+                        itemId: itemId,
+                        quantity: 1
+                    });
+                }
+            } catch (err) {
+                console.error('[COR3 Helper] Sell item error:', err);
+            }
+        });
+    });
 }
 
 // --- Daily Ops Timer ---
@@ -927,7 +969,7 @@ async function displayDailyOpsData(data) {
     dailyNextTaskTime = data.nextTaskTime ? new Date(data.nextTaskTime).getTime() : null;
     dailyClaimed.textContent = data.hasClaimedToday ? 'Yes' : 'No';
     dailyStreak.textContent = data.currentStreak ?? '--';
-    dailyDifficulty.textContent = data.difficulty ?? '--';
+    dailyDifficulty.textContent = data.difficulty ? ((data.difficulty).charAt(0).toUpperCase() + (data.difficulty).slice(1)) : '--';
     // Use rewards API for streak bonus if available
     const { dailyRewardsData } = await chrome.storage.local.get('dailyRewardsData');
     const bonus = calcStreakBonus(data.currentStreak, dailyRewardsData);
@@ -2236,6 +2278,16 @@ let mercRestTimers = {};
 function updateMercStashWarning(settings) {
     if (!mercStashWarning) return;
     if (settings && settings.disabledReason === 'stash_full' && !settings.enabled) {
+        mercStashWarning.textContent = '⚠️ Stash is full — auto-send mercenary disabled. Clear stash and re-enable auto-send to resume.';
+        mercStashWarning.style.borderColor = 'var(--accent-orange)';
+        mercStashWarning.style.color = 'var(--accent-orange)';
+        mercStashWarning.style.background = 'rgba(255,160,0,0.15)';
+        mercStashWarning.style.display = '';
+    } else if (settings && settings.disabledReason === 'insufficient_credits' && !settings.enabled) {
+        mercStashWarning.textContent = '⚠️ Insufficient credits — auto-send mercenary disabled. Earn more credits and re-enable auto-send to resume.';
+        mercStashWarning.style.borderColor = 'var(--accent-red, #ff4444)';
+        mercStashWarning.style.color = 'var(--accent-red, #ff4444)';
+        mercStashWarning.style.background = 'rgba(255,68,68,0.15)';
         mercStashWarning.style.display = '';
     } else {
         mercStashWarning.style.display = 'none';

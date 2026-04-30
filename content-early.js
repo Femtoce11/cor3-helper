@@ -372,6 +372,16 @@ var webVersion = null;
                 return;
             }
 
+            // Check for insufficient credits error
+            if (payload.error && payload.error.message === 'insufficient-credits') {
+                console.log('[COR3 Helper] Expedition launch failed: insufficient credits');
+                window.postMessage({
+                    type: 'COR3_WS_INSUFFICIENT_CREDITS',
+                    error: payload.error.message
+                }, '*');
+                return;
+            }
+
             // Successful launch
             window.postMessage({
                 type: 'COR3_WS_EXPEDITION_LAUNCHED',
@@ -735,6 +745,19 @@ var webVersion = null;
         return true;
     };
 
+    // Sell an item from stash
+    window.__cor3SellItem = function (itemId, quantity) {
+        quantity = quantity || 1;
+        console.log('[COR3 Helper] Selling item:', itemId, 'qty:', quantity);
+        var msg = '42["event",{"event":{"name":"stash","action":"sell.item"},"data":{"itemId":"' + itemId + '","quantity":' + quantity + '}}]';
+        wsSend(msg);
+        // Refresh stash after a short delay to get updated inventory
+        setTimeout(function () {
+            window.__cor3RequestStash();
+        }, 1500);
+        return true;
+    };
+
     // HOME Market: just send get.options (no room joins needed)
     window.__cor3RequestMarket = function () {
         console.log('[COR3 Helper] Requesting HOME market options');
@@ -855,6 +878,9 @@ var webVersion = null;
         }
         if (event.data && event.data.type === 'COR3_LEAVE_STASH') {
             leaveRoom('stash');
+        }
+        if (event.data && event.data.type === 'COR3_SELL_ITEM') {
+            window.__cor3SellItem(event.data.itemId, event.data.quantity || 1);
         }
         // Decision response from popup
         if (event.data && event.data.type === 'COR3_RESPOND_DECISION') {

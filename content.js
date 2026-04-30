@@ -185,6 +185,24 @@ window.addEventListener('message', (event) => {
         autoSendInProgress = false;
         autoSendExpeditionId = null;
     }
+    // Handle insufficient credits error from expedition launch
+    if (event.data && event.data.type === 'COR3_WS_INSUFFICIENT_CREDITS') {
+        console.log('[COR3 Helper] Insufficient credits for expedition launch, disabling auto-send mercenary');
+        // Disable auto-send temporarily due to insufficient credits
+        chrome.storage.sync.get('autoSendMerc', (settings) => {
+            if (settings.autoSendMerc) {
+                chrome.storage.sync.set({
+                    autoSendMerc: {
+                        ...settings.autoSendMerc,
+                        enabled: false,
+                        disabledReason: 'insufficient_credits'
+                    }
+                });
+            }
+        });
+        autoSendInProgress = false;
+        autoSendExpeditionId = null;
+    }
     // Auto-send: collected all — proceed to get mercenaries and launch
     if (event.data && event.data.type === 'COR3_WS_COLLECTED_ALL') {
         if (autoSendInProgress && autoSendExpeditionId) {
@@ -713,6 +731,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         sendResponse({ success: true });
     } else if (request.action === "leaveStash") {
         window.postMessage({ type: 'COR3_LEAVE_STASH' }, '*');
+        sendResponse({ success: true });
+    } else if (request.action === "sellItem") {
+        window.postMessage({ type: 'COR3_SELL_ITEM', itemId: request.itemId, quantity: request.quantity || 1 }, '*');
         sendResponse({ success: true });
     } else if (request.action === "keepWorkerAlive") {
         window.postMessage({ type: 'COR3_KEEP_ALIVE' }, '*');
