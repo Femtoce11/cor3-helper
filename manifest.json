@@ -47,12 +47,12 @@
     }
   ],
   "icons": {
-    "16": "favicon16.png",
-    "48": "favicon48.png",
-    "150": "favicon128.png"
+    "16": "icon/favicon16.png",
+    "48": "icon/favicon48.png",
+    "128": "icon/favicon128.png"
   },
   "action": {
-    "default_icon": "favicon128.png",
+    "default_icon": "icon/favicon128.png",
     "default_popup": "popup.html",
     "default_title": "COR3 Helper"
   },
