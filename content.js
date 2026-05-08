@@ -81,6 +81,9 @@ window.addEventListener('message', (event) => {
     if (event.data && event.data.type === 'COR3_SYSTEM_VERSION') {
         chrome.storage.local.set({ systemVersion: event.data.version });
     }
+    if (event.data && event.data.type === 'COR3_PATCH_VERSION') {
+        chrome.storage.local.set({ patchVersion: event.data.version });
+    }
     // Store daily rewards data for streak bonus calculation
     if (event.data && event.data.type === 'COR3_DAILY_REWARDS') {
         chrome.storage.local.set({ dailyRewardsData: event.data.rewards });
@@ -198,6 +201,39 @@ window.addEventListener('message', (event) => {
                         disabledReason: 'insufficient_credits'
                     }
                 });
+            }
+        });
+        chrome.storage.local.set({
+            expeditionLaunchError: {
+                error: 'Insufficient credits to launch expedition',
+                retryAfter: 0,
+                timestamp: Date.now(),
+                noRetry: true
+            }
+        });
+        autoSendInProgress = false;
+        autoSendExpeditionId = null;
+    }
+    // Handle insufficient credits error during reward container opening (collect.all)
+    if (event.data && event.data.type === 'COR3_WS_COLLECT_INSUFFICIENT_CREDITS') {
+        console.log('[COR3 Helper] Insufficient credits for collect.all, disabling auto-send mercenary');
+        chrome.storage.sync.get('autoSendMerc', (settings) => {
+            if (settings.autoSendMerc) {
+                chrome.storage.sync.set({
+                    autoSendMerc: {
+                        ...settings.autoSendMerc,
+                        enabled: false,
+                        disabledReason: 'insufficient_credits'
+                    }
+                });
+            }
+        });
+        chrome.storage.local.set({
+            expeditionLaunchError: {
+                error: 'Insufficient credits to open reward container. Auto-send disabled.',
+                retryAfter: 0,
+                timestamp: Date.now(),
+                noRetry: true
             }
         });
         autoSendInProgress = false;
@@ -350,6 +386,10 @@ window.addEventListener('message', (event) => {
             dailyHackLog: event.data.message,
             dailyHackLogUpdatedAt: Date.now()
         });
+    }
+    // Auto-disable daily hack toggle after completion or failure
+    if (event.data && event.data.type === 'COR3_DAILY_HACK_DISABLE_TOGGLE') {
+        chrome.storage.sync.set({ autoDailyHackEnabled: false });
     }
     // Auto-fetch daily ops on page load (triggered from content-early.js)
     if (event.data && event.data.type === 'COR3_FETCH_DAILY_OPS') {
@@ -853,12 +893,37 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         showNetworkFogVideos();
         console.log('[COR3 Helper] Network fog re-enabled');
         sendResponse({ success: true });
+    } else if (request.action === "moveNotificationsLeft") {
+        chrome.storage.sync.set({ moveNotificationsLeft: true });
+        applyNotificationsLeft();
+        console.log('[COR3 Helper] Notifications moved to left');
+        sendResponse({ success: true });
+    } else if (request.action === "moveNotificationsRight") {
+        chrome.storage.sync.set({ moveNotificationsLeft: false });
+        removeNotificationsLeft();
+        console.log('[COR3 Helper] Notifications moved back to right');
+        sendResponse({ success: true });
     } else if (request.action === "getVersionFallbacks") {
         // Return version fallbacks from global variables
         sendResponse({
             webVersion: window.__cor3WebVersion,
-            systemVersion: window.__cor3SystemVersion
+            systemVersion: window.__cor3SystemVersion,
+            patchVersion: window.__cor3PatchVersion
         });
+    } else if (request.action === "startAutoJobs") {
+        // Start auto job solver — inject engine script and pass job queue
+        injectAutoJobSolver();
+        setTimeout(() => {
+            window.postMessage({ type: 'COR3_AUTOJOB_START', jobs: request.jobs }, '*');
+        }, 500);
+        sendResponse({ success: true });
+    } else if (request.action === "stopAutoJobs") {
+        window.postMessage({ type: 'COR3_AUTOJOB_STOP' }, '*');
+        sendResponse({ success: true });
+    } else if (request.action === "autoClearIpsCmd") {
+        // Relay auto-clear-ips WS commands to MAIN world
+        window.postMessage({ type: 'COR3_AUTOJOB_CMD', cmd: request.cmd, data: request.data || {} }, '*');
+        sendResponse({ success: true });
     }
 });
 
@@ -1061,5 +1126,166 @@ chrome.storage.sync.get('disableNetworkFog', (result) => {
             hideNetworkFogVideos();
             startNetworkFogObserver();
         }, 1000);
+    }
+});
+
+// --- Move Notifications to Left ---
+const COR3_NOTIF_LEFT_STYLE_ID = 'cor3-notifications-left-style';
+
+function applyNotificationsLeft() {
+    if (document.getElementById(COR3_NOTIF_LEFT_STYLE_ID)) return;
+    const style = document.createElement('style');
+    style.id = COR3_NOTIF_LEFT_STYLE_ID;
+    style.textContent = `
+        .Toastify__toast-container--bottom-right {
+            left: 16px !important;
+            right: auto !important;
+            margin-bottom: 35px;
+        }
+        [data-component-name="NotificationsHistory"] {
+            left: 0 !important;
+            right: auto !important;
+            align-items: flex-start;
+        }
+        [data-component-name="NotificationsHistory"] > button:first-of-type {
+            transform: scaleX(-1);
+            display: flex;
+        }
+        [data-component-name="NotificationsHistory"] .sticker-content {
+            color: transparent;               /* hide original text */
+            position: relative;
+        }
+        [data-component-name="NotificationsHistory"] .sticker-content::before {
+            content: "Notifications";         /* duplicate the word */
+            position: absolute;
+            left: 0;
+            transform: scaleX(-1);
+            color: #FFFFFF;   /* re‑apply the original colour */
+            white-space: pre;                 /* keep spacing */
+        }
+        [data-component-name="NotificationsHistory"] .go3673730358,
+        [data-component-name="NotificationsHistory"] > div:last-child {
+            border-top-left-radius: 0px;
+            border-top-right-radius: 16px;
+        }
+    `;
+    (document.head || document.documentElement).appendChild(style);
+}
+
+function removeNotificationsLeft() {
+    const el = document.getElementById(COR3_NOTIF_LEFT_STYLE_ID);
+    if (el) el.remove();
+}
+
+// Apply notifications left on page load if setting is enabled
+chrome.storage.sync.get('moveNotificationsLeft', (result) => {
+    if (result.moveNotificationsLeft) {
+        setTimeout(() => {
+            applyNotificationsLeft();
+        }, 1000);
+    }
+});
+
+// --- Auto Job Solver Engine Injection ---
+let autoJobSolverInjected = false;
+
+function injectAutoJobSolver() {
+    if (autoJobSolverInjected) return;
+    autoJobSolverInjected = true;
+    const script = document.createElement('script');
+    script.src = chrome.runtime.getURL('auto-job-solver.js');
+    script.onload = () => script.remove();
+    (document.head || document.documentElement).appendChild(script);
+    console.log('[COR3 Helper] Auto Job Solver engine injected');
+}
+
+// Listen for auto-job log/tracker updates from the engine (MAIN world -> content script -> storage)
+window.addEventListener('message', (event) => {
+    if (event.source !== window) return;
+    if (!isContextValid()) return;
+
+    if (event.data && event.data.type === 'COR3_AUTOJOB_ENABLE_DECRYPT_SOLVER') {
+        // Auto-enable the decrypt solver when auto-job needs it
+        chrome.storage.sync.get('autoDecryptEnabled', (result) => {
+            if (!result.autoDecryptEnabled) {
+                chrome.storage.sync.set({ autoDecryptEnabled: true });
+                console.log('[COR3 Helper] Auto Job: Enabling decrypt solver for minigame');
+            }
+            injectDecryptSolver();
+        });
+    }
+    if (event.data && event.data.type === 'COR3_AUTOJOB_LOG') {
+        // Append directly to persisted debug logs array (works even when popup is closed)
+        const logMsg = event.data.msg;
+        const logLevel = event.data.level || 'info';
+        const now = new Date();
+        const timeStr = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        chrome.storage.local.get('autoJobsDebugLogs', (result) => {
+            if (!isContextValid()) return;
+            const logs = Array.isArray(result.autoJobsDebugLogs) ? result.autoJobsDebugLogs : [];
+            logs.push({ time: timeStr, msg: logMsg, level: logLevel });
+            if (logs.length > 200) logs.splice(0, logs.length - 200);
+            chrome.storage.local.set({ autoJobsDebugLogs: logs });
+        });
+    }
+    if (event.data && event.data.type === 'COR3_WS_NETWORK_MAP') {
+        chrome.storage.local.set({ serverMaintenanceMap: event.data.servers });
+    }
+    if (event.data && event.data.type === 'COR3_AUTOJOB_TRACKER_UPDATE') {
+        chrome.storage.local.set({ autoJobsTracker: event.data.tracker });
+    }
+    if (event.data && event.data.type === 'COR3_AUTOJOB_DONE') {
+        chrome.storage.local.set({ autoJobsRunning: false });
+    }
+    if (event.data && event.data.type === 'COR3_AUTOJOB_SAVE_COMPLETED') {
+        // Merge completed job results into storage (accumulate across runs within same reset cycle)
+        chrome.storage.local.get('autoJobsCompletedResults', (result) => {
+            const existing = result.autoJobsCompletedResults || [];
+            const incoming = event.data.jobs || [];
+            // Merge: replace existing entries by jobId, append new ones
+            const merged = [...existing];
+            for (const job of incoming) {
+                const idx = merged.findIndex(j => j.jobId === job.jobId);
+                if (idx >= 0) merged[idx] = job;
+                else merged.push(job);
+            }
+            chrome.storage.local.set({ autoJobsCompletedResults: merged });
+        });
+    }
+    // --- Auto Clear IPs: relay WS responses to storage for background.js ---
+    if (event.data && event.data.type === 'COR3_AUTOJOB_SAI_TRANSIT') {
+        chrome.storage.local.set({ _clearIpsTransit: { data: event.data.data, error: event.data.error, ts: Date.now() } });
+    }
+    if (event.data && event.data.type === 'COR3_AUTOJOB_SAI_TRANSIT_REMOVE') {
+        chrome.storage.local.set({ _clearIpsTransitRemove: { data: event.data.data, error: event.data.error, ts: Date.now() } });
+    }
+    if (event.data && event.data.type === 'COR3_WS_ENDPOINT_RESULT') {
+        chrome.storage.local.set({ _clearIpsEndpoint: { success: event.data.success, error: event.data.error, ts: Date.now() } });
+    }
+    if (event.data && event.data.type === 'COR3_WS_DARK_MARKET_UNREACHABLE') {
+        chrome.storage.local.set({ _clearIpsEndpoint: { success: false, unreachable: true, error: event.data.error, ts: Date.now() } });
+    }
+    if (event.data && event.data.type === 'COR3_AUTOJOB_SAI_LOGIN_STATUS') {
+        chrome.storage.local.set({ _clearIpsLoginStatus: { data: event.data.data, error: event.data.error, ts: Date.now() } });
+    }
+    if (event.data && event.data.type === 'COR3_AUTOJOB_SAI_LOGIN_RESULT') {
+        chrome.storage.local.set({ _clearIpsLoginResult: { data: event.data.data, error: event.data.error, ts: Date.now() } });
+    }
+    if (event.data && event.data.type === 'COR3_AUTOJOB_SAI_HACK_START') {
+        chrome.storage.local.set({ _clearIpsHackStart: { data: event.data.data, error: event.data.error, ts: Date.now() } });
+    }
+    if (event.data && event.data.type === 'COR3_AUTOJOB_SAI_UPDATE') {
+        chrome.storage.local.set({ _clearIpsSaiUpdate: { data: event.data.data, ts: Date.now() } });
+    }
+});
+
+// Resume auto-jobs if they were running before page reload
+chrome.storage.local.get(['autoJobsRunning', 'autoJobsQueue'], (data) => {
+    if (data.autoJobsRunning && data.autoJobsQueue && data.autoJobsQueue.length > 0) {
+        console.log('[COR3 Helper] Resuming auto jobs after page reload');
+        injectAutoJobSolver();
+        setTimeout(() => {
+            window.postMessage({ type: 'COR3_AUTOJOB_START', jobs: data.autoJobsQueue }, '*');
+        }, 5000); // longer delay on page reload
     }
 });

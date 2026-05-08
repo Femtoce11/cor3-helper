@@ -1,13 +1,14 @@
 {
   "manifest_version": 3,
   "name": "COR3 Helper",
-  "version": "1.3.2",
+  "version": "1.3.9",
   "description": "Monitor markets, expeditions, daily ops, and get timer alerts for cor3.gg.",
   "permissions": [
     "storage",
     "activeTab",
     "tabs",
-    "sidePanel"
+    "sidePanel",
+    "alarms"
   ],
   "side_panel": {
     "default_path": "popup.html"
@@ -61,7 +62,8 @@
       "resources": [
         "ws-interceptor.js",
         "decrypt-solver.js",
-        "daily-hack-solver.js"
+        "daily-hack-solver.js",
+        "auto-job-solver.js"
       ],
       "matches": [
         "<all_urls>"

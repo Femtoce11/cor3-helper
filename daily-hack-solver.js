@@ -1,8 +1,8 @@
 // daily-hack-solver.js
-// Auto-solver for daily hacking minigames on cor3.gg
-// Handles both "System Log Integrity" and "Signal Hack" puzzles.
+// Fully automated solver for daily hacking minigames on cor3.gg
+// Handles both "System Log Integrity" and "Signal Hack" puzzles end-to-end.
+// Flow: Open daily ops tab → Start task → Detect puzzle → Solve → Close windows.
 // Injected into MAIN world. Controllable via window.__dailyHackAbort flag.
-// Based on auto-hack-script.txt logic.
 
 (function () {
     if (window.__dailyHackActive) {
@@ -13,6 +13,41 @@
     window.__dailyHackAbort = false;
 
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const hlog = (msg, level) => {
+        level = level || 'info';
+        console.log('[COR3 Daily Hack] ' + msg);
+        window.postMessage({ type: 'COR3_DAILY_HACK_LOG', message: msg }, '*');
+    };
+
+    // --- Wait for an element to appear in DOM, with timeout ---
+    function waitForEl(selector, timeoutMs, parent) {
+        timeoutMs = timeoutMs || 10000;
+        parent = parent || document;
+        return new Promise((resolve) => {
+            const el = parent.querySelector(selector);
+            if (el) { resolve(el); return; }
+            const observer = new MutationObserver(() => {
+                const found = parent.querySelector(selector);
+                if (found) { observer.disconnect(); clearTimeout(timer); resolve(found); }
+            });
+            observer.observe(parent === document ? document.body : parent, { childList: true, subtree: true });
+            const timer = setTimeout(() => { observer.disconnect(); resolve(null); }, timeoutMs);
+        });
+    }
+
+    // --- Click helper with React-compatible event dispatch ---
+    function click(el) {
+        if (!el) return;
+        el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    }
+
+    // --- Set React-controlled input value ---
+    function setInputValue(input, value) {
+        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+        nativeInputValueSetter.call(input, value);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+    }
 
     // --- Morse / Binary maps for Signal Hack ---
     const MORSE_MAP = {
@@ -22,6 +57,12 @@
     const BINARY_MAP = {
         SSSS: '0', SSSL: '1', SSLS: '2', SSLL: '3', SLSS: '4',
         SLSL: '5', SLLS: '6', SLLL: '7', LSSS: '8', LSSL: '9'
+    };
+
+    // Encoding option header text → internal key
+    const ENCODING_LABELS = {
+        'MORSE': 'Morse Numeric (0-9)',
+        'BINARY': 'Binary Numeric'
     };
 
     // --- System Log Integrity: valid types & statuses ---
@@ -97,112 +138,74 @@
             .find(b => (b.textContent || '').trim() === label) || null;
     }
 
-    // --- System Log Integrity solver ---
-    async function solveSystemLogIntegrity() {
-        console.log('[COR3 Daily Hack] Detected System Log Integrity puzzle');
-        const logContainer = document.querySelector('.log-entries') ||
-                             document.querySelector('.log-entries-holder') ||
-                             document.querySelector('.log-entries-container') ||
-                             document.querySelector('.log');
-        if (!logContainer) {
-            console.error('[COR3 Daily Hack] Could not find log-entries container.');
-            return;
-        }
-        const entries = Array.from(logContainer.querySelectorAll('.log-entry'));
-        if (!entries.length) {
-            console.error('[COR3 Daily Hack] No .log-entry elements found.');
-            return;
-        }
-
-        const analyzed = entries.map(el => {
-            const textEl = el.querySelector('span') || el.querySelector('.log-text') || el;
-            const text = (textEl?.textContent || '').trim();
-            return { el, text, issues: analyzeLogLine(text) };
-        }).filter(e => e.issues.length > 0);
-
-        analyzed.sort((a, b) => b.issues.length - a.issues.length);
-        const selected = analyzed.slice(0, 2);
-        if (selected.length < 2) console.log(`[COR3 Daily Hack] Only found ${selected.length} invalid log(s).`);
-
-        for (const entry of selected) {
-            clickCheckbox(entry.el);
-        }
-
-        console.log(`[COR3 Daily Hack] Selected ${selected.length} wrong log(s):`);
-        selected.forEach((e, i) => {
-            console.log(`\n[SELECTED #${i + 1}] ${e.text}`);
-            console.log('choices to select:');
-            e.issues.forEach(iss => console.log(`  - ${ERROR_LABELS[iss] || iss}`));
-        });
-
-        // Click confirm button
-        const confirmBtn = document.querySelector('.confirm-button');
-        if (!confirmBtn) {
-            console.error('[COR3 Daily Hack] Could not find .confirm-button');
-            return;
-        }
-        confirmBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-        await sleep(1000);
-
-        // Handle analysis/fix phase
-        const analysisContainer = document.querySelector('.analysis-container');
-        if (!analysisContainer) {
-            console.error('[COR3 Daily Hack] Could not find .analysis-container after confirming.');
-            return;
-        }
-
-        const blocks = Array.from(analysisContainer.querySelectorAll('.error-analysis-block'));
-        if (!blocks.length) {
-            console.error('[COR3 Daily Hack] No .error-analysis-block found.');
-            return;
-        }
-
-        const issueMap = new Map(selected.map(e => [e.text, e.issues]));
-
-        for (const block of blocks) {
-            const lineDisplay = block.querySelector('.log-line-display');
-            const lineText = (lineDisplay?.textContent || '').trim();
-            let issues = issueMap.get(lineText);
-            if (!issues) {
-                const match = selected.find(e => e.text === lineText) ||
-                              selected.find(e => lineText && e.text && (e.text.includes(lineText) || lineText.includes(e.text)));
-                issues = match ? match.issues : null;
-            }
-            if (!issues || !issues.length) {
-                console.warn('[COR3 Daily Hack] Could not map analysis block to picked issues:', lineText);
-                continue;
-            }
-
-            const fixBtn = block.querySelector('.fix-error-button');
-            if (fixBtn) {
-                fixBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-                await sleep(50);
-                for (const iss of issues) {
-                    const label = ERROR_LABELS[iss] || iss;
-                    const errBtn = findErrorTypeButton(block, label);
-                    if (errBtn) {
-                        errBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-                        await sleep(25);
-                    } else {
-                        console.warn('[COR3 Daily Hack] Could not find error-type-button for:', label);
-                    }
-                }
-                console.log(`\n[FIXED] ${lineText}`);
-                console.log('clicked:');
-                issues.forEach(iss => console.log(`  - ${ERROR_LABELS[iss] || iss}`));
+    // --- Close app windows (decode screen, daily ops) ---
+    async function closeAppWindows(count) {
+        count = count || 2;
+        for (let i = 0; i < count; i++) {
+            await sleep(300);
+            const closeBtn = document.querySelector('[data-component-name="close-app-btn"]');
+            if (closeBtn) {
+                click(closeBtn);
+                hlog('Closed window ' + (i + 1));
             } else {
-                console.warn('[COR3 Daily Hack] Could not find .fix-error-button for:', lineText);
+                break;
             }
         }
     }
 
-    // --- Signal Hack solver (pulse timeline) ---
-    function solveSignalHack() {
-        console.log('[COR3 Daily Hack] Detected Signal Hack (pulse timeline) puzzle');
-        const timeline = document.querySelector('.pulse-timeline');
+    // =============================================
+    // STEP 1: Open Daily Ops tab
+    // =============================================
+    async function openDailyOpsTab() {
+        hlog('Opening Daily Ops tab...');
+        // Click the tab bar item that opens daily ops page
+        const tabItem = document.querySelector('[data-component-name="TabBarItem-019a0c41-b17f-7abc-1234-567890abcde1"]');
+        if (!tabItem) {
+            hlog('Could not find Daily Ops tab bar item (.go3582441102)', 'error');
+            return false;
+        }
+        click(tabItem);
+        await sleep(800);
+        return true;
+    }
+
+    // =============================================
+    // STEP 2: Click "Start Task" button
+    // =============================================
+    async function clickStartTask() {
+        hlog('Waiting for Start Task button...');
+        const startBtn = await waitForEl('.start-task-button', 8000);
+        if (!startBtn) {
+            hlog('Could not find Start Task button (.start-task-button)', 'error');
+            return false;
+        }
+        click(startBtn);
+        hlog('Clicked Start Task');
+        await sleep(1000);
+        return true;
+    }
+
+    // =============================================
+    // Signal Hack — full end-to-end
+    // =============================================
+    async function solveSignalHackFull() {
+        hlog('Signal Hack detected');
+
+        // Step A: Click "Get Signal" button
+        const getSignalBtn = await waitForEl('.go190644802', 5000);
+        if (!getSignalBtn) {
+            hlog('Could not find Get Signal button (.go190644802)', 'error');
+            return false;
+        }
+        click(getSignalBtn);
+        hlog('Clicked Get Signal');
+        await sleep(1500);
+
+        // Step B: Wait for pulse timeline and decode
+        const timeline = await waitForEl('.pulse-timeline', 10000);
         if (!timeline) {
-            console.error('[COR3 Daily Hack] Could not find .pulse-timeline');
-            return;
+            hlog('Could not find pulse timeline after Get Signal', 'error');
+            return false;
         }
 
         const groups = Array.from(timeline.querySelectorAll('.pulse-group'));
@@ -237,8 +240,8 @@
         const bd = countDigits(binaryResult);
         let encoding, value;
         if (md === 0 && bd === 0) {
-            encoding = 'UNKNOWN';
-            value = '';
+            hlog('Could not decode signal — no valid digits found', 'error');
+            return false;
         } else if (md > bd) {
             encoding = 'MORSE';
             value = morseResult;
@@ -253,118 +256,338 @@
             value = binaryResult;
         }
 
-        console.log(`[COR3 Daily Hack] Type: ${encoding}`);
-        console.log(`[COR3 Daily Hack] Value: ${value}`);
+        hlog(`Signal Hack → Type: ${encoding}, Value: ${value}`);
         console.log(`[COR3 Daily Hack] Pulses: ${pulses.join(' ')}`);
 
-        // Report signal hack info to extension for display
-        window.postMessage({
-            type: 'COR3_DAILY_HACK_LOG',
-            message: `Signal Hack → Type: ${encoding}, Value: ${value}`
-        }, '*');
+        // Step C: Click "Select Encoding" (next-button)
+        await sleep(500);
+        const selectEncodingBtn = document.querySelector('.next-button');
+        if (!selectEncodingBtn) {
+            hlog('Could not find Select Encoding button (.next-button)', 'error');
+            return false;
+        }
+        click(selectEncodingBtn);
+        hlog('Clicked Select Encoding');
+        await sleep(800);
+
+        // Step D: Choose the correct encoding option
+        const targetLabel = ENCODING_LABELS[encoding];
+        const encodingOptions = Array.from(document.querySelectorAll('.encoding-option'));
+        let chosen = null;
+        for (const opt of encodingOptions) {
+            const header = opt.querySelector('.option-header');
+            if (header && (header.textContent || '').trim() === targetLabel) {
+                chosen = opt;
+                break;
+            }
+        }
+        if (!chosen) {
+            hlog(`Could not find encoding option "${targetLabel}"`, 'error');
+            return false;
+        }
+        click(chosen);
+        hlog(`Selected encoding: ${targetLabel}`);
+        await sleep(500);
+
+        // Step E: Click "Decode Signal" (next-button again)
+        const decodeBtn = document.querySelector('.next-button');
+        if (!decodeBtn) {
+            hlog('Could not find Decode Signal button (.next-button)', 'error');
+            return false;
+        }
+        click(decodeBtn);
+        hlog('Clicked Decode Signal');
+        await sleep(800);
+
+        // Step F: Enter the code value
+        const codeInput = await waitForEl('.code-input', 5000);
+        if (!codeInput) {
+            hlog('Could not find code input (.code-input)', 'error');
+            return false;
+        }
+        setInputValue(codeInput, value);
+        hlog(`Entered code: ${value}`);
+        await sleep(400);
+
+        // Step G: Click "CONFIRM CODE"
+        const confirmBtn = document.querySelector('.submit-button');
+        if (!confirmBtn) {
+            hlog('Could not find Confirm Code button (.submit-button)', 'error');
+            return false;
+        }
+        click(confirmBtn);
+        hlog('Clicked CONFIRM CODE');
+        await sleep(1500);
+
+        // Step H: Check for success
+        const resultTitle = document.querySelector('.result-title');
+        if (resultTitle && resultTitle.classList.contains('success')) {
+            hlog('✅ Signal Hack VERIFIED — Success!', 'success');
+        } else if (resultTitle) {
+            hlog('Signal Hack result: ' + (resultTitle.textContent || '').trim(), 'warn');
+        } else {
+            hlog('Could not verify result (no .result-title found)', 'warn');
+        }
+
+        // Step I: Close windows (decode screen + daily ops)
+        await sleep(500);
+        await closeAppWindows(2);
+
+        return true;
     }
 
-    // --- Detect puzzle type ---
+    // =============================================
+    // System Log Integrity — full end-to-end
+    // =============================================
+    async function solveSystemLogIntegrityFull() {
+        hlog('System Log Integrity detected');
+
+        // Step A: Click "Get Logs" button
+        const getLogsBtn = await waitForEl('.go190644802', 5000);
+        if (!getLogsBtn) {
+            hlog('Could not find Get Logs button (.go190644802)', 'error');
+            return false;
+        }
+        click(getLogsBtn);
+        hlog('Clicked Get Logs');
+        await sleep(4000);
+        // Step B: Wait for pulse timeline and decode
+        const log_entries = await waitForEl('.log-entries', 10000);
+        if (!log_entries) {
+            hlog('Could not find log-entries after Get Logs', 'error');
+            return false;
+        }
+        const logContainer = document.querySelector('.log-entries');
+        if (!logContainer) {
+            hlog('Could not find log-entries container', 'error');
+            return false;
+        }
+        const entries = Array.from(logContainer.querySelectorAll('.log-entry.log-entry-appearing'));
+        if (!entries.length) {
+            hlog('No .log-entry elements found', 'error');
+            return false;
+        }
+
+        const analyzed = entries.map(el => {
+            const textEl = el.querySelector('span') || el.querySelector('.log-line') || el;
+            const text = (textEl?.textContent || '').trim();
+            return { el, text, issues: analyzeLogLine(text) };
+        }).filter(e => e.issues.length > 0);
+
+        analyzed.sort((a, b) => b.issues.length - a.issues.length);
+        const selected = analyzed.slice(0, 2);
+        if (selected.length === 0) {
+            hlog('No invalid log entries found — puzzle may already be solved', 'warn');
+            return false;
+        }
+        if (selected.length < 2) hlog(`Only found ${selected.length} invalid log(s)`);
+
+        for (const entry of selected) {
+            clickCheckbox(entry.el);
+        }
+
+        hlog(`Selected ${selected.length} wrong log(s)`);
+        selected.forEach((e, i) => {
+            console.log(`[SELECTED #${i + 1}] ${e.text}`);
+            e.issues.forEach(iss => console.log(`  - ${ERROR_LABELS[iss] || iss}`));
+        });
+
+        // Click confirm button
+        const confirmSelectionBtn = document.querySelector('.confirm-button');
+        if (!confirmSelectionBtn) {
+            hlog('Could not find .confirm-button', 'error');
+            return false;
+        }
+        click(confirmSelectionBtn);
+        await sleep(1000);
+
+        // Handle analysis/fix phase
+        const analysisContainer = await waitForEl('.analysis-container', 5000);
+        if (!analysisContainer) {
+            hlog('Could not find .analysis-container after confirming', 'error');
+            return false;
+        }
+
+        const blocks = Array.from(analysisContainer.querySelectorAll('.error-analysis-block'));
+        if (!blocks.length) {
+            hlog('No .error-analysis-block found', 'error');
+            return false;
+        }
+
+        const issueMap = new Map(selected.map(e => [e.text, e.issues]));
+
+        for (const block of blocks) {
+            const lineDisplay = block.querySelector('.log-line-display');
+            const lineText = (lineDisplay?.textContent || '').trim();
+            let issues = issueMap.get(lineText);
+            if (!issues) {
+                const match = selected.find(e => e.text === lineText) ||
+                              selected.find(e => lineText && e.text && (e.text.includes(lineText) || lineText.includes(e.text)));
+                issues = match ? match.issues : null;
+            }
+            if (!issues || !issues.length) {
+                console.warn('[COR3 Daily Hack] Could not map analysis block to picked issues:', lineText);
+                continue;
+            }
+
+            const fixBtn = block.querySelector('.fix-error-button');
+            if (fixBtn) {
+                click(fixBtn);
+                await sleep(50);
+                for (const iss of issues) {
+                    const label = ERROR_LABELS[iss] || iss;
+                    const errBtn = findErrorTypeButton(block, label);
+                    if (errBtn) {
+                        click(errBtn);
+                        await sleep(25);
+                    } else {
+                        console.warn('[COR3 Daily Hack] Could not find error-type-button for:', label);
+                    }
+                }
+                hlog(`Fixed: ${lineText.substring(0, 40)}...`);
+            }
+        }
+        await sleep(1000);
+        // Click confirm button
+        const confirmFixesBtn = document.querySelector('.confirm-button');
+        if (!confirmFixesBtn) {
+            hlog('Could not find .confirm-button', 'error');
+            return false;
+        }
+        click(confirmFixesBtn);
+
+        await sleep(1000);
+        // Click confirm button
+        const scanBtn = document.querySelector('.scan-button');
+        if (!scanBtn) {
+            hlog('Could not find .confirm-button', 'error');
+            return false;
+        }
+        click(scanBtn);
+
+        // Wait for result
+        await sleep(1500);
+        const resultTitle = document.querySelector('.result-title');
+        if (resultTitle && resultTitle.classList.contains('success')) {
+            hlog('✅ System Log Integrity VERIFIED — Success!', 'success');
+        } else if (resultTitle) {
+            hlog('Log Integrity result: ' + (resultTitle.textContent || '').trim(), 'warn');
+        }
+
+        // Close windows
+        await sleep(500);
+        await closeAppWindows(2);
+
+        return true;
+    }
+
+    // =============================================
+    // Detect puzzle type from DOM
+    // =============================================
     function detectPuzzle() {
-        if (document.querySelector('.pulse-timeline')) return 'signal';
-        if (document.querySelector('.log-entries') || document.querySelector('.log-entries-holder') || document.querySelector('.log-entries-container') || document.querySelector('.log')) return 'log';
-        return null;
-    }
-
-    // --- Main: detect puzzle type and solve, then keep polling for new hacks ---
-    // Track the last puzzle DOM signature so we detect when a NEW hack starts
-    let lastPuzzleSignature = null;
-
-    function getPuzzleSignature() {
-        // Build a signature from puzzle DOM to detect when a new puzzle appears
-        const timeline = document.querySelector('.pulse-timeline');
-        if (timeline) {
-            const groups = timeline.querySelectorAll('.pulse-group');
-            return 'signal:' + groups.length + ':' + timeline.innerHTML.length;
-        }
-        const logContainer = document.querySelector('.log-entries') ||
-                             document.querySelector('.log-entries-holder') ||
-                             document.querySelector('.log-entries-container') ||
-                             document.querySelector('.log');
-        if (logContainer) {
-            const entries = logContainer.querySelectorAll('.log-entry');
-            return 'log:' + entries.length + ':' + logContainer.innerHTML.length;
+        // First check for hack type label in the DOM (most reliable)
+        var hackTypeDiv = document.querySelector('.task-title');
+        if (hackTypeDiv) {
+            if ((hackTypeDiv.textContent).includes('System Log Integrity')) return 'log';
+            if ((hackTypeDiv.textContent).includes('Signal Decode')) return 'signal';
         }
         return null;
     }
 
-    async function run() {
-        console.log('[COR3 Daily Hack] Solver started, waiting for puzzle...');
-        // Try up to 30 seconds for puzzle elements to appear
-        let puzzle = detectPuzzle();
+    // =============================================
+    // Main run — full automation flow with retry
+    // =============================================
+    const MAX_ATTEMPTS = 3;
+
+    async function attemptSolve() {
+        // STEP 1: Open Daily Ops tab
+        const tabOpened = await openDailyOpsTab();
+        if (!tabOpened || window.__dailyHackAbort) return { success: false, abort: true };
+
+        // STEP 2: Click "Start Task"
+        const taskStarted = await clickStartTask();
+        if (!taskStarted || window.__dailyHackAbort) return { success: false, abort: true };
+
+        // STEP 3: Wait for puzzle to appear
+        hlog('Waiting for puzzle to appear...');
+        let puzzle = null;
         let waited = 0;
-        while (!puzzle && waited < 30000 && !window.__dailyHackAbort) {
+        while (!puzzle && waited < 15000 && !window.__dailyHackAbort) {
             await sleep(500);
             waited += 500;
             puzzle = detectPuzzle();
         }
 
-        if (window.__dailyHackAbort) {
-            console.log('[COR3 Daily Hack] Aborted.');
-            window.__dailyHackActive = false;
-            return;
+        if (window.__dailyHackAbort) return { success: false, abort: true };
+
+        if (!puzzle) {
+            hlog('No puzzle detected after 15s', 'error');
+            return { success: false, abort: false };
         }
 
+        // STEP 4: Solve based on type
+        let solved = false;
         try {
             if (puzzle === 'signal') {
-                solveSignalHack();
-                lastPuzzleSignature = getPuzzleSignature();
+                solved = await solveSignalHackFull();
             } else if (puzzle === 'log') {
-                await solveSystemLogIntegrity();
-                lastPuzzleSignature = getPuzzleSignature();
-            } else {
-                console.log('[COR3 Daily Hack] No known puzzle detected after 30s. Looking for ".pulse-timeline" or ".log-entries".');
-                window.postMessage({
-                    type: 'COR3_DAILY_HACK_LOG',
-                    message: 'No puzzle detected. Navigate to the daily hack page first.'
-                }, '*');
+                solved = await solveSystemLogIntegrityFull();
             }
         } catch (e) {
+            hlog('Error: ' + (e.message || e), 'error');
             console.error('[COR3 Daily Hack] Error:', e);
-            window.postMessage({
-                type: 'COR3_DAILY_HACK_LOG',
-                message: 'Error: ' + (e.message || e)
-            }, '*');
+            solved = false;
         }
 
-        // Keep polling for new hacks (e.g. signal hack back-to-back)
-        console.log('[COR3 Daily Hack] Solver finished. Monitoring for new puzzles...');
-        pollForNewPuzzle();
+        // Verify success by checking for .result-title.success
+        const resultTitle = document.querySelector('.result-title');
+        if (resultTitle && resultTitle.classList.contains('success')) {
+            return { success: true };
+        }
+
+        return { success: solved === true, abort: false };
     }
 
-    async function pollForNewPuzzle() {
-        while (!window.__dailyHackAbort) {
-            await sleep(2000);
+    async function run() {
+        hlog('Solver started — full automation mode');
+
+        for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
             if (window.__dailyHackAbort) break;
 
-            const currentSig = getPuzzleSignature();
-            // New puzzle appeared (different from last solved one)
-            if (currentSig && currentSig !== lastPuzzleSignature) {
-                console.log('[COR3 Daily Hack] New puzzle detected, solving...');
-                const puzzle = detectPuzzle();
-                try {
-                    if (puzzle === 'signal') {
-                        solveSignalHack();
-                    } else if (puzzle === 'log') {
-                        await solveSystemLogIntegrity();
-                    }
-                    lastPuzzleSignature = getPuzzleSignature();
-                } catch (e) {
-                    console.error('[COR3 Daily Hack] Error solving new puzzle:', e);
-                    window.postMessage({
-                        type: 'COR3_DAILY_HACK_LOG',
-                        message: 'Error: ' + (e.message || e)
-                    }, '*');
-                }
+            if (attempt > 1) {
+                hlog(`Retry attempt ${attempt}/${MAX_ATTEMPTS} — closing windows and restarting...`, 'warn');
+                await closeAppWindows(3);
+                await sleep(3000);
+                if (window.__dailyHackAbort) break;
+            }
+
+            const result = await attemptSolve();
+
+            if (result.abort) {
+                hlog('Solver aborted');
+                break;
+            }
+
+            if (result.success) {
+                hlog('✅ Daily hack completed successfully!', 'success');
+                // Auto-disable toggle after success
+                window.postMessage({ type: 'COR3_DAILY_HACK_DISABLE_TOGGLE' }, '*');
+                cleanup();
+                return;
+            }
+
+            if (attempt < MAX_ATTEMPTS) {
+                hlog(`Attempt ${attempt}/${MAX_ATTEMPTS} failed — will retry...`, 'warn');
             }
         }
 
-        console.log('[COR3 Daily Hack] Polling stopped (aborted).');
+        // All attempts failed
+        hlog(`Daily hack failed after ${MAX_ATTEMPTS} attempts — disabling toggle`, 'error');
+        window.postMessage({ type: 'COR3_DAILY_HACK_DISABLE_TOGGLE' }, '*');
+        cleanup();
+    }
+
+    function cleanup() {
         window.__dailyHackActive = false;
         window.__dailyHackAbort = false;
     }

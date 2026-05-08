@@ -304,6 +304,17 @@
             background: var(--btn-small-hover);
             border: 1px solid var(--accent-cyan);
         }
+        .option-row.confirming {
+            background: rgba(0,200,80,0.25) !important;
+            border: 1px solid var(--accent-green) !important;
+            cursor: pointer;
+        }
+        .option-row.confirming .option-label::after {
+            content: ' — Click to confirm';
+            font-size: 9px;
+            color: var(--accent-green);
+            font-weight: normal;
+        }
         .option-score {
             font-size: 10px;
             color: var(--accent-purple);
@@ -942,13 +953,14 @@
         /* Theme selector */
         .header-row {
             display: flex;
-            align-items: self-end;
+            align-items: baseline;
             justify-content: space-between;
             margin-bottom: 10px;
             position: relative;
         }
         .header-row h3 {
             margin: 0;
+            font-size: medium;
         }
         .header-btns {
             display: flex;
@@ -1124,13 +1136,265 @@
         .system-message-toggle input:checked + .slider:before {
             transform: translateX(20px);
         }
+
+        /* Auto Job Solver */
+        .auto-jobs-section {
+            background: var(--bg-section);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 10px;
+            margin-bottom: 8px;
+        }
+        .auto-jobs-section .section-title {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+        .auto-jobs-tabs {
+            display: flex;
+            gap: 0;
+            margin-bottom: 2px;
+            border-bottom: 1px solid var(--border);
+        }
+        .auto-jobs-tab {
+            flex: 1;
+            padding: 6px 10px;
+            font-size: 11px;
+            font-weight: bold;
+            color: var(--text-muted);
+            background: transparent;
+            border: none;
+            border-bottom: 2px solid transparent;
+            cursor: pointer;
+            text-align: center;
+            transition: color 0.2s, border-color 0.2s;
+        }
+        .auto-jobs-tab:hover {
+            color: var(--text);
+        }
+        .auto-jobs-tab.active {
+            color: var(--accent-cyan);
+            border-bottom-color: var(--accent-cyan);
+        }
+        .auto-jobs-tab-content {
+            display: none;
+        }
+        .auto-jobs-tab-content.active {
+            display: block;
+        }
+        .auto-jobs-type-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 0;
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+        .auto-jobs-type-row input[type="checkbox"] {
+            accent-color: var(--accent-cyan);
+            cursor: pointer;
+            width: 14px;
+            height: 14px;
+            flex-shrink: 0;
+            margin-left: auto;
+        }
+        .auto-jobs-type-row input[type="checkbox"]:disabled {
+            cursor: not-allowed;
+            opacity: 0.4;
+        }
+        .auto-jobs-type-row .job-type-label {
+            flex: 1;
+        }
+        .auto-jobs-type-row .job-type-count {
+            font-size: 10px;
+            color: var(--text-dim);
+            flex-shrink: 0;
+        }
+        .auto-jobs-type-row .unsupported-tooltip {
+            font-size: 9px;
+            color: var(--accent-orange);
+            font-style: italic;
+        }
+        .auto-jobs-select-all {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 0;
+            margin-bottom: 4px;
+            font-size: 10px;
+            color: var(--text-muted);
+            border-top: 1px solid var(--border);
+        }
+        .auto-jobs-select-all .job-type-label {
+            flex: 1;
+        }
+        .auto-jobs-select-all .job-type-count {
+            font-size: 10px;
+            color: var(--text-dim);
+            flex-shrink: 0;
+        }
+        .auto-jobs-select-all input[type="checkbox"] {
+            accent-color: var(--accent-cyan);
+            width: 14px;
+            height: 14px;
+            flex-shrink: 0;
+            margin-left: auto;
+        }
+        .auto-jobs-btn-start {
+            display: block;
+            width: 100%;
+            padding: 10px;
+            margin-top: 8px;
+            font-size: 13px;
+            font-weight: bold;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.2s, transform 0.1s;
+            text-align: center;
+        }
+        .auto-jobs-btn-start.start {
+            background: #22c55e;
+            color: #000;
+        }
+        .auto-jobs-btn-start.start:hover {
+            background: #16a34a;
+        }
+        .auto-jobs-btn-start.stop {
+            background: #ef4444;
+            color: #fff;
+        }
+        .auto-jobs-btn-start.stop:hover {
+            background: #dc2626;
+        }
+        .auto-jobs-btn-start:active {
+            transform: scale(0.98);
+        }
+        /* Debug Console */
+        .debug-console {
+            margin-top: 8px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            overflow: hidden;
+        }
+        .debug-console-tabs {
+            display: flex;
+            border-bottom: 1px solid var(--border);
+        }
+        .debug-console-tab {
+            flex: 1;
+            padding: 5px 8px;
+            font-size: 10px;
+            font-weight: bold;
+            color: var(--text-muted);
+            background: var(--bg-card);
+            border: none;
+            cursor: pointer;
+            text-align: center;
+            transition: color 0.2s, background 0.2s;
+        }
+        .debug-console-tab.active {
+            color: var(--accent-cyan);
+            background: var(--bg-primary);
+        }
+        .debug-console-body {
+            display: none;
+            max-height: 200px;
+            overflow-y: auto;
+            background: var(--bg-primary);
+            padding: 6px 8px;
+            font-size: 10px;
+            font-family: monospace;
+        }
+        .debug-console-body::-webkit-scrollbar {
+            width: 6px;
+        }
+        .debug-console-body::-webkit-scrollbar-track {
+            background: var(--bg-primary);
+            border-radius: 3px;
+        }
+        .debug-console-body::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 3px;
+        }
+        .debug-console-body::-webkit-scrollbar-thumb:hover {
+            background: var(--text-dim);
+        }
+        .debug-console-body.active {
+            display: block;
+        }
+        .debug-job-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 3px 0;
+            border-bottom: 1px solid var(--border);
+        }
+        .debug-job-row:last-child {
+            border-bottom: none;
+        }
+        .debug-job-status {
+            font-size: 9px;
+            padding: 1px 5px;
+            border-radius: 3px;
+            font-weight: bold;
+            white-space: nowrap;
+        }
+        .auto-jobs-reset-timer {
+            font-size: 11px;
+            color: var(--accent-orange);
+            margin-bottom: 6px;
+            padding: 2px 0;
+        }
+        .debug-job-status.open { background: var(--border); color: var(--text-muted); }
+        .debug-job-status.in-progress { background: var(--accent-purple); color: var(--bg-primary); }
+        .debug-job-status.pending { background: var(--accent-yellow); color: var(--bg-primary); }
+        .debug-job-status.running { background: var(--accent-cyan); color: var(--bg-primary); }
+        .debug-job-status.done { background: var(--accent-green); color: var(--bg-primary); }
+        .debug-job-status.failed { background: var(--accent-red); color: #fff; }
+        .debug-job-status.skipped { background: var(--accent-orange); color: var(--bg-primary); }
+        .debug-job-status.bugged { background: var(--accent-orange); color: var(--bg-primary); }
+        .debug-log-row {
+            padding: 2px 0;
+            color: var(--text-dim);
+            word-break: break-word;
+        }
+        .debug-log-row .log-time {
+            color: var(--text-muted);
+            margin-right: 4px;
+        }
+        .debug-log-row.log-error {
+            color: var(--accent-red);
+        }
+        .debug-log-row.log-success {
+            color: var(--accent-green);
+        }
+        .debug-log-row.log-warn {
+            color: var(--accent-orange);
+        }
+        .debug-market-group {
+            margin-bottom: 6px;
+        }
+        .debug-market-group-title {
+            font-size: 10px;
+            font-weight: bold;
+            color: var(--accent-cyan);
+            margin-bottom: 2px;
+        }
+        .auto-jobs-no-jobs {
+            font-size: 10px;
+            color: var(--text-dim);
+            padding: 8px 0;
+            text-align: center;
+        }
     </style>
 </head>
 <body>
 <!-- Main View -->
 <div id="mainView">
     <div class="header-row">
-        <h3><svg width="20" height="20" viewBox="0 0 150 150" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle;margin-right:4px;"><path d="M75 0C33.5752 0 0 33.5752 0 75C0 116.425 33.5752 150 75 150C116.425 150 150 116.425 150 75C150 33.5752 116.425 0 75 0ZM40.7212 84.9165L65.6992 109.894C67.3483 111.544 69.5251 112.445 71.8338 112.445H78.1882C80.5189 112.445 82.6957 111.544 84.3228 109.894L106.882 87.3351C108.641 85.5761 110.994 84.5866 113.5 84.5866C116.007 84.5866 118.338 85.5541 120.119 87.3351L121.68 88.8962C123.439 90.6552 124.428 93.0079 124.428 95.5145C124.428 98.0211 123.461 100.352 121.68 102.133L102.704 121.108C100.88 122.933 98.4828 123.835 96.0862 123.835C93.6895 123.835 91.2929 122.933 89.4679 121.108L89.314 120.954C87.6649 119.305 85.4881 118.404 83.1794 118.404H66.7546C64.4239 118.404 62.2471 119.305 60.6201 120.954L60.4881 121.086C56.8382 124.736 50.9235 124.736 47.2735 121.086L28.2982 102.111C26.5391 100.352 25.5497 97.9991 25.5497 95.4925C25.5497 92.9859 26.5171 90.6552 28.2982 88.8742L29.6614 87.511C31.3105 85.8619 32.212 83.6851 32.212 81.3764V68.6895C32.212 66.3588 31.3105 64.1821 29.6614 62.555L28.2982 61.1917C26.5391 59.4327 25.5497 57.08 25.5497 54.5734C25.5497 52.0668 26.5171 49.7362 28.2982 47.9552L47.2735 28.9798C50.9235 25.3298 56.8382 25.3298 60.4881 28.9798L60.6201 29.1117C62.2691 30.7608 64.4459 31.6623 66.7546 31.6623H83.1794C85.5101 31.6623 87.6869 30.7608 89.314 29.1117L89.4679 28.9578C93.1178 25.3078 99.0325 25.3078 102.682 28.9578L121.658 47.9332C123.417 49.6922 124.406 52.0449 124.406 54.5515C124.406 57.0581 123.439 59.3887 121.658 61.1698L120.097 62.7309C118.338 64.4899 115.985 65.4793 113.478 65.4793C110.972 65.4793 108.641 64.5119 106.86 62.7309L84.3448 40.1715C82.6957 38.5224 80.5189 37.6209 78.2102 37.6209H71.8558C69.5251 37.6209 67.3483 38.5224 65.7212 40.1715L40.7212 65.1495C39.0721 66.7986 38.1706 68.9754 38.1706 71.2841V78.7819C38.1706 81.0906 39.0721 83.2894 40.7212 84.9165Z" fill="#76C1D1"/></svg> COR3 Helper</h3>
+        <h3><svg width="20" height="20" viewBox="0 0 150 150" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:bottom;margin-right:4px;"><path d="M75 0C33.5752 0 0 33.5752 0 75C0 116.425 33.5752 150 75 150C116.425 150 150 116.425 150 75C150 33.5752 116.425 0 75 0ZM40.7212 84.9165L65.6992 109.894C67.3483 111.544 69.5251 112.445 71.8338 112.445H78.1882C80.5189 112.445 82.6957 111.544 84.3228 109.894L106.882 87.3351C108.641 85.5761 110.994 84.5866 113.5 84.5866C116.007 84.5866 118.338 85.5541 120.119 87.3351L121.68 88.8962C123.439 90.6552 124.428 93.0079 124.428 95.5145C124.428 98.0211 123.461 100.352 121.68 102.133L102.704 121.108C100.88 122.933 98.4828 123.835 96.0862 123.835C93.6895 123.835 91.2929 122.933 89.4679 121.108L89.314 120.954C87.6649 119.305 85.4881 118.404 83.1794 118.404H66.7546C64.4239 118.404 62.2471 119.305 60.6201 120.954L60.4881 121.086C56.8382 124.736 50.9235 124.736 47.2735 121.086L28.2982 102.111C26.5391 100.352 25.5497 97.9991 25.5497 95.4925C25.5497 92.9859 26.5171 90.6552 28.2982 88.8742L29.6614 87.511C31.3105 85.8619 32.212 83.6851 32.212 81.3764V68.6895C32.212 66.3588 31.3105 64.1821 29.6614 62.555L28.2982 61.1917C26.5391 59.4327 25.5497 57.08 25.5497 54.5734C25.5497 52.0668 26.5171 49.7362 28.2982 47.9552L47.2735 28.9798C50.9235 25.3298 56.8382 25.3298 60.4881 28.9798L60.6201 29.1117C62.2691 30.7608 64.4459 31.6623 66.7546 31.6623H83.1794C85.5101 31.6623 87.6869 30.7608 89.314 29.1117L89.4679 28.9578C93.1178 25.3078 99.0325 25.3078 102.682 28.9578L121.658 47.9332C123.417 49.6922 124.406 52.0449 124.406 54.5515C124.406 57.0581 123.439 59.3887 121.658 61.1698L120.097 62.7309C118.338 64.4899 115.985 65.4793 113.478 65.4793C110.972 65.4793 108.641 64.5119 106.86 62.7309L84.3448 40.1715C82.6957 38.5224 80.5189 37.6209 78.2102 37.6209H71.8558C69.5251 37.6209 67.3483 38.5224 65.7212 40.1715L40.7212 65.1495C39.0721 66.7986 38.1706 68.9754 38.1706 71.2841V78.7819C38.1706 81.0906 39.0721 83.2894 40.7212 84.9165Z" fill="#76C1D1"/></svg> COR3 Helper</h3>
         <div class="header-btns">
             <button class="header-icon-btn" id="popOutBtn" title="Open in separate window"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></button>
             <button class="header-icon-btn" id="sidePanelBtn" title="Open as side panel"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="15" y1="3" x2="15" y2="21"/></svg></button>
@@ -1182,6 +1446,17 @@
             </div>
         </div>
         <div id="dailyHackLog" style="display:none;font-size:10px;margin-top:6px;padding:6px 8px;background:var(--bg-card);border-radius:6px;border:1px solid var(--border);color:var(--accent-cyan);"></div>
+        <!-- Auto Job Solver Toggle -->
+        <div class="auto-decrypt-row" style="margin-top:8px;">
+            <span class="decrypt-label">🤖 Auto Job Solver</span>
+            <div style="display:flex;align-items:center;gap:8px;">
+                <span class="decrypt-status" id="autoJobSolverStatus">Off</span>
+                <label class="alarm-toggle-switch">
+                    <input type="checkbox" id="autoJobSolverToggle">
+                    <span class="slider-track"></span>
+                </label>
+            </div>
+        </div>
         <!-- System Message Notifications -->
         <div class="auto-decrypt-row" style="margin-top:8px;">
             <span class="decrypt-label">🔕 Disable System Message</span>
@@ -1213,6 +1488,77 @@
                     <input type="checkbox" id="disableNetworkFogToggle">
                     <span class="slider-track"></span>
                 </label>
+            </div>
+        </div>
+        <!-- Move Notifications to Left -->
+        <div class="auto-decrypt-row" style="margin-top:8px;">
+            <span class="decrypt-label">📌 Move Notifications To Left</span>
+            <div style="display:flex;align-items:center;gap:8px;">
+                <span class="decrypt-status" id="moveNotificationsStatus">Off</span>
+                <label class="alarm-toggle-switch">
+                    <input type="checkbox" id="moveNotificationsToggle">
+                    <span class="slider-track"></span>
+                </label>
+            </div>
+        </div>
+    </div>
+
+    <!-- Auto Job Solver Section -->
+    <div class="auto-jobs-section" id="autoJobSolverSection" style="display:none;">
+        <div class="section-title">
+            <span>🤖 Auto Job Solver</span>
+            <button id="refreshAutoJobsBtn" class="refresh-btn-small" title="Refresh job data">🔄</button>
+        </div>
+        <!-- Market Tabs -->
+        <div class="auto-jobs-tabs">
+            <button class="auto-jobs-tab active" data-market="home" id="autoJobsTabHome">🏠 HOME</button>
+            <button class="auto-jobs-tab" data-market="dark" id="autoJobsTabDark">🌑 D4RK</button>
+        </div>
+        <!-- HOME market jobs -->
+        <div class="auto-jobs-tab-content active" id="autoJobsContentHome">
+            <div class="auto-jobs-no-jobs">Loading job data...</div>
+        </div>
+        <!-- D4RK market jobs -->
+        <div class="auto-jobs-tab-content" id="autoJobsContentDark">
+            <div class="auto-jobs-no-jobs">Loading job data...</div>
+        </div>
+        <!-- Start/Stop Button -->
+        <button class="auto-jobs-btn-start start" id="autoJobsStartBtn">▶ Start Auto Jobs</button>
+        <!-- Auto Finish All Jobs Toggle -->
+        <div class="auto-decrypt-row" style="margin-top:8px;">
+            <span class="decrypt-label" style="font-size:10px;">🔄 Auto Finish All Jobs</span>
+            <label class="alarm-toggle-switch">
+                <input type="checkbox" id="autoFinishAllJobsToggle">
+                <span class="slider-track"></span>
+            </label>
+        </div>
+        <!-- Auto Clear Generated IPs Toggle -->
+        <div class="auto-decrypt-row" style="margin-top:4px;">
+            <span class="decrypt-label" style="font-size:10px;">🧹 Auto Clear Generated IPs</span>
+            <label class="alarm-toggle-switch">
+                <input type="checkbox" id="autoClearIpsToggle">
+                <span class="slider-track"></span>
+            </label>
+        </div>
+        <!-- Debug Console Toggle -->
+        <div class="auto-decrypt-row" style="margin-top:4px;">
+            <span class="decrypt-label" style="font-size:10px;">🖥️ Debug Console</span>
+            <label class="alarm-toggle-switch">
+                <input type="checkbox" id="autoJobsDebugToggle">
+                <span class="slider-track"></span>
+            </label>
+        </div>
+        <!-- Debug Console -->
+        <div class="debug-console" id="autoJobsDebugConsole" style="display:none;">
+            <div class="debug-console-tabs">
+                <button class="debug-console-tab active" data-tab="jobs" id="debugTabJobs">Jobs</button>
+                <button class="debug-console-tab" data-tab="logs" id="debugTabLogs">Logs</button>
+            </div>
+            <div class="debug-console-body active" id="debugJobsBody">
+                <div style="color:var(--text-dim);">No job data yet.</div>
+            </div>
+            <div class="debug-console-body" id="debugLogsBody">
+                <div style="color:var(--text-dim);">No logs yet.</div>
             </div>
         </div>
     </div>
@@ -1303,6 +1649,13 @@
                 <span style="font-size:10px;">Auto-choose highest score before deadline</span>
                 <label class="alarm-toggle-switch" style="margin-right:6px;">
                     <input type="checkbox" id="autoChooseCheckbox">
+                    <span class="slider-track"></span>
+                </label>
+            </div>
+            <div class="auto-choose-row" id="noWaitRow" style="display:none;">
+                <span style="font-size:10px;">Do not wait to auto choose</span>
+                <label class="alarm-toggle-switch" style="margin-right:6px;">
+                    <input type="checkbox" id="noWaitAutoChooseCheckbox">
                     <span class="slider-track"></span>
                 </label>
             </div>
@@ -1425,6 +1778,8 @@
         <div id="webVersionData" style="display:none;font-size:10px;color:var(--accent-orange);text-align:center;margin-top:4px;"></div>
         <div id="systemVersionNotice" style="display:none;font-size:10px;color:var(--accent-orange);text-align:center;margin-top:4px;"></div>
         <div id="systemVersionData" style="display:none;font-size:10px;color:var(--accent-orange);text-align:center;margin-top:4px;"></div>
+        <div id="patchVersionNotice" style="display:none;font-size:10px;color:var(--accent-orange);text-align:center;margin-top:4px;"></div>
+        <div id="patchVersionData" style="display:none;font-size:10px;color:var(--accent-orange);text-align:center;margin-top:4px;"></div>
     </div>
 
     <!-- Check for Updates -->
