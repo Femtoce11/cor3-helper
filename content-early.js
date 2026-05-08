@@ -502,22 +502,88 @@ var webVersion = null;
             return;
         }
 
-        // Intercept market responses — only relay actual market data (not "connected" acks)
+        // Intercept market responses — handle get.options, get.lots, get.jobs separately
+        // The new WS format sends these as 3 separate responses. We cache and merge them.
         if (eventName === 'market' && payload && payload.data) {
+            var mktAction = payload.event ? payload.event.action : null;
+
+            // get.options: contains market info, reputation, userCredits (no lots/jobs)
             var mkt = payload.data.market;
-            // Skip connection acknowledgments (action: "connected") — they don't contain real market data
-            if (mkt && mkt.marketName) {
-                if (mkt.id === '019d3ea4-85bd-7389-904d-908ba9194aa0') {
-                    window.postMessage({
-                        type: 'COR3_WS_DARK_MARKET',
-                        market: payload.data
-                    }, '*');
+            if (mktAction === 'get.options' && mkt && mkt.marketName) {
+                var isDark = mkt.id === '019d3ea4-85bd-7389-904d-908ba9194aa0';
+                var cacheKey = isDark ? '__cor3DarkMarketCache' : '__cor3HomeMarketCache';
+                // Initialize or reset cache with get.options data
+                // Preserve existing jobs/recentJobs/nextJobsResetAt so UI doesn't flicker
+                var prevJobs = window[cacheKey] ? window[cacheKey].jobs : undefined;
+                var prevRecentJobs = window[cacheKey] ? window[cacheKey].recentJobs : undefined;
+                var prevNextJobsResetAt = window[cacheKey] ? window[cacheKey].nextJobsResetAt : undefined;
+                window[cacheKey] = Object.assign({}, payload.data);
+                if (prevJobs !== undefined) window[cacheKey].jobs = prevJobs;
+                if (prevRecentJobs !== undefined) window[cacheKey].recentJobs = prevRecentJobs;
+                if (prevNextJobsResetAt !== undefined) window[cacheKey].nextJobsResetAt = prevNextJobsResetAt;
+                if (isDark) {
+                    window.postMessage({ type: 'COR3_WS_DARK_MARKET', market: window[cacheKey] }, '*');
                 } else {
-                    window.postMessage({
-                        type: 'COR3_WS_MARKET',
-                        market: payload.data
-                    }, '*');
-                    // Store HOME market ID (mercenary fetch removed — now handled by Refresh All)
+                    window.postMessage({ type: 'COR3_WS_MARKET', market: window[cacheKey] }, '*');
+                    window.__cor3LastMarketId = mkt.id;
+                }
+                // Queue this marketId for lots/jobs matching, then auto-request them
+                var marketId = mkt.id;
+                window.__cor3PendingLotsMarket = window.__cor3PendingLotsMarket || [];
+                window.__cor3PendingJobsMarket = window.__cor3PendingJobsMarket || [];
+                window.__cor3PendingLotsMarket.push(marketId);
+                window.__cor3PendingJobsMarket.push(marketId);
+                setTimeout(function () {
+                    var lotsMsg = '42["event",{"event":{"name":"market","action":"get.lots"},"data":{"marketId":"' + marketId + '"}}]';
+                    wsSend(lotsMsg);
+                }, humanDelay());
+                setTimeout(function () {
+                    var jobsMsg = '42["event",{"event":{"name":"market","action":"get.jobs"},"data":{"marketId":"' + marketId + '"}}]';
+                    wsSend(jobsMsg);
+                }, humanDelay() + 500);
+            }
+
+            // get.lots: merge lots into cached market data
+            if (mktAction === 'get.lots' && payload.data.lots) {
+                // Dequeue the marketId we queued when sending get.lots
+                var lotsMarketId = (window.__cor3PendingLotsMarket && window.__cor3PendingLotsMarket.length > 0)
+                    ? window.__cor3PendingLotsMarket.shift() : null;
+                var lotsDark = lotsMarketId === '019d3ea4-85bd-7389-904d-908ba9194aa0';
+                var lotsCacheKey = lotsDark ? '__cor3DarkMarketCache' : '__cor3HomeMarketCache';
+                if (window[lotsCacheKey]) {
+                    window[lotsCacheKey].lots = payload.data.lots;
+                    if (lotsDark) {
+                        window.postMessage({ type: 'COR3_WS_DARK_MARKET', market: window[lotsCacheKey] }, '*');
+                    } else {
+                        window.postMessage({ type: 'COR3_WS_MARKET', market: window[lotsCacheKey] }, '*');
+                    }
+                }
+            }
+
+            // get.jobs: merge jobs into cached market data
+            if (mktAction === 'get.jobs') {
+                var jobsMarketId = (window.__cor3PendingJobsMarket && window.__cor3PendingJobsMarket.length > 0)
+                    ? window.__cor3PendingJobsMarket.shift() : null;
+                var jobsDark = jobsMarketId === '019d3ea4-85bd-7389-904d-908ba9194aa0';
+                var jobsCacheKey = jobsDark ? '__cor3DarkMarketCache' : '__cor3HomeMarketCache';
+                if (window[jobsCacheKey]) {
+                    window[jobsCacheKey].jobs = payload.data.jobs || [];
+                    window[jobsCacheKey].recentJobs = payload.data.recentJobs || [];
+                    window[jobsCacheKey].nextJobsResetAt = payload.data.nextJobsResetAt || window[jobsCacheKey].nextJobsResetAt;
+                    if (jobsDark) {
+                        window.postMessage({ type: 'COR3_WS_DARK_MARKET', market: window[jobsCacheKey] }, '*');
+                    } else {
+                        window.postMessage({ type: 'COR3_WS_MARKET', market: window[jobsCacheKey] }, '*');
+                    }
+                }
+            }
+
+            // Legacy: handle market responses without action (for backwards compatibility)
+            if (!mktAction && mkt && mkt.marketName) {
+                if (mkt.id === '019d3ea4-85bd-7389-904d-908ba9194aa0') {
+                    window.postMessage({ type: 'COR3_WS_DARK_MARKET', market: payload.data }, '*');
+                } else {
+                    window.postMessage({ type: 'COR3_WS_MARKET', market: payload.data }, '*');
                     window.__cor3LastMarketId = mkt.id;
                 }
             }
@@ -682,6 +748,10 @@ var webVersion = null;
         // --- Auto Job Solver: Intercept minigame start ---
         if (eventName === 'minigames' && payload && payload.event && payload.event.action === 'start.minigame') {
             window.postMessage({ type: 'COR3_AUTOJOB_MINIGAME_START', data: payload.data }, '*');
+            // Also notify ICE Wall solver if this is an EXTERNAL minigame (ice-wall-break)
+            if (payload.data && payload.data.type === 'EXTERNAL' && payload.data.url && payload.data.url.indexOf('ice-wall-break') !== -1) {
+                window.postMessage({ type: 'COR3_ICE_WALL_MINIGAME_START', data: payload.data }, '*');
+            }
         }
 
         // --- Auto Job Solver: Intercept profile receive.progress (renown/XP) ---
@@ -953,8 +1023,20 @@ var webVersion = null;
     }
 
     // Send a join-room message and mark as joined.
+    // New format includes jwtToken and clientVersion.
     function sendJoin(room) {
-        wsSend('42["join-room",{"room":"' + room + '"}]');
+        var joinData = { room: room };
+        // Include jwtToken (strip "Bearer " prefix from captured token)
+        if (capturedBearerToken) {
+            var jwt = capturedBearerToken;
+            if (jwt.startsWith('Bearer ')) jwt = jwt.substring(7);
+            joinData.jwtToken = jwt;
+        }
+        // Include clientVersion from captured web version
+        if (window.__cor3WebVersion) {
+            joinData.clientVersion = window.__cor3WebVersion;
+        }
+        wsSend('42["join-room",' + JSON.stringify(joinData) + ']');
         joinedRooms.add(room);
     }
 
@@ -1503,6 +1585,14 @@ var webVersion = null;
             // If solver was stopped, reset flags and re-inject will handle it
             window.__solverAbort = false;
             window.__solverActive = false;
+        }
+        if (event.data && event.data.type === 'COR3_STOP_ICE_WALL_SOLVER') {
+            window.__iceWallSolverAbort = true;
+        }
+        if (event.data && event.data.type === 'COR3_START_ICE_WALL_SOLVER') {
+            if (window.__iceWallSolverActive && !window.__iceWallSolverAbort) return;
+            window.__iceWallSolverAbort = false;
+            window.__iceWallSolverActive = false;
         }
         if (event.data && event.data.type === 'COR3_KEEP_ALIVE') {
             window.__cor3KeepAlive();

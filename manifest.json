@@ -63,7 +63,8 @@
         "ws-interceptor.js",
         "decrypt-solver.js",
         "daily-hack-solver.js",
-        "auto-job-solver.js"
+        "auto-job-solver.js",
+        "ice-wall-solver.js"
       ],
       "matches": [
         "<all_urls>"

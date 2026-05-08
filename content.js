@@ -727,10 +727,34 @@ function stopDailyHackSolver() {
     dailyHackInjected = false;
 }
 
-// Auto-start solver if it was enabled before page load
-chrome.storage.sync.get('autoDecryptEnabled', (data) => {
+// --- Auto ICE Wall Solver ---
+let iceWallSolverInjected = false;
+
+function injectIceWallSolver() {
+    if (iceWallSolverInjected) {
+        // Solver already injected, just signal restart
+        window.postMessage({ type: 'COR3_START_ICE_WALL_SOLVER' }, '*');
+        return;
+    }
+    iceWallSolverInjected = true;
+    const script = document.createElement('script');
+    script.src = chrome.runtime.getURL('ice-wall-solver.js');
+    script.onload = () => script.remove();
+    (document.head || document.documentElement).appendChild(script);
+}
+
+function stopIceWallSolver() {
+    window.postMessage({ type: 'COR3_STOP_ICE_WALL_SOLVER' }, '*');
+    iceWallSolverInjected = false;
+}
+
+// Auto-start solvers if they were enabled before page load
+chrome.storage.sync.get(['autoDecryptEnabled', 'autoIceWallEnabled'], (data) => {
     if (data.autoDecryptEnabled) {
         injectDecryptSolver();
+    }
+    if (data.autoIceWallEnabled) {
+        injectIceWallSolver();
     }
 });
 
@@ -788,6 +812,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             injectDecryptSolver();
         } else {
             stopDecryptSolver();
+        }
+        sendResponse({ success: true });
+    } else if (request.action === "toggleIceWallSolver") {
+        if (request.enabled) {
+            injectIceWallSolver();
+        } else {
+            stopIceWallSolver();
         }
         sendResponse({ success: true });
     } else if (request.action === "toggleDailyHackSolver") {
@@ -1212,6 +1243,16 @@ window.addEventListener('message', (event) => {
                 console.log('[COR3 Helper] Auto Job: Enabling decrypt solver for minigame');
             }
             injectDecryptSolver();
+        });
+    }
+    if (event.data && event.data.type === 'COR3_AUTOJOB_ENABLE_ICE_WALL_SOLVER') {
+        // Auto-enable the ICE Wall solver when auto-job needs it
+        chrome.storage.sync.get('autoIceWallEnabled', (result) => {
+            if (!result.autoIceWallEnabled) {
+                chrome.storage.sync.set({ autoIceWallEnabled: true });
+                console.log('[COR3 Helper] Auto Job: Enabling ICE Wall solver for minigame');
+            }
+            injectIceWallSolver();
         });
     }
     if (event.data && event.data.type === 'COR3_AUTOJOB_LOG') {

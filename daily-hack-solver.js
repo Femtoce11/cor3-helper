@@ -170,7 +170,23 @@
     }
 
     // =============================================
-    // STEP 2: Click "Start Task" button
+    // STEP 2: Select "Daily Ops" section
+    // =============================================
+    async function selectDailyOpsSection() {
+        hlog('Waiting for Start Task button...');
+        const dailyOpsBtn = document.querySelector('.game-center-grid button:nth-child(2)');
+        if (!startBtn) {
+            hlog('Could not find Daily Ops section button (.game-center-grid button:nth-child(2))', 'error');
+            return false;
+        }
+        click(dailyOpsBtn);
+        hlog('Clicked Daily Ops section');
+        await sleep(1000);
+        return true;
+    }
+
+    // =============================================
+    // STEP 3: Click "Start Task" button
     // =============================================
     async function clickStartTask() {
         hlog('Waiting for Start Task button...');
@@ -504,7 +520,11 @@
         const tabOpened = await openDailyOpsTab();
         if (!tabOpened || window.__dailyHackAbort) return { success: false, abort: true };
 
-        // STEP 2: Click "Start Task"
+        // STEP 2: Select Daily Ops section
+        const sectionSelected = await selectDailyOpsSection();
+        if (!sectionSelected || window.__dailyHackAbort) return { success: false, abort: true };
+
+        // STEP 3: Click "Start Task"
         const taskStarted = await clickStartTask();
         if (!taskStarted || window.__dailyHackAbort) return { success: false, abort: true };
 

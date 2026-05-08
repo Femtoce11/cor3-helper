@@ -88,6 +88,12 @@
         window.postMessage({ type: 'COR3_AUTOJOB_ENABLE_DECRYPT_SOLVER' }, '*');
     }
 
+    // Ensure the ICE wall solver is enabled (content.js will inject it)
+    function ensureIceWallSolverEnabled() {
+        log('Ensuring ICE wall solver is enabled');
+        window.postMessage({ type: 'COR3_AUTOJOB_ENABLE_ICE_WALL_SOLVER' }, '*');
+    }
+
     // Wait for a specific postMessage event type, with timeout
     function waitForEvent(eventType, timeoutMs) {
         timeoutMs = timeoutMs || 15000;
@@ -223,8 +229,9 @@
             if (hackResult.error) {
                 throw new Error('Hack failed: ' + (hackResult.error.message || JSON.stringify(hackResult.error)));
             }
-            // Hack minigame started — auto-decrypt-solver will handle it
+            // Hack minigame started — solvers will handle it
             ensureDecryptSolverEnabled();
+            ensureIceWallSolverEnabled();
             log('Hack minigame started, waiting for solver to complete...');
             // Wait briefly for SAI update — solver often finishes so fast the event is missed
             var saiUpdateReceived = false;

@@ -2090,6 +2090,37 @@ autoDecryptToggle.addEventListener('change', async () => {
     }
 });
 
+// --- Auto ICE Wall Hacking ---
+const autoIceWallToggle = document.getElementById('autoIceWallToggle');
+const iceWallStatus = document.getElementById('iceWallStatus');
+
+function updateIceWallStatusLabel(enabled) {
+    iceWallStatus.textContent = enabled ? 'Active' : 'Off';
+    iceWallStatus.style.color = enabled ? 'var(--accent-green)' : 'var(--text-dim)';
+}
+
+// Load saved state on popup open
+chrome.storage.sync.get('autoIceWallEnabled', (data) => {
+    const enabled = !!data.autoIceWallEnabled;
+    autoIceWallToggle.checked = enabled;
+    updateIceWallStatusLabel(enabled);
+});
+
+autoIceWallToggle.addEventListener('change', async () => {
+    const enabled = autoIceWallToggle.checked;
+    await chrome.storage.sync.set({ autoIceWallEnabled: enabled });
+    updateIceWallStatusLabel(enabled);
+
+    // Send toggle message to content script
+    const tab = await getCor3Tab();
+    if (tab) {
+        chrome.tabs.sendMessage(tab.id, {
+            action: "toggleIceWallSolver",
+            enabled: enabled
+        }).catch(() => {});
+    }
+});
+
 // --- Auto Daily Hacking ---
 const autoDailyHackToggle = document.getElementById('autoDailyHackToggle');
 const dailyHackStatus = document.getElementById('dailyHackStatus');
@@ -2159,6 +2190,12 @@ chrome.storage.onChanged.addListener((changes, area) => {
         const enabled = !!changes.autoDailyHackEnabled.newValue;
         autoDailyHackToggle.checked = enabled;
         updateDailyHackStatusLabel(enabled);
+    }
+    // Sync ICE Wall toggle state (e.g. when auto-job enables it)
+    if (area === 'sync' && changes.autoIceWallEnabled) {
+        const enabled = !!changes.autoIceWallEnabled.newValue;
+        autoIceWallToggle.checked = enabled;
+        updateIceWallStatusLabel(enabled);
     }
 });
 
@@ -2597,7 +2634,13 @@ function renderMercenaries(data) {
         const traitName = merc.traitName || merc.trait || '--';
         const traitDesc = merc.traitDescription || '';
 
-        let html = `<div class="merc-details">`;
+        // Avatar image (avatarSeed is now a CDN URL)
+        let avatarHtml = '';
+        if (merc.avatarSeed && merc.avatarSeed.startsWith('http')) {
+            avatarHtml = `<img class="merc-avatar" src="${merc.avatarSeed}" alt="${merc.callsign || ''}" loading="lazy">`;
+        }
+
+        let html = `${avatarHtml}<div class="merc-details">`;
         html += `<div class="merc-name">${merc.callsign || merc.name || 'Unknown'}</div>`;
         html += `<div style="margin-bottom:4px;"><span class="merc-status ${statusClass}">${status}</span>${restTimer}</div>`;
         html += `<div class="merc-info">`;

@@ -1040,9 +1040,10 @@
         /* Expedition info card */
         .step-icon { margin-right: 4px; }
         /* Mercenary cards */
-        .merc-card { background: var(--bg-card); border-radius: 8px; padding: 8px 10px; margin-bottom: 6px; border: 1px solid var(--border); cursor: pointer; transition: border-color 0.2s; }
+        .merc-card { background: var(--bg-card); border-radius: 8px; padding: 8px 10px; margin-bottom: 6px; border: 1px solid var(--border); cursor: pointer; transition: border-color 0.2s; display: flex; gap: 10px; align-items: flex-start; }
         .merc-card:hover { border-color: var(--accent-cyan); }
         .merc-card.selected { border-color: var(--accent-green); box-shadow: 0 0 6px rgba(0,255,120,0.2); }
+        .merc-avatar { width: 40px; height: 40px; border-radius: 50%; object-fit: contain; background: var(--bg-primary); flex-shrink: 0; }
         .merc-name { font-size: 12px; font-weight: bold; color: var(--accent-cyan); margin-bottom: 2px; }
         .merc-status { font-size: 9px; padding: 2px 6px; border-radius: 3px; font-weight: bold; }
         .merc-status.available { background: var(--accent-green); color: var(--bg-primary); }
@@ -1434,6 +1435,17 @@
             </div>
         </div>
         <div id="dailyHackInfo" style="display:none;font-size:10px;color:var(--accent-cyan);margin-top:6px;"></div>
+        <!-- Auto ICE Wall Hacking -->
+        <div class="auto-decrypt-row" style="margin-top:8px;">
+            <span class="decrypt-label">&#x1F513; Auto ICE Wall Hacking</span>
+            <div style="display:flex;align-items:center;gap:8px;">
+                <span class="decrypt-status" id="iceWallStatus">Off</span>
+                <label class="alarm-toggle-switch">
+                    <input type="checkbox" id="autoIceWallToggle">
+                    <span class="slider-track"></span>
+                </label>
+            </div>
+        </div>
         <!-- Auto Daily Hacking -->
         <div class="auto-decrypt-row" style="margin-top:8px;">
             <span class="decrypt-label">&#x1F513; Auto Daily Hacking</span>
