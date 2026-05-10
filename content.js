@@ -5,6 +5,38 @@ function isContextValid() {
     try { return !!chrome.runtime.id; } catch (e) { return false; }
 }
 
+// Auto Update Markets toggle: when OFF, only explicit refresh operations update market data in storage
+let _autoUpdateMarkets = true;
+let _marketRefreshInProgress = false;
+let _autoUpdateMarketsLastRefresh = 0;
+let _seqRefreshRunning = false;
+const _AUTO_UPDATE_MARKETS_INTERVAL = 10 * 60 * 1000; // 10 minutes
+try { chrome.storage.sync.get('autoUpdateMarkets', (data) => {
+    if (data.autoUpdateMarkets !== undefined) _autoUpdateMarkets = data.autoUpdateMarkets;
+}); } catch (e) {}
+
+// Periodic market refresh when Auto Update Markets is enabled
+setInterval(() => {
+    if (!_autoUpdateMarkets) return;
+    if (!isContextValid()) return;
+    if (_marketRefreshInProgress || _seqRefreshRunning) return;
+    const now = Date.now();
+    if (now - _autoUpdateMarketsLastRefresh < _AUTO_UPDATE_MARKETS_INTERVAL) return;
+    _autoUpdateMarketsLastRefresh = now;
+    _marketRefreshInProgress = true;
+    console.log('[COR3 Helper] Auto Update Markets: triggering periodic 10-min refresh');
+    window.postMessage({ type: 'COR3_REFRESH_ALL_MARKETS_SEQ' }, '*');
+    // Safety: clear flag after 30s if completion signal not received
+    setTimeout(() => { _marketRefreshInProgress = false; }, 30000);
+    function onDone(evt) {
+        if (evt.data && evt.data.type === 'COR3_ALL_MARKETS_REFRESHED') {
+            window.removeEventListener('message', onDone);
+            _marketRefreshInProgress = false;
+        }
+    }
+    window.addEventListener('message', onDone);
+}, 30000); // check every 30s
+
 // --- Listen for data relayed from content-early.js (MAIN world) ---
 window.addEventListener('message', (event) => {
     if (event.source !== window) return;
@@ -62,14 +94,26 @@ window.addEventListener('message', (event) => {
         });
     }
     if (event.data && event.data.type === 'COR3_WS_MARKET') {
-        chrome.storage.local.set({ marketData: event.data.market, marketDataUpdatedAt: now });
+        if (_autoUpdateMarkets || _marketRefreshInProgress) {
+            chrome.storage.local.set({ marketData: event.data.market, marketDataUpdatedAt: now });
+        }
     }
     if (event.data && event.data.type === 'COR3_WS_DARK_MARKET') {
-        chrome.storage.local.set({ darkMarketData: event.data.market, darkMarketAvailable: true, darkMarketDataUpdatedAt: now });
+        if (_autoUpdateMarkets || _marketRefreshInProgress) {
+            chrome.storage.local.set({ darkMarketData: event.data.market, darkMarketAvailable: true, darkMarketDataUpdatedAt: now });
+        }
+    }
+    if (event.data && event.data.type === 'COR3_WS_SOYUZ_MARKET') {
+        if (_autoUpdateMarkets || _marketRefreshInProgress) {
+            chrome.storage.local.set({ soyuzMarketData: event.data.market, soyuzMarketAvailable: true, soyuzMarketDataUpdatedAt: now });
+        }
     }
     // Handle dark market unreachable — keep cached data, set flag
     if (event.data && event.data.type === 'COR3_WS_DARK_MARKET_UNREACHABLE') {
         chrome.storage.local.set({ darkMarketAvailable: false, darkMarketDataUpdatedAt: now });
+    }
+    if (event.data && event.data.type === 'COR3_WS_SOYUZ_MARKET_UNREACHABLE') {
+        chrome.storage.local.set({ soyuzMarketAvailable: false, soyuzMarketDataUpdatedAt: now });
     }
     if (event.data && event.data.type === 'COR3_BEARER_TOKEN') {
         chrome.storage.local.set({ bearerToken: event.data.token });
@@ -565,6 +609,15 @@ function getTimerRemainingSeconds(timerSource) {
                     resolve(null);
                 }
             });
+        } else if (timerSource === 'soyuz_jobs') {
+            chrome.storage.local.get('soyuzMarketData', (result) => {
+                if (result.soyuzMarketData && result.soyuzMarketData.nextJobsResetAt) {
+                    const diff = new Date(result.soyuzMarketData.nextJobsResetAt).getTime() - Date.now();
+                    resolve(diff > 0 ? Math.floor(diff / 1000) : 0);
+                } else {
+                    resolve(null);
+                }
+            });
         } else if (timerSource.startsWith('exp_')) {
             const expId = timerSource.substring(4);
             chrome.storage.local.get('expeditionsData', (result) => {
@@ -594,7 +647,7 @@ function clearAllIntervals() {
 
 async function checkAlarms() {
     try {
-        if (!isContextValid()) { clearAllIntervals(); return; }
+        if (!isContextValid()) return; // Skip cycle, keep interval alive
         for (const alarm of alarms) {
             if (!alarm.enabled || alarm.thresholdSeconds <= 0) continue;
             const remaining = await getTimerRemainingSeconds(alarm.timerSource);
@@ -612,7 +665,8 @@ async function checkAlarms() {
             }
         }
     } catch (e) {
-        if (e.message && e.message.includes('Extension context invalidated')) clearAllIntervals();
+        // Don't kill intervals on context invalidation — just skip this cycle
+        if (e.message && e.message.includes('Extension context invalidated')) return;
     }
 }
 
@@ -620,19 +674,42 @@ async function checkAlarms() {
 alarmsIntervalId = setInterval(() => checkAlarms(), 1000);
 
 // --- Auto-Refresh for Market Job Timers ---
-let autoRefreshSettings = { home_jobs: false, dark_jobs: false };
-let autoRefreshRetryPending = { home_jobs: false, dark_jobs: false };
+let autoRefreshSettings = { home_jobs: false, dark_jobs: false, soyuz_jobs: false };
+let autoRefreshRetryPending = { home_jobs: false, dark_jobs: false, soyuz_jobs: false };
+let autoRefreshExpiredRetryAt = { home_jobs: 0, dark_jobs: 0, soyuz_jobs: 0 }; // timestamp when next expired retry is allowed
 
 // Load auto-refresh settings on startup
 try { chrome.storage.sync.get('autoRefresh', (data) => {
     if (data.autoRefresh) autoRefreshSettings = data.autoRefresh;
 }); } catch (e) {}
 
+// Keep auto-refresh settings in sync when changed from popup (even if popup doesn't send updateAutoRefresh)
+try { chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'sync' && changes.autoRefresh && changes.autoRefresh.newValue) {
+        autoRefreshSettings = changes.autoRefresh.newValue;
+    }
+    if (area === 'sync' && changes.autoUpdateMarkets !== undefined) {
+        _autoUpdateMarkets = changes.autoUpdateMarkets.newValue !== false;
+    }
+    // Clear expired retry cooldown when market data arrives with a future nextJobsResetAt
+    if (area === 'local') {
+        const marketKeyMap = { marketData: 'home_jobs', darkMarketData: 'dark_jobs', soyuzMarketData: 'soyuz_jobs' };
+        for (const [storageKey, refreshKey] of Object.entries(marketKeyMap)) {
+            if (changes[storageKey] && changes[storageKey].newValue) {
+                const resetAt = changes[storageKey].newValue.nextJobsResetAt;
+                if (resetAt && new Date(resetAt).getTime() > Date.now()) {
+                    autoRefreshExpiredRetryAt[refreshKey] = 0; // timer updated — clear cooldown
+                }
+            }
+        }
+    }
+}); } catch (e) {}
+
 function getMarketTimerSeconds(which) {
     return new Promise((resolve) => {
         if (!isContextValid()) { resolve(null); return; }
         try {
-            const key = which === 'home_jobs' ? 'marketData' : 'darkMarketData';
+            const key = which === 'home_jobs' ? 'marketData' : which === 'soyuz_jobs' ? 'soyuzMarketData' : 'darkMarketData';
             chrome.storage.local.get(key, (result) => {
                 const data = result[key];
                 if (data && data.nextJobsResetAt) {
@@ -646,38 +723,75 @@ function getMarketTimerSeconds(which) {
     });
 }
 
-function doAutoRefreshMarket(which) {
-    if (which === 'home_jobs') {
-        window.postMessage({ type: 'COR3_REFRESH_MARKET' }, '*');
-    } else {
-        window.postMessage({ type: 'COR3_REFRESH_DARK_MARKET' }, '*');
-    }
-}
-
 async function checkAutoRefresh() {
     try {
-        if (!isContextValid()) { clearAllIntervals(); return; }
-        for (const key of ['home_jobs', 'dark_jobs']) {
+        // When context is invalid, we can't read storage but auto-refresh uses
+        // window.postMessage which still works. Skip storage-dependent timer checks
+        // but keep the interval alive so it resumes if context is restored (page reload).
+        if (!isContextValid()) return;
+        if (_seqRefreshRunning) return; // sequential refresh already in progress
+
+        // Check if ANY enabled market timer hit 0 (with 60s retry cooldown for expired timers)
+        let needsRefresh = false;
+        let expiredMarkets = [];
+        const now = Date.now();
+        for (const key of ['home_jobs', 'dark_jobs', 'soyuz_jobs']) {
             if (!autoRefreshSettings[key]) continue;
             if (autoRefreshRetryPending[key]) continue;
 
             const sec = await getMarketTimerSeconds(key);
             if (sec !== null && sec <= 0) {
-                autoRefreshRetryPending[key] = true;
-                doAutoRefreshMarket(key);
-
-                // After 10s, re-check. If still 0, retry.
-                setTimeout(async () => {
-                    autoRefreshRetryPending[key] = false;
-                    const newSec = await getMarketTimerSeconds(key);
-                    if (newSec !== null && newSec <= 0) {
-                        // Will be picked up by next checkAutoRefresh cycle
-                    }
-                }, 10000);
+                // If timer is expired, only retry if 60s cooldown has passed
+                if (autoRefreshExpiredRetryAt[key] && now < autoRefreshExpiredRetryAt[key]) continue;
+                needsRefresh = true;
+                expiredMarkets.push(key);
             }
         }
+
+        if (needsRefresh) {
+            _seqRefreshRunning = true;
+            // Mark expired markets as pending and set 60s retry cooldown
+            for (const key of expiredMarkets) {
+                autoRefreshRetryPending[key] = true;
+                autoRefreshExpiredRetryAt[key] = now + 60000; // retry again in 60s if still expired
+            }
+
+            // Build order: only include expired markets, priority: soyuz → dark → home
+            var order = [];
+            if (expiredMarkets.includes('soyuz_jobs')) order.push('soyuz');
+            if (expiredMarkets.includes('dark_jobs')) order.push('dark');
+            if (expiredMarkets.includes('home_jobs')) order.push('home');
+
+            // Trigger sequential refresh (one market at a time)
+            _marketRefreshInProgress = true;
+            _autoUpdateMarketsLastRefresh = Date.now();
+            var msg = { type: 'COR3_REFRESH_ALL_MARKETS_SEQ' };
+            if (order.length > 0) msg.order = order;
+            window.postMessage(msg, '*');
+
+            // After 30s max, clear the pending flags so next cycle can retry if needed
+            setTimeout(() => {
+                _seqRefreshRunning = false;
+                for (const key of ['home_jobs', 'dark_jobs', 'soyuz_jobs']) {
+                    autoRefreshRetryPending[key] = false;
+                }
+            }, 30000);
+
+            // Listen for completion signal to clear flags early
+            function onAllDone(evt) {
+                if (evt.data && evt.data.type === 'COR3_ALL_MARKETS_REFRESHED') {
+                    window.removeEventListener('message', onAllDone);
+                    _seqRefreshRunning = false;
+                    for (const key of ['home_jobs', 'dark_jobs', 'soyuz_jobs']) {
+                        autoRefreshRetryPending[key] = false;
+                    }
+                }
+            }
+            window.addEventListener('message', onAllDone);
+        }
     } catch (e) {
-        if (e.message && e.message.includes('Extension context invalidated')) clearAllIntervals();
+        // Don't kill intervals on context invalidation — just skip this cycle
+        if (e.message && e.message.includes('Extension context invalidated')) return;
     }
 }
 
@@ -748,13 +862,36 @@ function stopIceWallSolver() {
     iceWallSolverInjected = false;
 }
 
+// --- Auto Simple Decrypt Solver ---
+let simpleDecryptSolverInjected = false;
+
+function injectSimpleDecryptSolver() {
+    if (simpleDecryptSolverInjected) {
+        window.postMessage({ type: 'COR3_START_SIMPLE_DECRYPT_SOLVER' }, '*');
+        return;
+    }
+    simpleDecryptSolverInjected = true;
+    const script = document.createElement('script');
+    script.src = chrome.runtime.getURL('simple-decrypt-solver.js');
+    script.onload = () => script.remove();
+    (document.head || document.documentElement).appendChild(script);
+}
+
+function stopSimpleDecryptSolver() {
+    window.postMessage({ type: 'COR3_STOP_SIMPLE_DECRYPT_SOLVER' }, '*');
+    simpleDecryptSolverInjected = false;
+}
+
 // Auto-start solvers if they were enabled before page load
-chrome.storage.sync.get(['autoDecryptEnabled', 'autoIceWallEnabled'], (data) => {
+chrome.storage.sync.get(['autoDecryptEnabled', 'autoIceWallEnabled', 'autoSimpleDecryptEnabled'], (data) => {
     if (data.autoDecryptEnabled) {
         injectDecryptSolver();
     }
     if (data.autoIceWallEnabled) {
         injectIceWallSolver();
+    }
+    if (data.autoSimpleDecryptEnabled) {
+        injectSimpleDecryptSolver();
     }
 });
 
@@ -785,13 +922,36 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         window.postMessage({ type: 'COR3_REQUEST_MARKET' }, '*');
         sendResponse({ success: true });
     } else if (request.action === "refreshMarket") {
+        _marketRefreshInProgress = true;
+        _autoUpdateMarketsLastRefresh = Date.now();
+        setTimeout(() => { _marketRefreshInProgress = false; }, 10000);
         window.postMessage({ type: 'COR3_REFRESH_MARKET' }, '*');
         sendResponse({ success: true });
     } else if (request.action === "requestDarkMarket") {
         window.postMessage({ type: 'COR3_REQUEST_DARK_MARKET' }, '*');
         sendResponse({ success: true });
     } else if (request.action === "refreshDarkMarket") {
+        _marketRefreshInProgress = true;
+        _autoUpdateMarketsLastRefresh = Date.now();
+        setTimeout(() => { _marketRefreshInProgress = false; }, 10000);
         window.postMessage({ type: 'COR3_REFRESH_DARK_MARKET' }, '*');
+        sendResponse({ success: true });
+    } else if (request.action === "requestSoyuzMarket") {
+        window.postMessage({ type: 'COR3_REQUEST_SOYUZ_MARKET' }, '*');
+        sendResponse({ success: true });
+    } else if (request.action === "refreshSoyuzMarket") {
+        _marketRefreshInProgress = true;
+        _autoUpdateMarketsLastRefresh = Date.now();
+        setTimeout(() => { _marketRefreshInProgress = false; }, 10000);
+        window.postMessage({ type: 'COR3_REFRESH_SOYUZ_MARKET' }, '*');
+        sendResponse({ success: true });
+    } else if (request.action === "refreshAllMarketsSeq") {
+        _marketRefreshInProgress = true;
+        _autoUpdateMarketsLastRefresh = Date.now();
+        var msg = { type: 'COR3_REFRESH_ALL_MARKETS_SEQ' };
+        if (request.skipLots) msg.skipLots = true;
+        if (request.order) msg.order = request.order;
+        window.postMessage(msg, '*');
         sendResponse({ success: true });
     } else if (request.action === "leaveStash") {
         window.postMessage({ type: 'COR3_LEAVE_STASH' }, '*');
@@ -819,6 +979,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             injectIceWallSolver();
         } else {
             stopIceWallSolver();
+        }
+        sendResponse({ success: true });
+    } else if (request.action === "toggleSimpleDecryptSolver") {
+        if (request.enabled) {
+            injectSimpleDecryptSolver();
+        } else {
+            stopSimpleDecryptSolver();
         }
         sendResponse({ success: true });
     } else if (request.action === "toggleDailyHackSolver") {
@@ -1245,6 +1412,33 @@ window.addEventListener('message', (event) => {
             injectDecryptSolver();
         });
     }
+    if (event.data && event.data.type === 'COR3_ICE_WALL_STATUS') {
+        chrome.storage.local.set({
+            iceWallSolverStatus: {
+                message: event.data.message,
+                level: event.data.level || 'info',
+                timestamp: Date.now()
+            }
+        });
+    }
+    if (event.data && event.data.type === 'COR3_SIMPLE_DECRYPT_STATUS') {
+        chrome.storage.local.set({
+            simpleDecryptSolverStatus: {
+                message: event.data.message,
+                level: event.data.level || 'info',
+                timestamp: Date.now()
+            }
+        });
+    }
+    if (event.data && event.data.type === 'COR3_AUTOJOB_ENABLE_SIMPLE_DECRYPT_SOLVER') {
+        chrome.storage.sync.get('autoSimpleDecryptEnabled', (result) => {
+            if (!result.autoSimpleDecryptEnabled) {
+                chrome.storage.sync.set({ autoSimpleDecryptEnabled: true });
+                console.log('[COR3 Helper] Auto Job: Enabling Simple Decrypt solver for minigame');
+            }
+            injectSimpleDecryptSolver();
+        });
+    }
     if (event.data && event.data.type === 'COR3_AUTOJOB_ENABLE_ICE_WALL_SOLVER') {
         // Auto-enable the ICE Wall solver when auto-job needs it
         chrome.storage.sync.get('autoIceWallEnabled', (result) => {
@@ -1277,6 +1471,11 @@ window.addEventListener('message', (event) => {
     }
     if (event.data && event.data.type === 'COR3_AUTOJOB_DONE') {
         chrome.storage.local.set({ autoJobsRunning: false });
+    }
+    if (event.data && event.data.type === 'COR3_ALL_MARKETS_REFRESHED') {
+        _marketRefreshInProgress = false;
+        // Signal background.js that sequential refresh is complete
+        chrome.storage.local.set({ _allMarketsRefreshed: Date.now() });
     }
     if (event.data && event.data.type === 'COR3_AUTOJOB_SAVE_COMPLETED') {
         // Merge completed job results into storage (accumulate across runs within same reset cycle)

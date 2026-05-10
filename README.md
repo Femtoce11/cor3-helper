@@ -13,16 +13,18 @@ The use of automation tools may be detectable by the site's developers and could
 - **Theme Support** — Multiple color themes to match your preference
 - **Pop-up Window / Panel Support** — Exports the UI to pop-up window or side panel depending on your preference
 - **Refresh System** — Either by using "refresh all" button or by clicking "refresh" for each section, it refreshes related data available on the UI
-- **Pinned Timers** — Every timer except "RESTING" timer for mercenaries can be pinned to top of the UI for tracking.
+- **Pinned Timers** — Every timer except "RESTING" timer for mercenaries can be pinned to top of the UI for tracking
 - **Auto Job Refresh** — If the "auto-refresh" checkbox next to pinned job timer is enabled, jobs get automatically refreshed when they reach zero. This gives users more jobs per day by triggering them earlier and giving enough time to finish
 - **Auto Decrypt Hacking** — Automatically solves decryption hacks when enabled. Just toggle it on and the extension handles the rest
-- **Auto Daily Hacking** — Fully automated daily ops solver. Opens daily ops tab, starts the task, detects the puzzle type (System Log Integrity or Signal Hack), solves it end-to-end, closes windows, and auto-disables the toggle after completion. Includes retry logic (up to 3 attempts) with automatic window cleanup between retries.
-- **Auto Job Solver** — Automated market job solver supporting 9 job types: File Decryption, IP Injection, Data Download, Log Deletion, Log Download, Decrypt & Extract, File Elimination, Data Upload, and IP Cleanup. Features a tabbed UI showing both HOME and D4RK market jobs with per-type checkboxes, a start/stop button, and a debug console with Jobs and Logs tabs. Jobs are sorted by server priority (furthest first) and automatically handle endpoint setting, server login (with hack if needed), type-specific actions, and job completion with reward tracking. Checks server maintenance status before each job and skips jobs on servers currently in maintenance.
+- **Auto ICE Wall Hacking** — Automatically solves ICE Wall hacking minigame. Detects triangle patterns and clicks them in the correct sequence to complete the puzzle
+- **Auto Simple Decrypt Hacking** — Automatically solves Simple Decrypt hacking minigame. Clicks the decrypt button and monitors progress until completion
+- **Auto Daily Hacking** — Fully automated daily ops solver. Opens daily ops tab, starts the task, detects the puzzle type (System Log Integrity or Signal Hack), solves it end-to-end, closes windows, and auto-disables the toggle after completion. Includes retry logic (up to 3 attempts) with automatic window cleanup between retries
+- **Auto Job Solver** — Automated market job solver supporting 9 job types: File Decryption, IP Injection, Data Download, Log Deletion, Log Download, Decrypt & Extract, File Elimination, Data Upload, and IP Cleanup. Features a tabbed UI showing HOME, D4RK, and SOYUZ market jobs with per-type checkboxes, a start/stop button, and a debug console with Jobs and Logs tabs. Jobs are sorted by server priority (furthest first) and job type priority, automatically handle endpoint setting (with hack-through if unreachable), server login (with hack if no active access), type-specific actions, and job completion with reward tracking. Checks server maintenance status before each job and skips jobs on servers currently in maintenance
 - **Auto Finish All Jobs** — Background scheduling that automatically starts the Auto Job Solver when new jobs become available after reset. Uses chrome.alarms to schedule runs at job reset times with retry logic. Works even when the popup is closed. Server maintenance–aware: skips jobs on servers currently in maintenance and schedules retries at the earlier of job reset or maintenance end.
 - **Auto Clear Generated IPs** — Periodically cleans up auto-generated IPs (10.x, 172.x, 192.x, 198.x) from servers, keeping at most 10 per server. Runs every 3 hours in the background. Automatically hacks servers if access has expired.
 - **D4RK Market Path-Through** — When the D4RK market server is unreachable (no-path-to-server), automatically attempts to establish a path by setting endpoints to intermediate servers (RM7-E1L5 → RM7-E1SCP), hacking them if needed for access, then retrying the D4RK endpoint.
 - **Daily Ops** — Countdown to your next daily ops task with streak bonus, difficulty, and claim status
-- **Market Monitoring** — View Market-1 (HOME) and Market-2 (D4RK) stats, job reset timers, items list, and jobs list (with Category/Server/Reward columns)
+- **Market Monitoring** — View Market-1 (HOME), Market-2 (D4RK), and Market-3 (SOYUZ) stats, job reset timers, items list, and jobs list (with Category/Server/Reward columns)
 - **Active Expedition Tracking** — See active expeditions with remaining timer, cost, risk, insurance, and mercenary info
 - **Expedition Decisions** — View and respond to pending decisions by clicking them with score calculation
 - **Auto Choose Decision** — Auto choose decisions 1-min before deadline according to their scoring. Configure loot/risk modifiers to change how scoring works.
@@ -66,8 +68,10 @@ The use of automation tools may be detectable by the site's developers and could
 - **Pin timers** to keep them visible at the top of the popup.
 - **Auto job refresh** feature can be used to automatically refresh jobs when needed after pinning timers and clicking the "Auto" checkbox next to it.
 - **Auto Decrypt Hacking** — Toggle the switch to enable. It automatically solves decryption hacks whenever one appears.
+- **Auto ICE Wall Hacking** — Toggle the switch to enable. It automatically solves ICE Wall hacking minigames by detecting and clicking triangle patterns.
+- **Auto Simple Decrypt Hacking** — Toggle the switch to enable. It automatically solves Simple Decrypt hacking minigames by clicking the decrypt button and monitoring progress.
 - **Auto Daily Hacking** — Toggle the switch to enable. It opens daily ops, starts the task, solves the puzzle automatically, and disables itself when done.
-- **Auto Job Solver** — Toggle the switch to reveal job selection UI. Choose job types from HOME and D4RK market tabs, then click Start. The debug console shows real-time job progress and logs. Toggle "Auto Finish All Jobs" for fully automatic operation.
+- **Auto Job Solver** — Toggle the switch to reveal job selection UI. Choose job types from HOME, D4RK, and SOYUZ market tabs, then click Start. The debug console shows real-time job progress and logs. Toggle "Auto Finish All Jobs" for fully automatic operation.
 - **Auto Clear Generated IPs** — Toggle the switch to enable. Runs every 3 hours in the background to clean up excess auto-generated IPs from servers.
 - **Set decision scores** by clicking edit button. After the change click save button to keep the changes. This way you can change default scoring that extension shows next to each decision.
 - **Enable auto choose decision** for extension to automatically choose best decision according to scoring which is calculated by default/modified loot/risk modifiers.
@@ -78,19 +82,21 @@ The use of automation tools may be detectable by the site's developers and could
 
 ## Files
 
-| File                   | Description                                                                                                                       |
-|------------------------|-----------------------------------------------------------------------------------------------------------------------------------|
-| `manifest.json`        | Extension manifest (Manifest V3) — permissions include storage, tabs, alarms, sidePanel                                           |
-| `popup.html`           | Popup UI (HTML + CSS) — includes auto job solver section, debug console, and all toggle UIs                                       |
-| `popup.js`             | Popup logic, rendering, alarm management, auto job solver UI, debug console, live storage update listeners                        |
-| `content-early.js`     | Injected at `document_start` — intercepts WebSocket/HTTP polling messages, WS send functions, D4RK path-through logic             |
-| `content.js`           | Injected at `document_idle` — relays data to storage, handles auto-refresh, auto job solver injection, notification repositioning |
-| `background.js`        | Service worker — auto finish all jobs scheduling, auto clear IPs scheduling, expedition polling, alarm management                 |
-| `ws-interceptor.js`    | WebSocket interceptor helper                                                                                                      |
-| `decrypt-solver.js`    | Auto-solver for decryption hacking minigame (injected into page when enabled)                                                     |
-| `daily-hack-solver.js` | Fully automated daily ops solver — opens tab, starts task, detects puzzle, solves it, closes windows, auto-disables toggle        |
-| `auto-job-solver.js`   | MAIN world auto job solver engine — handles 9 job types with promise-based WS event orchestration                                 |
-| `versions.json`        | Version tracking file for update checks (extension, web, system, patch)                                                           |
+| File                       | Description                                                                                                                       |
+|----------------------------|-----------------------------------------------------------------------------------------------------------------------------------|
+| `manifest.json`            | Extension manifest (Manifest V3) — permissions include storage, tabs, alarms, sidePanel                                           |
+| `popup.html`               | Popup UI (HTML + CSS) — includes auto job solver section, debug console, and all toggle UIs                                       |
+| `popup.js`                 | Popup logic, rendering, alarm management, auto job solver UI, debug console, live storage update listeners                        |
+| `content-early.js`         | Injected at `document_start` — intercepts WebSocket/HTTP polling messages, WS send functions, D4RK path-through logic             |
+| `content.js`               | Injected at `document_idle` — relays data to storage, handles auto-refresh, auto job solver injection, notification repositioning |
+| `background.js`            | Service worker — auto finish all jobs scheduling, auto clear IPs scheduling, expedition polling, alarm management                 |
+| `ws-interceptor.js`        | WebSocket interceptor helper                                                                                                      |
+| `decrypt-solver.js`        | Auto-solver for decryption hacking minigame (injected into page when enabled)                                                     |
+| `ice-wall-solver.js`       | Auto-solver for ICE Wall hacking minigame — detects triangle patterns and clicks them in sequence                                 |
+| `simple-decrypt-solver.js` | Auto-solver for Simple Decrypt hacking minigame — clicks decrypt button and monitors progress                                     |
+| `daily-hack-solver.js`     | Fully automated daily ops solver — opens tab, starts task, detects puzzle, solves it, closes windows, auto-disables toggle        |
+| `auto-job-solver.js`       | MAIN world auto job solver engine — handles 9 job types with promise-based WS event orchestration                                 |
+| `versions.json`            | Version tracking file for update checks (extension, web, system, patch)                                                           |
 
 ## Requirements
 

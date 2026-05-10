@@ -16,9 +16,25 @@
 
     // D4RK market server ID — must set endpoint before interacting with D4RK jobs
     var DARK_MARKET_SERVER_ID = '019d29c5-4b37-79bf-b23e-304d8ea03c15';
+    // SOYUZ market server ID — must set endpoint before interacting with SOYUZ jobs
+    var SOYUZ_MARKET_SERVER_ID = '019da6f1-16f7-75a6-b6d3-0b1d5f92a108';
 
     // Server priority order (furthest first)
-    var SERVER_PRIORITY = ['D4RK RM7CE', 'RM7-S4L4', 'RM7-E1SCP', 'RM7-E1L5', 'RM7-E1L3'];
+    var SERVER_PRIORITY = ['RM7-N1L1', 'RM7-W3NCP', 'RM7-N2L3', 'RM7-N2L2', 'RM7-N2ECP', 'D4RK RM7CE', 'RM7-S4L4', 'RM7-E1SCP', 'RM7-E1L2CT', 'RM7-E1L5', 'RM7-E1L3'];
+
+    // Job type priority (lower index = processed first per server)
+    // Transit-affecting jobs first, then simple jobs, then complex multi-step jobs
+    var JOB_TYPE_PRIORITY = [
+        'IP Injection',
+        'IP Cleanup',
+        'Data Upload',
+        'Data Download',
+        'Log Deletion',
+        'Log Download',
+        'File Elimination',
+        'File Decryption',
+        'Decrypt & Extract'
+    ];
 
     // Server connection tree — maps each server name to all server IDs on the path
     // from HOME to that server (excluding HOME, which cannot be in maintenance).
@@ -29,6 +45,10 @@
         ],
         'RM7-E1L5': [
             { name: 'RM7-E1L5', id: '019d1b0a-13a9-77dd-b41f-374ee144bd07' }
+        ],
+        'RM7-E1L2CT': [
+            { name: 'RM7-E1L5', id: '019d1b0a-13a9-77dd-b41f-374ee144bd07' },
+            { name: 'RM7-E1L2CT', id: '019d53aa-5101-7f08-b3dd-378b0ddcf7d0' }
         ],
         'RM7-E1SCP': [
             { name: 'RM7-E1L5', id: '019d1b0a-13a9-77dd-b41f-374ee144bd07' },
@@ -43,6 +63,36 @@
             { name: 'RM7-E1L5', id: '019d1b0a-13a9-77dd-b41f-374ee144bd07' },
             { name: 'RM7-E1SCP', id: '019d1b0a-13a9-77dd-b41f-3a21d490cb2d' },
             { name: 'D4RK RM7CE', id: '019d29c5-4b37-79bf-b23e-304d8ea03c15' }
+        ],
+        'RM7-N2ECP': [
+            { name: 'RM7-E1L3', id: '019d1b0a-13a9-77dd-b41f-33f06f2df284' },
+            { name: 'RM7-N2ECP', id: '019da6f1-16f7-75a6-b6d3-0b1d5f92a105' }
+        ],
+        'RM7-N2L2': [
+            { name: 'RM7-E1L3', id: '019d1b0a-13a9-77dd-b41f-33f06f2df284' },
+            { name: 'RM7-N2ECP', id: '019da6f1-16f7-75a6-b6d3-0b1d5f92a105' },
+            { name: 'RM7-N2L2', id: '019da6f1-16f7-75a6-b6d3-0b1d5f92a101' }
+        ],
+        'RM7-N2L3': [
+            { name: 'RM7-E1L3', id: '019d1b0a-13a9-77dd-b41f-33f06f2df284' },
+            { name: 'RM7-N2ECP', id: '019da6f1-16f7-75a6-b6d3-0b1d5f92a105' },
+            { name: 'RM7-N2L2', id: '019da6f1-16f7-75a6-b6d3-0b1d5f92a101' },
+            { name: 'RM7-N2L3', id: '019da6f1-16f7-75a6-b6d3-0b1d5f92a102' }
+        ],
+        'RM7-W3NCP': [
+            { name: 'RM7-E1L3', id: '019d1b0a-13a9-77dd-b41f-33f06f2df284' },
+            { name: 'RM7-N2ECP', id: '019da6f1-16f7-75a6-b6d3-0b1d5f92a105' },
+            { name: 'RM7-N2L2', id: '019da6f1-16f7-75a6-b6d3-0b1d5f92a101' },
+            { name: 'RM7-N2L3', id: '019da6f1-16f7-75a6-b6d3-0b1d5f92a102' },
+            { name: 'RM7-W3NCP', id: '019da6f1-16f7-75a6-b6d3-0b1d5f92a106' }
+        ],
+        'RM7-N1L1': [
+            { name: 'RM7-E1L3', id: '019d1b0a-13a9-77dd-b41f-33f06f2df284' },
+            { name: 'RM7-N2ECP', id: '019da6f1-16f7-75a6-b6d3-0b1d5f92a105' },
+            { name: 'RM7-N2L2', id: '019da6f1-16f7-75a6-b6d3-0b1d5f92a101' },
+            { name: 'RM7-N2L3', id: '019da6f1-16f7-75a6-b6d3-0b1d5f92a102' },
+            { name: 'RM7-W3NCP', id: '019da6f1-16f7-75a6-b6d3-0b1d5f92a106' },
+            { name: 'RM7-N1L1', id: '019da6f1-16f7-75a6-b6d3-0b1d5f92a104' }
         ]
     };
 
@@ -58,6 +108,11 @@
         return idx >= 0 ? idx : SERVER_PRIORITY.length;
     }
 
+    function getJobTypePriority(typeName) {
+        var idx = JOB_TYPE_PRIORITY.indexOf(typeName);
+        return idx >= 0 ? idx : JOB_TYPE_PRIORITY.length;
+    }
+
     function humanDelay() {
         return 800 + Math.floor(Math.random() * 700);
     }
@@ -70,6 +125,24 @@
 
     function updateTracker() {
         window.postMessage({ type: 'COR3_AUTOJOB_TRACKER_UPDATE', tracker: jobQueue }, '*');
+    }
+
+    // Save completed/failed/bugged/skipped results incrementally so the debug console
+    // can show final statuses even before the entire queue finishes.
+    function saveCompletedResultsIncremental() {
+        var results = jobQueue.filter(function (j) {
+            return j.status === 'done' || j.status === 'failed' || j.status === 'bugged' || j.status === 'skipped';
+        }).map(function (j) {
+            return {
+                jobId: j.jobId, name: j.name, type: j.type,
+                serverName: j.serverName, marketKey: j.marketKey,
+                status: j.status, reward: j.reward || null,
+                error: j.error || null, completedAt: Date.now()
+            };
+        });
+        if (results.length > 0) {
+            window.postMessage({ type: 'COR3_AUTOJOB_SAVE_COMPLETED', jobs: results }, '*');
+        }
     }
 
     function signalDone() {
@@ -92,6 +165,31 @@
     function ensureIceWallSolverEnabled() {
         log('Ensuring ICE wall solver is enabled');
         window.postMessage({ type: 'COR3_AUTOJOB_ENABLE_ICE_WALL_SOLVER' }, '*');
+    }
+
+    // Ensure the Simple decrypt solver is enabled (content.js will inject it)
+    function ensureSimpleDecryptSolverEnabled() {
+        log('Ensuring Simple decrypt solver is enabled');
+        window.postMessage({ type: 'COR3_AUTOJOB_ENABLE_SIMPLE_DECRYPT_SOLVER' }, '*');
+    }
+
+    // Detect which hack minigame is active by polling the DOM
+    function detectHackType(pollMs) {
+        pollMs = pollMs || 3000;
+        return new Promise(function (resolve) {
+            var elapsed = 0;
+            var interval = 200;
+            function check() {
+                if (document.querySelector('[data-component-name="WallBoard"]')) return resolve('ice-wall');
+                if (document.querySelector('[data-sentry-component="ConfigHackApplication"]')) return resolve('decrypt');
+                if (document.querySelector('[data-component-name="SimpleDecryptApplication"]') ||
+                    document.querySelector('[data-sentry-component="SimpleDecryptApplication"]')) return resolve('simple-decrypt');
+                elapsed += interval;
+                if (elapsed >= pollMs) return resolve(null);
+                setTimeout(check, interval);
+            }
+            check();
+        });
     }
 
     // Wait for a specific postMessage event type, with timeout
@@ -147,20 +245,45 @@
 
     // ---- Job Type Handlers ----
 
-    // Step: Set endpoint to target server
-    async function stepSetEndpoint(serverId) {
-        log('Setting endpoint to server ' + serverId);
-        sendCmd('set.endpoint', { serverId: serverId });
+    // Reverse lookup: find server name from server ID using SERVER_PATH_MAP
+    function getServerNameById(serverId) {
+        for (var name in SERVER_PATH_MAP) {
+            var path = SERVER_PATH_MAP[name];
+            for (var i = 0; i < path.length; i++) {
+                if (path[i].id === serverId) return path[i].name;
+            }
+        }
+        return null;
+    }
 
-        // Race: wait for either endpoint result or unreachable
-        var raceResult = await new Promise(function (resolve) {
+    // Find the path map entry for a target server by its ID
+    function getPathForServerId(serverId) {
+        for (var name in SERVER_PATH_MAP) {
+            var path = SERVER_PATH_MAP[name];
+            if (path.length > 0 && path[path.length - 1].id === serverId) {
+                return path;
+            }
+        }
+        return null;
+    }
+
+    // Internal: send set.endpoint and wait for result
+    async function _sendSetEndpoint(serverId) {
+        sendCmd('set.endpoint', { serverId: serverId });
+        return await new Promise(function (resolve) {
             var timer;
             function endpointHandler(evt) {
                 if (evt.data && evt.data.type === 'COR3_WS_ENDPOINT_RESULT') {
                     cleanup();
-                    resolve({ ok: true, data: evt.data });
+                    // Check if the endpoint result is a no-path or maintenance error
+                    if (evt.data.success === false && evt.data.error &&
+                        (evt.data.error.message === 'no-path-to-server' || evt.data.error.message === 'server-in-maintenance')) {
+                        resolve({ ok: false, unreachable: true, errorMsg: evt.data.error.message });
+                    } else {
+                        resolve({ ok: true, data: evt.data });
+                    }
                 }
-                if (evt.data && evt.data.type === 'COR3_WS_DARK_MARKET_UNREACHABLE') {
+                if (evt.data && (evt.data.type === 'COR3_WS_DARK_MARKET_UNREACHABLE' || evt.data.type === 'COR3_WS_SOYUZ_MARKET_UNREACHABLE')) {
                     cleanup();
                     resolve({ ok: false, unreachable: true });
                 }
@@ -175,10 +298,47 @@
                 resolve({ ok: true, timeout: true }); // timeout is non-fatal
             }, 10000);
         });
+    }
+
+    // Step: Set endpoint to target server, with path-through hack on failure
+    async function stepSetEndpoint(serverId) {
+        log('Setting endpoint to server ' + serverId);
+        var raceResult = await _sendSetEndpoint(serverId);
 
         if (raceResult.unreachable) {
-            throw new Error('Server unreachable (no path to server) — may be in maintenance');
+            // Try path-through: hack intermediate servers on the path
+            var path = getPathForServerId(serverId);
+            if (!path || path.length <= 1) {
+                throw new Error('Server unreachable (no path to server) — may be in maintenance');
+            }
+            log('⚡ Server unreachable — attempting path-through hack (' + path.length + ' servers on path)');
+            // Walk through each intermediate server (excluding the target itself which is the last)
+            for (var pi = 0; pi < path.length - 1; pi++) {
+                var intermediate = path[pi];
+                log('⚡ Path-through: setting endpoint to ' + intermediate.name + ' (' + (pi + 1) + '/' + (path.length - 1) + ')');
+                var intResult = await _sendSetEndpoint(intermediate.id);
+                if (intResult.unreachable) {
+                    log('⚡ Path-through: ' + intermediate.name + ' also unreachable — maintenance?', 'warn');
+                    throw new Error('Path-through failed: ' + intermediate.name + ' unreachable');
+                }
+                await delay(humanDelay());
+                // Login/hack to this intermediate server
+                try {
+                    await stepLogin(intermediate.id);
+                } catch (e) {
+                    log('⚡ Path-through: login/hack failed on ' + intermediate.name + ': ' + e.message, 'warn');
+                    throw new Error('Path-through failed: could not login to ' + intermediate.name);
+                }
+                await delay(humanDelay());
+            }
+            // Retry the original endpoint
+            log('⚡ Path-through complete — retrying endpoint to target server');
+            raceResult = await _sendSetEndpoint(serverId);
+            if (raceResult.unreachable) {
+                throw new Error('Server still unreachable after path-through hack');
+            }
         }
+
         if (raceResult.timeout) {
             log('Endpoint set timeout (may already be set)', 'warn');
         }
@@ -232,14 +392,26 @@
             // Hack minigame started — solvers will handle it
             ensureDecryptSolverEnabled();
             ensureIceWallSolverEnabled();
+            ensureSimpleDecryptSolverEnabled();
             log('Hack minigame started, waiting for solver to complete...');
-            // Wait briefly for SAI update — solver often finishes so fast the event is missed
+
+            // Detect which hack minigame appeared to set appropriate timeout
+            var hackSolverTimeout = 30000; // default 30s for decrypt/simple
+            var hackType = await detectHackType(3000);
+            if (hackType === 'ice-wall') {
+                hackSolverTimeout = 120000; // 2 minutes for ICE Wall
+                log('ICE Wall hack detected — waiting up to 2 minutes');
+            } else if (hackType) {
+                log(hackType + ' hack detected');
+            }
+
+            // Wait for SAI update — solver often finishes so fast the event is missed
             var saiUpdateReceived = false;
             try {
-                await waitForEvent('COR3_AUTOJOB_SAI_UPDATE', 5000);
+                await waitForEvent('COR3_AUTOJOB_SAI_UPDATE', hackSolverTimeout);
                 saiUpdateReceived = true;
             } catch (e) {
-                log('SAI update not received in 5s — checking login status directly', 'warn');
+                log('SAI update not received in ' + (hackSolverTimeout / 1000) + 's — checking login status directly', 'warn');
             }
             if (saiUpdateReceived) {
                 log('Hack completed', 'success');
@@ -339,12 +511,12 @@
 
         // Refresh market data to get updated conditions from recentJobs
         log('Refreshing market data for job conditions...');
-        sendCmd('get.options', { marketId: job.marketId });
+        sendCmd('get.jobs', { marketId: job.marketId });
         // Listen for market data response to update job conditions
         var updatedConditions = await new Promise(function (resolve) {
             var timer;
             function handler(evt) {
-                if (evt.data && (evt.data.type === 'COR3_WS_MARKET' || evt.data.type === 'COR3_WS_DARK_MARKET')) {
+                if (evt.data && (evt.data.type === 'COR3_WS_MARKET' || evt.data.type === 'COR3_WS_DARK_MARKET' || evt.data.type === 'COR3_WS_SOYUZ_MARKET')) {
                     var md = evt.data.market;
                     if (md && md.recentJobs) {
                         var rj = md.recentJobs.find(function (j) { return j.id === job.jobId; });
@@ -387,12 +559,12 @@
         }
     }
 
-    // Step: Get market options and check if job canComplete
+    // Step: Get market jobs and check if job canComplete
     async function stepCheckJobComplete(marketId, jobId) {
         log('Checking job completion status');
-        sendCmd('get.options', { marketId: marketId });
+        sendCmd('get.jobs', { marketId: marketId });
         // Wait for market data to arrive via existing market handler
-        await delay(3000);
+        await delay(1000);
         // We return true/false but for now we'll try to complete
         return true;
     }
@@ -800,8 +972,8 @@
 
         // 7. Check if job is completable or needs decryption
         // Refresh market to check canComplete
-        sendCmd('get.options', { marketId: job.marketId });
-        await delay(3000);
+        sendCmd('get.jobs', { marketId: job.marketId });
+        await delay(1000);
 
         // Try to complete — if it fails, we may need to decrypt
         var reward = await stepCompleteJob(job);
@@ -1404,11 +1576,14 @@
         running = true;
         abortFlag = false;
 
-        // Sort jobs by server priority (furthest servers first to avoid maintenance blocking closer ones)
+        // Sort jobs by server priority (furthest first), then by job type priority within same server
         jobQueue.sort(function (a, b) {
             var pa = getServerPriority(a.serverName || '');
             var pb = getServerPriority(b.serverName || '');
-            return pa - pb;
+            if (pa !== pb) return pa - pb;
+            var ta = getJobTypePriority(a.type || a.name || '');
+            var tb = getJobTypePriority(b.type || b.name || '');
+            return ta - tb;
         });
 
         log('Auto Job Solver started — processing ' + jobQueue.length + ' job(s)');
@@ -1448,6 +1623,7 @@
                 }
                 if (skippedCount > 0) {
                     updateTracker();
+                    saveCompletedResultsIncremental();
                     log(skippedCount + ' job(s) skipped due to server maintenance');
                 } else {
                     log('All servers reachable — no maintenance detected');
@@ -1467,9 +1643,11 @@
                 cj.status = 'running';
                 updateTracker();
                 try {
-                    // Set endpoint for D4RK market jobs before completing
+                    // Set endpoint for D4RK/SOYUZ market jobs before completing
                     if (cj.marketKey === 'dark') {
                         await stepSetEndpoint(DARK_MARKET_SERVER_ID);
+                    } else if (cj.marketKey === 'soyuz') {
+                        await stepSetEndpoint(SOYUZ_MARKET_SERVER_ID);
                     }
                     var cReward = await stepCompleteJob(cj);
                     if (cReward) {
@@ -1487,10 +1665,11 @@
                     log('❌ Failed to claim reward: ' + cj.name + ' — ' + e.message, 'error');
                 }
                 updateTracker();
+                saveCompletedResultsIncremental();
                 // Human delay + market refresh after each auto-claim
                 await delay(humanDelay());
-                sendCmd('get.options', { marketId: cj.marketId });
-                await delay(1500);
+                sendCmd('get.jobs', { marketId: cj.marketId });
+                await delay(1000);
             }
         }
 
@@ -1536,9 +1715,11 @@
             updateTracker();
 
             try {
-                // Set endpoint for D4RK market jobs before processing
+                // Set endpoint for D4RK/SOYUZ market jobs before processing
                 if (job.marketKey === 'dark') {
                     await stepSetEndpoint(DARK_MARKET_SERVER_ID);
+                } else if (job.marketKey === 'soyuz') {
+                    await stepSetEndpoint(SOYUZ_MARKET_SERVER_ID);
                 }
                 log('Processing job ' + (i + 1) + '/' + jobQueue.length + ': ' + job.name + ' on ' + (job.serverName || 'None'));
                 var reward = await solveJob(job);
@@ -1558,13 +1739,14 @@
             }
 
             updateTracker();
+            saveCompletedResultsIncremental();
 
             // Human delay after job completion to avoid "too many requests"
             await delay(humanDelay());
 
             // Refresh market data so UI updates (completed jobs disappear)
-            sendCmd('get.options', { marketId: job.marketId });
-            await delay(2000);
+            sendCmd('get.jobs', { marketId: job.marketId });
+            await delay(1000);
 
             // Delay between jobs
             if (i < jobQueue.length - 1 && !abortFlag) {
@@ -1605,10 +1787,22 @@
         });
         window.postMessage({ type: 'COR3_AUTOJOB_SAVE_COMPLETED', jobs: completedResults }, '*');
 
-        // Refresh both markets at the end to ensure UI is fully updated
-        sendCmd('get.options', { marketId: '019d3ea4-85bd-7389-904d-8f7c85841134' });
-        await delay(2000);
-        sendCmd('get.options', { marketId: '019d3ea4-85bd-7389-904d-908ba9194aa0' });
+        // Refresh all markets sequentially at the end to ensure UI is fully updated
+        log('Refreshing all markets sequentially...');
+        window.postMessage({ type: 'COR3_REFRESH_ALL_MARKETS_SEQ', skipLots: true }, '*');
+        // Wait for completion signal (max 30s)
+        await new Promise(function (resolve) {
+            var timer = setTimeout(resolve, 30000);
+            function onDone(evt) {
+                if (evt.data && evt.data.type === 'COR3_ALL_MARKETS_REFRESHED') {
+                    window.removeEventListener('message', onDone);
+                    clearTimeout(timer);
+                    resolve();
+                }
+            }
+            window.addEventListener('message', onDone);
+        });
+        log('Market refresh complete.');
 
         signalDone();
     }

@@ -138,6 +138,10 @@ const SERVER_PATH_MAP = {
     'RM7-E1L5': [
         { name: 'RM7-E1L5', id: '019d1b0a-13a9-77dd-b41f-374ee144bd07' }
     ],
+    'RM7-E1L2CT': [
+        { name: 'RM7-E1L5', id: '019d1b0a-13a9-77dd-b41f-374ee144bd07' },
+        { name: 'RM7-E1L2CT', id: '019d53aa-5101-7f08-b3dd-378b0ddcf7d0' }
+    ],
     'RM7-E1SCP': [
         { name: 'RM7-E1L5', id: '019d1b0a-13a9-77dd-b41f-374ee144bd07' },
         { name: 'RM7-E1SCP', id: '019d1b0a-13a9-77dd-b41f-3a21d490cb2d' }
@@ -151,12 +155,43 @@ const SERVER_PATH_MAP = {
         { name: 'RM7-E1L5', id: '019d1b0a-13a9-77dd-b41f-374ee144bd07' },
         { name: 'RM7-E1SCP', id: '019d1b0a-13a9-77dd-b41f-3a21d490cb2d' },
         { name: 'D4RK RM7CE', id: '019d29c5-4b37-79bf-b23e-304d8ea03c15' }
+    ],
+    'RM7-N2ECP': [
+        { name: 'RM7-E1L3', id: '019d1b0a-13a9-77dd-b41f-33f06f2df284' },
+        { name: 'RM7-N2ECP', id: '019da6f1-16f7-75a6-b6d3-0b1d5f92a105' }
+    ],
+    'RM7-N2L2': [
+        { name: 'RM7-E1L3', id: '019d1b0a-13a9-77dd-b41f-33f06f2df284' },
+        { name: 'RM7-N2ECP', id: '019da6f1-16f7-75a6-b6d3-0b1d5f92a105' },
+        { name: 'RM7-N2L2', id: '019da6f1-16f7-75a6-b6d3-0b1d5f92a101' }
+    ],
+    'RM7-N2L3': [
+        { name: 'RM7-E1L3', id: '019d1b0a-13a9-77dd-b41f-33f06f2df284' },
+        { name: 'RM7-N2ECP', id: '019da6f1-16f7-75a6-b6d3-0b1d5f92a105' },
+        { name: 'RM7-N2L2', id: '019da6f1-16f7-75a6-b6d3-0b1d5f92a101' },
+        { name: 'RM7-N2L3', id: '019da6f1-16f7-75a6-b6d3-0b1d5f92a102' }
+    ],
+    'RM7-W3NCP': [
+        { name: 'RM7-E1L3', id: '019d1b0a-13a9-77dd-b41f-33f06f2df284' },
+        { name: 'RM7-N2ECP', id: '019da6f1-16f7-75a6-b6d3-0b1d5f92a105' },
+        { name: 'RM7-N2L2', id: '019da6f1-16f7-75a6-b6d3-0b1d5f92a101' },
+        { name: 'RM7-N2L3', id: '019da6f1-16f7-75a6-b6d3-0b1d5f92a102' },
+        { name: 'RM7-W3NCP', id: '019da6f1-16f7-75a6-b6d3-0b1d5f92a106' }
+    ],
+    'RM7-N1L1': [
+        { name: 'RM7-E1L3', id: '019d1b0a-13a9-77dd-b41f-33f06f2df284' },
+        { name: 'RM7-N2ECP', id: '019da6f1-16f7-75a6-b6d3-0b1d5f92a105' },
+        { name: 'RM7-N2L2', id: '019da6f1-16f7-75a6-b6d3-0b1d5f92a101' },
+        { name: 'RM7-N2L3', id: '019da6f1-16f7-75a6-b6d3-0b1d5f92a102' },
+        { name: 'RM7-W3NCP', id: '019da6f1-16f7-75a6-b6d3-0b1d5f92a106' },
+        { name: 'RM7-N1L1', id: '019da6f1-16f7-75a6-b6d3-0b1d5f92a104' }
     ]
 };
 
-function collectJobsBg(marketData, darkMarketData, completedResults, serverMaintenanceMap) {
-    const MARKET_IDS = { home: '019d3ea4-85bd-7389-904d-8f7c85841134', dark: '019d3ea4-85bd-7389-904d-908ba9194aa0' };
-    const SERVER_PRIORITY = ['D4RK RM7CE', 'RM7-S4L4', 'RM7-E1SCP', 'RM7-E1L5', 'RM7-E1L3'];
+function collectJobsBg(marketData, darkMarketData, completedResults, serverMaintenanceMap, soyuzMarketData) {
+    const MARKET_IDS = { home: '019d3ea4-85bd-7389-904d-8f7c85841134', dark: '019d3ea4-85bd-7389-904d-908ba9194aa0', soyuz: '019da731-2db5-7d76-9447-1ea3b9b78001' };
+    const SERVER_PRIORITY = ['RM7-N1L1', 'RM7-W3NCP', 'RM7-N2L3', 'RM7-N2L2', 'RM7-N2ECP', 'D4RK RM7CE', 'RM7-S4L4', 'RM7-E1SCP', 'RM7-E1L2CT', 'RM7-E1L5', 'RM7-E1L3'];
+    const JOB_TYPE_PRIORITY = ['IP Injection', 'IP Cleanup', 'Data Upload', 'Data Download', 'Log Deletion', 'Log Download', 'File Elimination', 'File Decryption', 'Decrypt & Extract'];
     const maint = serverMaintenanceMap || {};
     const now = Date.now();
     // Build set of job IDs that already failed/bugged — skip them
@@ -189,8 +224,8 @@ function collectJobsBg(marketData, darkMarketData, completedResults, serverMaint
     }
     const jobs = [];
     const skippedMaintenance = [];
-    for (const marketKey of ['dark', 'home']) {
-        const md = marketKey === 'home' ? marketData : darkMarketData;
+    for (const marketKey of ['dark', 'home', 'soyuz']) {
+        const md = marketKey === 'home' ? marketData : marketKey === 'dark' ? darkMarketData : soyuzMarketData;
         if (!md) continue;
         const openJobs = (md.jobs || []).filter(j => !j.isCompleted && !j.isExpired && SUPPORTED_JOB_TYPES_BG.includes(j.name) && !isJobBuggedBg(j) && !skipIds.has(j.id));
         const takenJobs = (md.recentJobs || []).filter(j => j.status === 'TAKEN' && SUPPORTED_JOB_TYPES_BG.includes(j.name) && !isJobBuggedBg(j) && !skipIds.has(j.id));
@@ -232,7 +267,11 @@ function collectJobsBg(marketData, darkMarketData, completedResults, serverMaint
     jobs.sort((a, b) => {
         const idxA = SERVER_PRIORITY.indexOf(a.serverName);
         const idxB = SERVER_PRIORITY.indexOf(b.serverName);
-        return (idxA >= 0 ? idxA : SERVER_PRIORITY.length) - (idxB >= 0 ? idxB : SERVER_PRIORITY.length);
+        const sp = (idxA >= 0 ? idxA : SERVER_PRIORITY.length) - (idxB >= 0 ? idxB : SERVER_PRIORITY.length);
+        if (sp !== 0) return sp;
+        const tpA = JOB_TYPE_PRIORITY.indexOf(a.name);
+        const tpB = JOB_TYPE_PRIORITY.indexOf(b.name);
+        return (tpA >= 0 ? tpA : JOB_TYPE_PRIORITY.length) - (tpB >= 0 ? tpB : JOB_TYPE_PRIORITY.length);
     });
     // Attach maintenance-skipped info for scheduling
     jobs._skippedMaintenance = skippedMaintenance;
@@ -254,6 +293,16 @@ async function bgAutoJobLog(msg, level) {
     } catch (e) { /* storage error — ignore */ }
 }
 
+// Debounce scheduleAutoFinishAllBg to prevent duplicate calls from multiple storage triggers
+let _scheduleAutoFinishDebounceTimer = null;
+function scheduleAutoFinishAllBgDebounced() {
+    if (_scheduleAutoFinishDebounceTimer) clearTimeout(_scheduleAutoFinishDebounceTimer);
+    _scheduleAutoFinishDebounceTimer = setTimeout(() => {
+        _scheduleAutoFinishDebounceTimer = null;
+        scheduleAutoFinishAllBg();
+    }, 2000);
+}
+
 async function scheduleAutoFinishAllBg() {
     const settings = await chrome.storage.sync.get('autoFinishAllJobsEnabled');
     if (!settings.autoFinishAllJobsEnabled) {
@@ -261,16 +310,22 @@ async function scheduleAutoFinishAllBg() {
         return;
     }
 
-    const { marketData, darkMarketData, autoJobsRunning, serverMaintenanceMap } = await chrome.storage.local.get(['marketData', 'darkMarketData', 'autoJobsRunning', 'serverMaintenanceMap']);
+    const { marketData, darkMarketData, soyuzMarketData, autoJobsRunning, serverMaintenanceMap } = await chrome.storage.local.get(['marketData', 'darkMarketData', 'soyuzMarketData', 'autoJobsRunning', 'serverMaintenanceMap']);
 
     // If jobs are currently running, don't schedule — will be called again when they finish
     if (autoJobsRunning) {
         return;
     }
 
+    // If an alarm is already pending, don't re-check (prevents duplicate "jobs available" messages)
+    const existingAlarm = await chrome.alarms.get('autoFinishAllJobs');
+    if (existingAlarm) {
+        return;
+    }
+
     // Check if jobs are available now (exclude previously failed/bugged and in-maintenance)
     const { autoJobsCompletedResults: crSched } = await chrome.storage.local.get('autoJobsCompletedResults');
-    const availableNow = collectJobsBg(marketData, darkMarketData, crSched || [], serverMaintenanceMap);
+    const availableNow = collectJobsBg(marketData, darkMarketData, crSched || [], serverMaintenanceMap, soyuzMarketData);
     if (availableNow.length > 0) {
         bgAutoJobLog('🔄 Auto Finish All: jobs available now — starting in 10s');
         await chrome.alarms.create('autoFinishAllJobs', { delayInMinutes: 10 / 60 });
@@ -283,7 +338,7 @@ async function scheduleAutoFinishAllBg() {
     let scheduledReason = '';
 
     // Job reset times
-    for (const md of [marketData, darkMarketData]) {
+    for (const md of [marketData, darkMarketData, soyuzMarketData]) {
         if (md && md.nextJobsResetAt) {
             const diff = new Date(md.nextJobsResetAt).getTime() - now;
             if (diff > 0 && diff < minWaitMs) {
@@ -355,21 +410,55 @@ async function runAutoFinishAllBg() {
         const runCheck = await chrome.storage.local.get('autoJobsRunning');
         if (runCheck.autoJobsRunning) return;
 
-        bgAutoJobLog(`🔄 Auto Finish All: refreshing market data (attempt ${attempt}/3)...`);
+        // Determine which markets need refresh (timer expired or no data)
+        const { marketData: mdCheck, darkMarketData: dmdCheck, soyuzMarketData: smdCheck } = await chrome.storage.local.get(['marketData', 'darkMarketData', 'soyuzMarketData']);
+        const nowCheck = Date.now();
+        const expiredMarkets = [];
+        if (!mdCheck || !mdCheck.nextJobsResetAt || new Date(mdCheck.nextJobsResetAt).getTime() <= nowCheck) expiredMarkets.push('home');
+        if (!dmdCheck || !dmdCheck.nextJobsResetAt || new Date(dmdCheck.nextJobsResetAt).getTime() <= nowCheck) expiredMarkets.push('dark');
+        if (!smdCheck || !smdCheck.nextJobsResetAt || new Date(smdCheck.nextJobsResetAt).getTime() <= nowCheck) expiredMarkets.push('soyuz');
+
+        // Order: soyuz → dark → home (furthest first)
+        const refreshOrder = [];
+        if (expiredMarkets.includes('soyuz')) refreshOrder.push('soyuz');
+        if (expiredMarkets.includes('dark')) refreshOrder.push('dark');
+        if (expiredMarkets.includes('home')) refreshOrder.push('home');
+
+        bgAutoJobLog(`🔄 Auto Finish All: refreshing ${refreshOrder.length > 0 ? refreshOrder.join(', ') : 'all'} market data (attempt ${attempt}/3)...`);
         try {
-            await chrome.tabs.sendMessage(tab.id, { action: "refreshMarket" });
-            await chrome.tabs.sendMessage(tab.id, { action: "refreshDarkMarket" });
+            // Use sequential refresh for only the expired markets
+            const refreshMsg = { action: "refreshAllMarketsSeq", skipLots: true };
+            if (refreshOrder.length > 0) refreshMsg.order = refreshOrder;
+            await chrome.tabs.sendMessage(tab.id, refreshMsg);
         } catch (e) {
             bgAutoJobLog('🔄 Auto Finish All: failed to refresh markets — ' + (e.message || e), 'error');
             scheduleAutoFinishAllBg();
             return;
         }
 
-        // Wait for market data to arrive
-        await new Promise(r => setTimeout(r, 5000));
+        // Wait for sequential refresh to complete (listen for COR3_ALL_MARKETS_REFRESHED via storage relay)
+        // The signal is relayed by content.js to storage key _allMarketsRefreshed
+        await new Promise(r => {
+            let done = false;
+            const listener = (changes, area) => {
+                if (area === 'local' && changes._allMarketsRefreshed) {
+                    done = true;
+                    chrome.storage.onChanged.removeListener(listener);
+                    clearTimeout(tmr);
+                    r();
+                }
+            };
+            chrome.storage.onChanged.addListener(listener);
+            const tmr = setTimeout(() => {
+                if (!done) {
+                    chrome.storage.onChanged.removeListener(listener);
+                    r(); // timeout fallback
+                }
+            }, 30000);
+        });
 
-        const { marketData, darkMarketData, autoJobsCompletedResults: crRun, serverMaintenanceMap } = await chrome.storage.local.get(['marketData', 'darkMarketData', 'autoJobsCompletedResults', 'serverMaintenanceMap']);
-        const jobsToRun = collectJobsBg(marketData, darkMarketData, crRun || [], serverMaintenanceMap);
+        const { marketData, darkMarketData, soyuzMarketData, autoJobsCompletedResults: crRun, serverMaintenanceMap } = await chrome.storage.local.get(['marketData', 'darkMarketData', 'soyuzMarketData', 'autoJobsCompletedResults', 'serverMaintenanceMap']);
+        const jobsToRun = collectJobsBg(marketData, darkMarketData, crRun || [], serverMaintenanceMap, soyuzMarketData);
 
         if (jobsToRun.length > 0) {
             const skippedList = jobsToRun._skippedMaintenance || [];
@@ -401,7 +490,7 @@ async function runAutoFinishAllBg() {
 
         // Check if only bugged/maintenance jobs remain
         const allUnfiltered = [];
-        for (const md of [marketData, darkMarketData]) {
+        for (const md of [marketData, darkMarketData, soyuzMarketData]) {
             if (!md) continue;
             const open = (md.jobs || []).filter(j => !j.isCompleted && !j.isExpired && SUPPORTED_JOB_TYPES_BG.includes(j.name));
             const taken = (md.recentJobs || []).filter(j => j.status === 'TAKEN' && SUPPORTED_JOB_TYPES_BG.includes(j.name));
@@ -437,6 +526,11 @@ async function runAutoFinishAllBg() {
 // --- Auto Clear Generated IPs (background) ---
 // Servers to clear IPs from (skip D4RK RM7CE — often in maintenance)
 const CLEAR_IP_SERVERS = [
+    { name: 'RM7-N1L1', id: '019da6f1-16f7-75a6-b6d3-0b1d5f92a104' },
+    { name: 'RM7-W3NCP', id: '019da6f1-16f7-75a6-b6d3-0b1d5f92a106' },
+    { name: 'RM7-N2L3', id: '019da6f1-16f7-75a6-b6d3-0b1d5f92a102' },
+    { name: 'RM7-N2L2', id: '019da6f1-16f7-75a6-b6d3-0b1d5f92a101' },
+    { name: 'RM7-N2ECP', id: '019da6f1-16f7-75a6-b6d3-0b1d5f92a105' },
     { name: 'RM7-S4L4', id: '019d1b0a-13a9-77dd-b41f-3ffb5f671742' },
     { name: 'RM7-E1SCP', id: '019d1b0a-13a9-77dd-b41f-3a21d490cb2d' },
     { name: 'RM7-E1L5', id: '019d1b0a-13a9-77dd-b41f-374ee144bd07' },
@@ -713,21 +807,45 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 chrome.storage.onChanged.addListener((changes, area) => {
     if (area === 'local' && changes.autoJobsRunning) {
         if (!changes.autoJobsRunning.newValue) {
-            // Jobs finished — schedule next run
-            scheduleAutoFinishAllBg();
+            // Jobs finished — refresh markets sequentially, then schedule next run
+            (async () => {
+                try {
+                    const settings = await chrome.storage.sync.get('autoFinishAllJobsEnabled');
+                    if (!settings.autoFinishAllJobsEnabled) return;
+                    const tab = await getCor3Tab();
+                    if (!tab) { scheduleAutoFinishAllBgDebounced(); return; }
+                    bgAutoJobLog('🔄 Auto Finish All: jobs done — refreshing markets before scheduling...');
+                    await chrome.tabs.sendMessage(tab.id, { action: "refreshAllMarketsSeq", skipLots: true });
+                    // Wait for refresh completion
+                    await new Promise(r => {
+                        let done = false;
+                        const listener = (ch, ar) => {
+                            if (ar === 'local' && ch._allMarketsRefreshed) {
+                                done = true;
+                                chrome.storage.onChanged.removeListener(listener);
+                                clearTimeout(tmr);
+                                r();
+                            }
+                        };
+                        chrome.storage.onChanged.addListener(listener);
+                        const tmr = setTimeout(() => { if (!done) { chrome.storage.onChanged.removeListener(listener); r(); } }, 30000);
+                    });
+                } catch (e) { /* best effort */ }
+                scheduleAutoFinishAllBgDebounced();
+            })();
         }
     }
     // Only re-schedule when nextJobsResetAt actually changes (new reset cycle), not on every market data update
-    if (area === 'local' && (changes.marketData || changes.darkMarketData)) {
+    if (area === 'local' && (changes.marketData || changes.darkMarketData || changes.soyuzMarketData)) {
         const resetChanged = (change) => {
             if (!change) return false;
             const oldReset = change.oldValue && change.oldValue.nextJobsResetAt;
             const newReset = change.newValue && change.newValue.nextJobsResetAt;
             return newReset && newReset !== oldReset;
         };
-        if (resetChanged(changes.marketData) || resetChanged(changes.darkMarketData)) {
+        if (resetChanged(changes.marketData) || resetChanged(changes.darkMarketData) || resetChanged(changes.soyuzMarketData)) {
             chrome.storage.sync.get('autoFinishAllJobsEnabled', (data) => {
-                if (data.autoFinishAllJobsEnabled) scheduleAutoFinishAllBg();
+                if (data.autoFinishAllJobsEnabled) scheduleAutoFinishAllBgDebounced();
             });
         }
     }

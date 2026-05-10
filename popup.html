@@ -705,6 +705,7 @@
             height: 8px;
             margin: 4px 0 8px 0;
             overflow: hidden;
+            clear: both;
         }
         .market-rep-fill {
             background: var(--accent-purple);
@@ -766,6 +767,16 @@
             font-size: 12px;
             color: var(--accent-cyan);
             font-weight: bold;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .faction-icon {
+            width: 35px;
+            height: 35px;
+            border-radius: 3px;
+            float: right;
+            margin-left: 10px;
         }
 
         /* Alarm settings */
@@ -918,6 +929,47 @@
             margin-bottom: 4px;
             border: 1px solid var(--border);
             font-size: 11px;
+        }
+        .pinned-timer-symbol-daily {
+            color: var(--accent-cyan);
+            font-weight: bold;
+            flex: 1;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            margin-right: 2px;
+        }
+        .pinned-timer-symbol-core {
+            color: var(--accent-cyan);
+            font-weight: bold;
+            flex: 1;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            margin-right: 2px;
+        }
+        .pinned-timer-symbol-dark {
+            color: var(--accent-cyan);
+            font-weight: bold;
+            flex: 1;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .pinned-timer-symbol-soyuz {
+            color: #c33b3b;
+            font-weight: bold;
+            flex: 1;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            margin-left: 3px;
+            margin-right: 3px;
         }
         .pinned-timer-label {
             color: var(--accent-cyan);
@@ -1446,6 +1498,19 @@
                 </label>
             </div>
         </div>
+        <div id="iceWallSolverStatusLine" style="display:none;font-size:10px;color:var(--text-dim);margin-top:2px;margin-left:2px;"></div>
+        <!-- Auto Simple Decrypt Hacking -->
+        <div class="auto-decrypt-row" style="margin-top:8px;">
+            <span class="decrypt-label">&#x1F513; Auto Simple Decrypt Hacking</span>
+            <div style="display:flex;align-items:center;gap:8px;">
+                <span class="decrypt-status" id="simpleDecryptStatus">Off</span>
+                <label class="alarm-toggle-switch">
+                    <input type="checkbox" id="autoSimpleDecryptToggle">
+                    <span class="slider-track"></span>
+                </label>
+            </div>
+        </div>
+        <div id="simpleDecryptSolverStatusLine" style="display:none;font-size:10px;color:var(--text-dim);margin-top:2px;margin-left:2px;"></div>
         <!-- Auto Daily Hacking -->
         <div class="auto-decrypt-row" style="margin-top:8px;">
             <span class="decrypt-label">&#x1F513; Auto Daily Hacking</span>
@@ -1465,6 +1530,17 @@
                 <span class="decrypt-status" id="autoJobSolverStatus">Off</span>
                 <label class="alarm-toggle-switch">
                     <input type="checkbox" id="autoJobSolverToggle">
+                    <span class="slider-track"></span>
+                </label>
+            </div>
+        </div>
+        <!-- Auto Update Markets -->
+        <div class="auto-decrypt-row" style="margin-top:8px;">
+            <span class="decrypt-label">📊 Auto Update Markets</span>
+            <div style="display:flex;align-items:center;gap:8px;">
+                <span class="decrypt-status" id="autoUpdateMarketsStatus">Off</span>
+                <label class="alarm-toggle-switch">
+                    <input type="checkbox" id="autoUpdateMarketsToggle">
                     <span class="slider-track"></span>
                 </label>
             </div>
@@ -1525,6 +1601,7 @@
         <div class="auto-jobs-tabs">
             <button class="auto-jobs-tab active" data-market="home" id="autoJobsTabHome">🏠 HOME</button>
             <button class="auto-jobs-tab" data-market="dark" id="autoJobsTabDark">🌑 D4RK</button>
+            <button class="auto-jobs-tab" data-market="soyuz" id="autoJobsTabSoyuz"><span style="color:#c33b3b;">☭</span> SOYUZ</button>
         </div>
         <!-- HOME market jobs -->
         <div class="auto-jobs-tab-content active" id="autoJobsContentHome">
@@ -1532,6 +1609,10 @@
         </div>
         <!-- D4RK market jobs -->
         <div class="auto-jobs-tab-content" id="autoJobsContentDark">
+            <div class="auto-jobs-no-jobs">Loading job data...</div>
+        </div>
+        <!-- SOYUZ market jobs -->
+        <div class="auto-jobs-tab-content" id="autoJobsContentSoyuz">
             <div class="auto-jobs-no-jobs">Loading job data...</div>
         </div>
         <!-- Start/Stop Button -->
@@ -1595,7 +1676,7 @@
         <div class="section-title">🏪 Markets</div>
         <div class="sub-section">
             <div class="market-sub-header">
-                <span class="market-sub-label" id="coreMarketLabel">🏠 Market-1</span>
+                <span class="market-sub-label" id="coreMarketLabel">Market-1</span>
                 <div style="display:flex;gap:4px;">
                     <button id="pinCoreMarketBtn" class="refresh-btn-small pin-btn" title="Pin Market Timer">📌</button>
                     <button id="refreshMarketBtn" class="refresh-btn-small" title="Refresh Market">🔄</button>
@@ -1606,7 +1687,7 @@
         </div>
         <div class="sub-section">
             <div class="market-sub-header">
-                <span class="market-sub-label" id="darkMarketLabel">🌑 Market-2</span>
+                <span class="market-sub-label" id="darkMarketLabel">Market-2</span>
                 <div style="display:flex;gap:4px;">
                     <button id="pinDarkMarketBtn" class="refresh-btn-small pin-btn" title="Pin Market Timer">📌</button>
                     <button id="refreshDarkMarketBtn" class="refresh-btn-small" title="Refresh Market">🔄</button>
@@ -1614,6 +1695,17 @@
             </div>
             <div class="last-updated" id="darkMarketLastUpdated"></div>
             <div id="darkMarketContainer"><div class="no-decisions">No market data cached yet.</div></div>
+        </div>
+        <div class="sub-section">
+            <div class="market-sub-header">
+                <span class="market-sub-label" id="soyuzMarketLabel">Market-3</span>
+                <div style="display:flex;gap:4px;">
+                    <button id="pinSoyuzMarketBtn" class="refresh-btn-small pin-btn" title="Pin Market Timer">📌</button>
+                    <button id="refreshSoyuzMarketBtn" class="refresh-btn-small" title="Refresh Market">🔄</button>
+                </div>
+            </div>
+            <div class="last-updated" id="soyuzMarketLastUpdated"></div>
+            <div id="soyuzMarketContainer"><div class="no-decisions">No market data cached yet.</div></div>
         </div>
     </div>
 
@@ -1757,6 +1849,7 @@
                     <option value="daily">Daily Ops</option>
                     <option value="home_jobs">Market-1 Jobs Reset</option>
                     <option value="dark_jobs">Market-2 Jobs Reset</option>
+                    <option value="soyuz_jobs">Market-3 Jobs Reset</option>
                     <optgroup label="Expeditions" id="alarmExpeditionGroup"></optgroup>
                 </select>
             </div>

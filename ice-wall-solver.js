@@ -22,6 +22,25 @@
 	// --- Utilities ------------------------------------------------------------
 	const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+	// Post a status message visible in the popup UI
+	function postStatus(msg, level) {
+		window.postMessage({ type: 'COR3_ICE_WALL_STATUS', message: msg, level: level || 'info' }, '*');
+	}
+
+	// Read the DOM round counter (e.g. "1/3")
+	function getRoundCounter() {
+		const el = document.querySelector('[data-sentry-element="SidebarCounterStyled"] span');
+		return el ? el.textContent.trim() : '';
+	}
+
+	// Get the game timer duration from pendingMinigameData, fallback to 60s
+	function getGameTimerMs() {
+		if (pendingMinigameData && pendingMinigameData.meta && pendingMinigameData.meta.staticParams) {
+			return pendingMinigameData.meta.staticParams.timerDurationMs || 60000;
+		}
+		return 60000;
+	}
+
 	// --- DOM Detection --------------------------------------------------------
 
 	function findIceWallApp() {
@@ -78,21 +97,24 @@
 
 	// --- Target Pattern Extraction --------------------------------------------
 
-	// The target preview (TargetPreview SVG) contains 9 <g> children arranged as
-	// a large composite triangle:
+	// The target preview (TargetPreview SVG) contains 3-9 <g> children arranged
+	// as a composite triangle. With 9 children the layout is:
 	//
-	//   Index layout (0-based):
 	//        [0]          (top, up)
 	//     [1] [2] [3]     (mid-row: up, down, up)
 	//   [4] [5] [6] [7] [8]  (bot-row: up, down, up, down, up)
 	//
-	// Index 6 is the anchor (center of bottom row, orientation "up").
-	// The 8 offsets describe where the other cells are relative to the anchor in
-	// grid units (dc=delta-col, dr=delta-row).
-	const OFFSETS = [
+	// For fewer triangles (e.g. 3 = hardest mode) only a subset is shown.
+	// We dynamically parse each child's translate/scale to derive grid positions,
+	// pick the first "up" triangle as the anchor, and compute relative offsets
+	// for all remaining triangles.
+
+	// Hardcoded offsets for the 9-triangle case (proven to work).
+	// Index 6 is the anchor. The 8 offsets are for indices 0-5, 7-8.
+	const OFFSETS_9 = [
 		{ dc:  0, dr: -2, orient: 'up'   },  // index 0
 		{ dc: -1, dr: -1, orient: 'up'   },  // index 1
-		{ dc:  0, dr:  0, orient: 'down'  },  // index 2  (same position as anchor, but inverted)
+		{ dc:  0, dr:  0, orient: 'down'  },  // index 2
 		{ dc:  1, dr: -1, orient: 'up'   },  // index 3
 		{ dc: -2, dr:  0, orient: 'up'   },  // index 4
 		{ dc: -1, dr:  1, orient: 'down'  },  // index 5
@@ -101,20 +123,56 @@
 		{ dc:  2, dr:  0, orient: 'up'   },  // index 8
 	];
 
-	// Extract the target pattern: anchor fingerprint + 8 offset fingerprints.
-	// Returns null if the target preview isn't ready or doesn't have 9 children.
+	// Extract the target pattern dynamically from the TargetPreview SVG.
+	// Works with any number of hint triangles (3, 5, 7, or 9).
 	function getTargetPattern() {
 		const groups = document.querySelectorAll(
 			'[data-component-name="TargetPreview"] > g'
 		);
-		if (groups.length < 9) return null;
+		if (groups.length < 3) return null;
+
+		// Fast path: 9-triangle case uses hardcoded offsets (proven)
+		if (groups.length >= 9) {
+			return {
+				anchorFingerprint: glyphFingerprint(groups[6]),
+				offsets: OFFSETS_9.map((off, i) => ({
+					...off,
+					fingerprint: glyphFingerprint(groups[i < 6 ? i : i + 1])
+				}))
+			};
+		}
+
+		// Dynamic path: parse grid positions from each preview triangle's transform
+		const parsed = [];
+		for (const g of groups) {
+			const pos = parseGridPos(g);
+			if (pos) {
+				parsed.push({ ...pos, fingerprint: glyphFingerprint(g) });
+			}
+		}
+		if (parsed.length < 3) return null;
+
+		// Pick the first "up" triangle as the anchor
+		const anchorIdx = parsed.findIndex(p => p.orientation === 'up');
+		if (anchorIdx === -1) return null;
+		const anchor = parsed[anchorIdx];
+
+		// Build offsets relative to the anchor
+		const offsets = [];
+		for (let i = 0; i < parsed.length; i++) {
+			if (i === anchorIdx) continue;
+			const p = parsed[i];
+			offsets.push({
+				dc: p.col - anchor.col,
+				dr: p.row - anchor.row,
+				orient: p.orientation,
+				fingerprint: p.fingerprint
+			});
+		}
 
 		return {
-			anchorFingerprint: glyphFingerprint(groups[6]),
-			offsets: OFFSETS.map((off, i) => ({
-				...off,
-				fingerprint: glyphFingerprint(groups[i < 6 ? i : i + 1])
-			}))
+			anchorFingerprint: anchor.fingerprint,
+			offsets: offsets
 		};
 	}
 
@@ -226,6 +284,7 @@
 		return new Promise((resolve) => {
 			let done = false;
 			let debounceTimer = null;
+			let lastLogKey = ''; // dedup repeated logs
 
 			function check() {
 				if (done) return;
@@ -250,12 +309,36 @@
 					return resolve(boardMap);
 				}
 
-				// Multiple candidates — log and keep waiting for more reveals
-				console.log(
-					'%c\uD83D\uDD13 [COR3 Helper] ' + candidates.length +
-					' candidates (best: ' + candidates[0].matches + ' matches) — waiting for more reveals...',
-					'color: #76C1D1'
-				);
+				// With fewer hints, we may never narrow to 1 candidate.
+				// Accept if best candidate has ALL hints matching and leads the runner-up.
+				// With ≤5 hints, lead by 1 is enough; with more hints, lead by 2.
+				const totalHints = 1 + targetPattern.offsets.length;
+				const bestMatches = candidates[0].matches;
+				const runnerUp = candidates.length > 1 ? candidates[1].matches : 0;
+				const minLead = totalHints <= 5 ? 1 : 2;
+				if (bestMatches >= totalHints && bestMatches - runnerUp >= minLead) {
+					done = true;
+					observer.disconnect();
+					console.log(
+						'%c\uD83D\uDD13 [COR3 Helper] Best candidate has ' + bestMatches +
+						'/' + totalHints + ' matches (runner-up: ' + runnerUp +
+						') — proceeding immediately',
+						'color: #8fb24e'
+					);
+					return resolve(boardMap);
+				}
+
+				// Multiple candidates — log only when state changes to avoid spam
+				const logKey = candidates.length + ':' + bestMatches;
+				if (logKey !== lastLogKey) {
+					lastLogKey = logKey;
+					console.log(
+						'%c\uD83D\uDD13 [COR3 Helper] ' + candidates.length +
+						' candidates (best: ' + bestMatches + '/' + totalHints +
+						' matches) — waiting for more reveals...',
+						'color: #76C1D1'
+					);
+				}
 			}
 
 			function scheduleCheck() {
@@ -285,88 +368,178 @@
 		});
 	}
 
-	// --- Solve one round ------------------------------------------------------
+	// --- Solve one round (with false-positive retry loop) --------------------
 
-	async function solveRound(targetPattern, excludeSet, minMatches) {
-		const boardMap = await waitForUniqueMatch(targetPattern, excludeSet, minMatches, 15000);
-		if (!boardMap) return; // game closed
+	async function solveRound(targetPattern, excludeSet, minMatches, roundLabel) {
+		const MAX_RETRIES = 20;
+		const roundTimerMs = getGameTimerMs();
+		const roundStart = Date.now();
 
-		const candidates = findCandidates(boardMap, targetPattern, excludeSet, minMatches);
-		if (candidates.length === 0) {
-			console.warn('\u26a0\ufe0f [COR3 Helper] No matching candidates found on board');
-			return;
+		for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+			if (window.__iceWallSolverAbort) return;
+			if (!findIceWallApp()) return;
+
+			// Time remaining for this round — use it as the waitForUniqueMatch timeout
+			const elapsed = Date.now() - roundStart;
+			const remaining = Math.max(5000, roundTimerMs - elapsed);
+
+			const boardMap = await waitForUniqueMatch(targetPattern, excludeSet, minMatches, remaining);
+			if (!boardMap) return; // game closed
+
+			const candidates = findCandidates(boardMap, targetPattern, excludeSet, minMatches);
+			if (candidates.length === 0) {
+				// Don't give up — keep waiting for more glyph reveals until game timer expires
+				if (Date.now() - roundStart >= roundTimerMs) {
+					console.warn('\u26a0\ufe0f [COR3 Helper] Round timer expired with no candidates');
+					postStatus(roundLabel + ': timer expired, no match found', 'error');
+					return;
+				}
+				console.log(
+					'%c\uD83D\uDD13 [COR3 Helper] No candidates yet — waiting for more reveals... (' +
+					Math.round((roundTimerMs - (Date.now() - roundStart)) / 1000) + 's left)',
+					'color: #76C1D1'
+				);
+				await sleep(500);
+				continue;
+			}
+
+			const best = candidates[0];
+			console.log(
+				'%c\uD83D\uDD13 [COR3 Helper] \u2705 Match at col=' + best.col +
+				' row=' + best.row + ' (' + best.matches + ' matches)',
+				'color: #8fb24e; font-weight: bold'
+			);
+			postStatus(roundLabel + ': clicking match (' + best.matches + ' hits)', 'info');
+
+			const anchorCell = boardMap.get(best.col + ',' + best.row + ',up');
+			const snapshot = stateSnapshot();
+
+			if (anchorCell) {
+				clickCell(anchorCell);
+			} else {
+				console.warn('\uD83D\uDD13 [COR3 Helper] \u26a0\ufe0f Anchor cell not found after lock-in.');
+			}
+
+			// Wait for state to change (counter advance or new round)
+			const changed = await waitForStateChange(snapshot, 4000);
+			if (changed) return; // success — round advanced
+
+			// False positive — mark this position as invalid and retry within this round
+			console.warn(
+				'\uD83D\uDD13 [COR3 Helper] \u26a0\ufe0f False positive at col=' + best.col +
+				' row=' + best.row + ' — marking invalid and retrying (' +
+				(attempt + 1) + '/' + MAX_RETRIES + ')...'
+			);
+			postStatus(roundLabel + ': false positive, retrying (' + (attempt + 1) + '/' + MAX_RETRIES + ')', 'warn');
+			excludeSet.add(best.col + ',' + best.row);
 		}
-
-		const best = candidates[0];
-		console.log(
-			'%c\uD83D\uDD13 [COR3 Helper] \u2705 Match at col=' + best.col +
-			' row=' + best.row + ' (' + best.matches + ' matches)',
-			'color: #8fb24e; font-weight: bold'
-		);
-
-		const anchorCell = boardMap.get(best.col + ',' + best.row + ',up');
-		const snapshot = stateSnapshot();
-
-		if (anchorCell) {
-			clickCell(anchorCell);
-		} else {
-			console.warn('\uD83D\uDD13 [COR3 Helper] \u26a0\ufe0f Anchor cell not found after lock-in.');
-		}
-
-		// Wait for state to change (counter advance or new round)
-		const changed = await waitForStateChange(snapshot, 4000);
-		if (changed) return;
-
-		// False positive — mark this position as invalid and retry
-		console.warn(
-			'\uD83D\uDD13 [COR3 Helper] \u26a0\ufe0f False positive at col=' + best.col +
-			' row=' + best.row + ' — marking invalid and retrying...'
-		);
-		excludeSet.add(best.col + ',' + best.row);
+		console.warn('\uD83D\uDD13 [COR3 Helper] \u26a0\ufe0f Exhausted retries for this round');
+		postStatus(roundLabel + ': exhausted retries', 'error');
 	}
 
 	// --- Main game solver (handles all rounds) --------------------------------
+
+	// Build a combined fingerprint of the current round state: counter + target preview + board hash
+	function roundFingerprint() {
+		const counter = getRoundCounter();
+		const targetPreview = document.querySelector('[data-component-name="TargetPreview"]');
+		const targetInner = targetPreview ? targetPreview.innerHTML.slice(0, 500) : '';
+		return counter + '||' + targetInner;
+	}
+
+	// Wait for a new round to appear (counter changes, target preview changes, or game closes)
+	async function waitForNewRound(prevFingerprint, timeoutMs) {
+		const start = Date.now();
+		while (Date.now() - start < timeoutMs) {
+			if (window.__iceWallSolverAbort) return 'abort';
+			if (!findIceWallApp()) return 'closed';
+			const current = roundFingerprint();
+			if (current !== prevFingerprint) return 'changed';
+			await sleep(150);
+		}
+		return 'timeout';
+	}
 
 	async function solveIceWallGame() {
 		console.log(
 			'%c\uD83D\uDD13 [COR3 Helper] Starting ICE Wall solver...',
 			'color: #4ec9f3; font-weight: bold'
 		);
+		postStatus('ICE Wall solver started', 'info');
 
 		let roundNum = 0;
-		const MIN_MATCHES = 3;
+		let lastFingerprint = '';
+		const MAX_ROUNDS = 10; // safety cap
 
-		while (findIceWallApp()) {
+		while (findIceWallApp() && roundNum < MAX_ROUNDS) {
 			if (window.__iceWallSolverAbort) return;
 
 			const targetPattern = getTargetPattern();
 			if (!targetPattern) {
-				await sleep(100);
+				await sleep(200);
 				continue;
 			}
 
+			// Detect if this is actually a new round (target preview or counter changed)
+			const currentFingerprint = roundFingerprint();
+			if (currentFingerprint === lastFingerprint) {
+				// Same round still — wait for it to change
+				await sleep(200);
+				continue;
+			}
+			lastFingerprint = currentFingerprint;
+
+			// Dynamic minimum matches based on hint count:
+			// With 3 hints (1 anchor + 2 offsets) max possible = 3, require at least 2
+			// With 9 hints (1 anchor + 8 offsets) max possible = 9, require at least 3
+			const hintCount = 1 + targetPattern.offsets.length; // anchor + offsets
+			const minMatches = Math.max(2, Math.min(3, hintCount - 1));
+
 			roundNum++;
+			const counter = getRoundCounter();
+			const roundLabel = 'Round ' + roundNum + (counter ? ' (' + counter + ')' : '');
 			console.log(
-				'%c\uD83D\uDD13 [COR3 Helper] Round ' + roundNum + ' — searching...',
+				'%c\uD83D\uDD13 [COR3 Helper] ' + roundLabel +
+				' — searching (' + hintCount + ' hints, min ' + minMatches + ' matches)...',
 				'color: #76C1D1; font-weight: bold'
 			);
+			postStatus(roundLabel + ': scanning (' + hintCount + ' hints)', 'info');
 
 			const excludeSet = new Set();
-			await solveRound(targetPattern, excludeSet, MIN_MATCHES);
+			const preRoundFingerprint = currentFingerprint;
+			await solveRound(targetPattern, excludeSet, minMatches, roundLabel);
 
 			if (window.__iceWallSolverAbort) return;
 
 			console.log(
-				'%c\uD83D\uDD13 [COR3 Helper] Round ' + roundNum + ' complete. Waiting for next round...',
+				'%c\uD83D\uDD13 [COR3 Helper] ' + roundLabel + ' complete. Waiting for next round...',
 				'color: #888; font-style: italic'
 			);
-			await sleep(300);
+			postStatus(roundLabel + ': complete', 'success');
+
+			// Wait for the round to actually change (counter or target preview update)
+			// This prevents re-entering the same round if the DOM hasn't updated yet
+			const changeResult = await waitForNewRound(preRoundFingerprint, 8000);
+			if (changeResult === 'abort') return;
+			if (changeResult === 'closed') break;
+			if (changeResult === 'timeout') {
+				console.warn('\uD83D\uDD13 [COR3 Helper] \u26a0\ufe0f Timed out waiting for next round — checking if game is done');
+				// Game might be done (all rounds completed), check if app is still present
+				if (!findIceWallApp()) break;
+				// Still present — force refresh fingerprint and continue
+				lastFingerprint = '';
+			}
+
+			// Brief pause for DOM to settle before parsing next round
+			await sleep(500);
 		}
 
+		const finishMsg = 'Finished (' + roundNum + ' round(s) completed)';
 		console.log(
-			'%c\uD83D\uDD13 [COR3 Helper] Finished (' + roundNum + ' round(s) completed).',
+			'%c\uD83D\uDD13 [COR3 Helper] ' + finishMsg,
 			'color: #8fb24e; font-weight: bold'
 		);
+		postStatus(finishMsg, 'success');
 	}
 
 	// --- Watcher --------------------------------------------------------------

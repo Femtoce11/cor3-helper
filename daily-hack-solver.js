@@ -159,7 +159,7 @@
     async function openDailyOpsTab() {
         hlog('Opening Daily Ops tab...');
         // Click the tab bar item that opens daily ops page
-        const tabItem = document.querySelector('[data-component-name="TabBarItem-019a0c41-b17f-7abc-1234-567890abcde1"]');
+        const tabItem = document.querySelector('[data-component-name="TabBarItem-019a0c41-b17f-7abc-1234-567890abcde2"]');
         if (!tabItem) {
             hlog('Could not find Daily Ops tab bar item (.go3582441102)', 'error');
             return false;
@@ -175,7 +175,7 @@
     async function selectDailyOpsSection() {
         hlog('Waiting for Start Task button...');
         const dailyOpsBtn = document.querySelector('.game-center-grid button:nth-child(2)');
-        if (!startBtn) {
+        if (!dailyOpsBtn) {
             hlog('Could not find Daily Ops section button (.game-center-grid button:nth-child(2))', 'error');
             return false;
         }
@@ -190,7 +190,7 @@
     // =============================================
     async function clickStartTask() {
         hlog('Waiting for Start Task button...');
-        const startBtn = await waitForEl('.start-task-button', 8000);
+        const startBtn = await waitForEl('[data-component-name="DailyOpsStartButton"]', 8000);
         if (!startBtn) {
             hlog('Could not find Start Task button (.start-task-button)', 'error');
             return false;
@@ -347,7 +347,7 @@
 
         // Step I: Close windows (decode screen + daily ops)
         await sleep(500);
-        await closeAppWindows(2);
+        await closeAppWindows(3);
 
         return true;
     }
@@ -492,7 +492,7 @@
 
         // Close windows
         await sleep(500);
-        await closeAppWindows(2);
+        await closeAppWindows(3);
 
         return true;
     }
@@ -502,7 +502,7 @@
     // =============================================
     function detectPuzzle() {
         // First check for hack type label in the DOM (most reliable)
-        var hackTypeDiv = document.querySelector('.task-title');
+        var hackTypeDiv = document.querySelector('[data-component-name="DailyOpsTaskInfoTitle"]');
         if (hackTypeDiv) {
             if ((hackTypeDiv.textContent).includes('System Log Integrity')) return 'log';
             if ((hackTypeDiv.textContent).includes('Signal Decode')) return 'signal';
@@ -524,19 +524,19 @@
         const sectionSelected = await selectDailyOpsSection();
         if (!sectionSelected || window.__dailyHackAbort) return { success: false, abort: true };
 
-        // STEP 3: Click "Start Task"
-        const taskStarted = await clickStartTask();
-        if (!taskStarted || window.__dailyHackAbort) return { success: false, abort: true };
-
         // STEP 3: Wait for puzzle to appear
         hlog('Waiting for puzzle to appear...');
         let puzzle = null;
         let waited = 0;
         while (!puzzle && waited < 15000 && !window.__dailyHackAbort) {
+            puzzle = detectPuzzle();
             await sleep(500);
             waited += 500;
-            puzzle = detectPuzzle();
         }
+
+        // STEP 4: Click "Start Task"
+        const taskStarted = await clickStartTask();
+        if (!taskStarted || window.__dailyHackAbort) return { success: false, abort: true };
 
         if (window.__dailyHackAbort) return { success: false, abort: true };
 
@@ -576,7 +576,7 @@
 
             if (attempt > 1) {
                 hlog(`Retry attempt ${attempt}/${MAX_ATTEMPTS} — closing windows and restarting...`, 'warn');
-                await closeAppWindows(3);
+                await closeAppWindows(4);
                 await sleep(3000);
                 if (window.__dailyHackAbort) break;
             }
