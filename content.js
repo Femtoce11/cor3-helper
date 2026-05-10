@@ -1118,6 +1118,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     } else if (request.action === "stopAutoJobs") {
         window.postMessage({ type: 'COR3_AUTOJOB_STOP' }, '*');
         sendResponse({ success: true });
+    } else if (request.action === "enableHackSolvers") {
+        // Enable all hack solvers (used by background.js before hack.start)
+        injectDecryptSolver();
+        injectIceWallSolver();
+        injectSimpleDecryptSolver();
+        sendResponse({ success: true });
     } else if (request.action === "autoClearIpsCmd") {
         // Relay auto-clear-ips WS commands to MAIN world
         window.postMessage({ type: 'COR3_AUTOJOB_CMD', cmd: request.cmd, data: request.data || {} }, '*');

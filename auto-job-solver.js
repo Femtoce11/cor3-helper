@@ -175,17 +175,45 @@
 
     // Detect which hack minigame is active by polling the DOM
     function detectHackType(pollMs) {
-        pollMs = pollMs || 3000;
+        pollMs = pollMs || 5000;
         return new Promise(function (resolve) {
             var elapsed = 0;
             var interval = 200;
             function check() {
-                if (document.querySelector('[data-component-name="WallBoard"]')) return resolve('ice-wall');
+                if (document.querySelector('[data-component-name="WallBoard"]') ||
+                    document.querySelector('[data-component-name="IceWallBreakApplication"]') ||
+                    document.querySelector('[data-sentry-component="IceWallBreakApplication"]')) return resolve('ice-wall');
                 if (document.querySelector('[data-sentry-component="ConfigHackApplication"]')) return resolve('decrypt');
                 if (document.querySelector('[data-component-name="SimpleDecryptApplication"]') ||
                     document.querySelector('[data-sentry-component="SimpleDecryptApplication"]')) return resolve('simple-decrypt');
                 elapsed += interval;
                 if (elapsed >= pollMs) return resolve(null);
+                setTimeout(check, interval);
+            }
+            check();
+        });
+    }
+
+    // Check if any hack minigame dialog is currently visible in the DOM
+    function isHackMinigameOpen() {
+        return !!(document.querySelector('[data-component-name="IceWallBreakApplication"]') ||
+            document.querySelector('[data-sentry-component="IceWallBreakApplication"]') ||
+            document.querySelector('[data-component-name="WallBoard"]') ||
+            document.querySelector('[data-sentry-component="ConfigHackApplication"]') ||
+            document.querySelector('[data-component-name="SimpleDecryptApplication"]') ||
+            document.querySelector('[data-sentry-component="SimpleDecryptApplication"]'));
+    }
+
+    // Wait for all hack minigame dialogs to close (max waitMs)
+    function waitForHackMinigameClose(waitMs) {
+        waitMs = waitMs || 120000;
+        return new Promise(function (resolve) {
+            var elapsed = 0;
+            var interval = 300;
+            function check() {
+                if (!isHackMinigameOpen()) return resolve(true);
+                elapsed += interval;
+                if (elapsed >= waitMs) return resolve(false);
                 setTimeout(check, interval);
             }
             check();
@@ -377,8 +405,13 @@
             }
             log('Logged in via existing access', 'success');
         } else {
-            // Need to hack
+            // Need to hack — enable all solvers BEFORE starting hack so they're
+            // ready when the minigame appears (it can start instantly)
             log('No active access — starting hack');
+            ensureDecryptSolverEnabled();
+            ensureIceWallSolverEnabled();
+            ensureSimpleDecryptSolverEnabled();
+            await delay(300); // brief pause for solver injection
             sendCmd('hack.start', { serverId: serverId });
             var hackResult;
             try {
@@ -389,34 +422,60 @@
             if (hackResult.error) {
                 throw new Error('Hack failed: ' + (hackResult.error.message || JSON.stringify(hackResult.error)));
             }
-            // Hack minigame started — solvers will handle it
-            ensureDecryptSolverEnabled();
-            ensureIceWallSolverEnabled();
-            ensureSimpleDecryptSolverEnabled();
             log('Hack minigame started, waiting for solver to complete...');
 
             // Detect which hack minigame appeared to set appropriate timeout
             var hackSolverTimeout = 30000; // default 30s for decrypt/simple
-            var hackType = await detectHackType(3000);
+            var hackType = await detectHackType(5000);
             if (hackType === 'ice-wall') {
                 hackSolverTimeout = 120000; // 2 minutes for ICE Wall
                 log('ICE Wall hack detected — waiting up to 2 minutes');
             } else if (hackType) {
                 log(hackType + ' hack detected');
+            } else {
+                log('Could not detect hack type — using default 30s timeout', 'warn');
             }
 
-            // Wait for SAI update — solver often finishes so fast the event is missed
+            // Wait for SAI update OR minigame close (whichever comes first)
+            // Only poll for minigame close if we confirmed the minigame rendered (hackType detected)
             var saiUpdateReceived = false;
+            var canPollClose = !!hackType; // only poll DOM close if we saw it appear
             try {
-                await waitForEvent('COR3_AUTOJOB_SAI_UPDATE', hackSolverTimeout);
-                saiUpdateReceived = true;
+                await new Promise(function (resolve, reject) {
+                    var done = false;
+                    // Listen for SAI update event
+                    function onEvent(evt) {
+                        if (evt.data && evt.data.type === 'COR3_AUTOJOB_SAI_UPDATE') {
+                            if (!done) { done = true; window.removeEventListener('message', onEvent); clearInterval(pollTimer); clearTimeout(timeoutTimer); saiUpdateReceived = true; resolve(); }
+                        }
+                    }
+                    window.addEventListener('message', onEvent);
+                    // Poll for minigame close (solver finished but SAI event missed)
+                    // Only if we confirmed the minigame DOM appeared
+                    var pollTimer = canPollClose ? setInterval(function () {
+                        if (!isHackMinigameOpen()) {
+                            if (!done) { done = true; window.removeEventListener('message', onEvent); clearInterval(pollTimer); clearTimeout(timeoutTimer); resolve(); }
+                        }
+                    }, 500) : 0;
+                    // Hard timeout
+                    var timeoutTimer = setTimeout(function () {
+                        if (!done) { done = true; window.removeEventListener('message', onEvent); if (pollTimer) clearInterval(pollTimer); reject(new Error('timeout')); }
+                    }, hackSolverTimeout);
+                });
             } catch (e) {
-                log('SAI update not received in ' + (hackSolverTimeout / 1000) + 's — checking login status directly', 'warn');
+                log('Hack solver did not complete in ' + (hackSolverTimeout / 1000) + 's — checking login status directly', 'warn');
             }
             if (saiUpdateReceived) {
-                log('Hack completed', 'success');
+                log('Hack completed (SAI update)', 'success');
+            } else if (canPollClose && !isHackMinigameOpen()) {
+                log('Hack completed (minigame closed)', 'success');
             }
-            // After hack (or timeout), check login status to see if we have access
+
+            // Wait for minigame dialog to fully close before proceeding
+            if (isHackMinigameOpen()) {
+                log('Waiting for hack minigame dialog to close...');
+                await waitForHackMinigameClose(30000);
+            }
             await delay(humanDelay());
             var maxRetries = 3;
             var loggedIn = false;

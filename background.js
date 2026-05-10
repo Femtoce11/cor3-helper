@@ -607,9 +607,13 @@ async function clearIpsLoginToServer(tab, server) {
             throw new Error('Login with access failed: ' + e.message);
         }
     } else {
-        // Need to hack
+        // Need to hack — enable solvers BEFORE starting hack
         bgAutoJobLog(`🧹 ${server.name}: no access — hacking...`);
-        await chrome.storage.local.remove('_clearIpsHackStart');
+        try {
+            await chrome.tabs.sendMessage(tab.id, { action: 'enableHackSolvers' });
+        } catch (e) { /* best effort */ }
+        await new Promise(r => setTimeout(r, 300));
+        await chrome.storage.local.remove(['_clearIpsHackStart', '_clearIpsSaiUpdate']);
         await sendClearIpsCmd(tab, 'hack.start', { serverId: server.id });
         let hackResult;
         try {
@@ -620,9 +624,15 @@ async function clearIpsLoginToServer(tab, server) {
         if (hackResult.error) {
             throw new Error('Hack failed: ' + (hackResult.error.message || JSON.stringify(hackResult.error)));
         }
-        // Hack minigame started (token received) — wait for decrypt solver to complete it
-        bgAutoJobLog(`🧹 ${server.name}: hack started (token received), waiting 5s for solver...`);
-        await new Promise(r => setTimeout(r, 5000));
+        // Hack minigame started — wait for SAI update (solver completes hack)
+        bgAutoJobLog(`🧹 ${server.name}: hack started, waiting for solver...`);
+        try {
+            await waitForClearIpsEvent('_clearIpsSaiUpdate', 120000);
+            bgAutoJobLog(`🧹 ${server.name}: hack completed (SAI update received)`);
+        } catch (e) {
+            bgAutoJobLog(`🧹 ${server.name}: SAI update timeout — checking login status`, 'warn');
+        }
+        await new Promise(r => setTimeout(r, 1000));
 
         // After hack, get login status again and use access
         for (let attempt = 1; attempt <= 3; attempt++) {
@@ -807,29 +817,11 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 chrome.storage.onChanged.addListener((changes, area) => {
     if (area === 'local' && changes.autoJobsRunning) {
         if (!changes.autoJobsRunning.newValue) {
-            // Jobs finished — refresh markets sequentially, then schedule next run
+            // Jobs finished — auto-job-solver already refreshed markets, just schedule next run
             (async () => {
                 try {
                     const settings = await chrome.storage.sync.get('autoFinishAllJobsEnabled');
                     if (!settings.autoFinishAllJobsEnabled) return;
-                    const tab = await getCor3Tab();
-                    if (!tab) { scheduleAutoFinishAllBgDebounced(); return; }
-                    bgAutoJobLog('🔄 Auto Finish All: jobs done — refreshing markets before scheduling...');
-                    await chrome.tabs.sendMessage(tab.id, { action: "refreshAllMarketsSeq", skipLots: true });
-                    // Wait for refresh completion
-                    await new Promise(r => {
-                        let done = false;
-                        const listener = (ch, ar) => {
-                            if (ar === 'local' && ch._allMarketsRefreshed) {
-                                done = true;
-                                chrome.storage.onChanged.removeListener(listener);
-                                clearTimeout(tmr);
-                                r();
-                            }
-                        };
-                        chrome.storage.onChanged.addListener(listener);
-                        const tmr = setTimeout(() => { if (!done) { chrome.storage.onChanged.removeListener(listener); r(); } }, 30000);
-                    });
                 } catch (e) { /* best effort */ }
                 scheduleAutoFinishAllBgDebounced();
             })();

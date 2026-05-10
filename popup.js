@@ -1171,7 +1171,7 @@ function updateMarketLabel(labelEl, wsName, placeholder, icon) {
         labelEl.appendChild(document.createTextNode(' ' + text));
     } else {
         if (icon == '☭') {
-            labelEl.innerHTML = `<span style="color:#c33b3b;">☭</span> ${text}`;
+            labelEl.innerHTML = `<span style="color:#c33b3b;margin-left:3px;margin-right:1px">☭</span> ${text}`;
         } else {
             labelEl.textContent = `${icon} ${text}`;
         }
@@ -1881,7 +1881,7 @@ function renderPinnedTimers() {
         const row = document.createElement('div');
         row.className = 'pinned-timer-row';
         row.innerHTML = `
-            <div><span class="pinned-timer-symbol-core">🏠 </span>
+            <div style="width: 200%;"><span class="pinned-timer-symbol-core">🏠 </span>
             <span class="pinned-timer-label">${name} Jobs</span></div>
             <span class="pinned-timer-value" id="pinnedCoreJobsValue">--:--:--</span>
             <label class="pinned-auto-refresh" title="Auto-refresh jobs when timer hits 0">
@@ -1900,7 +1900,7 @@ function renderPinnedTimers() {
         const row = document.createElement('div');
         row.className = 'pinned-timer-row';
         row.innerHTML = `
-            <div><span class="pinned-timer-symbol-dark">🌑 </span>
+            <div style="width: 200%;"><span class="pinned-timer-symbol-dark">🌑 </span>
             <span class="pinned-timer-label">${name} Jobs</span></div>
             <span class="pinned-timer-value" id="pinnedDarkJobsValue">--:--:--</span>
             <label class="pinned-auto-refresh" title="Auto-refresh jobs when timer hits 0">
@@ -1920,7 +1920,7 @@ function renderPinnedTimers() {
         const row = document.createElement('div');
         row.className = 'pinned-timer-row';
         row.innerHTML = `
-            <div><span class="pinned-timer-symbol-soyuz">☭ </span>
+            <div style="width: 200%;"><span class="pinned-timer-symbol-soyuz">☭ </span>
             <span class="pinned-timer-label">${name} Jobs</span></div>
             <span class="pinned-timer-value" id="pinnedSoyuzJobsValue">--:--:--</span>
             <label class="pinned-auto-refresh" title="Auto-refresh jobs when timer hits 0">
@@ -2263,7 +2263,7 @@ function renderIceWallSolverStatus(statusObj) {
         return;
     }
     const colorMap = { success: 'var(--accent-green)', error: 'var(--accent-red, #ff5555)', warn: 'var(--accent-orange)', info: 'var(--accent-cyan)' };
-    iceWallSolverStatusLine.textContent = '\uD83D\uDD13 ' + statusObj.message;
+    iceWallSolverStatusLine.textContent = statusObj.message;
     iceWallSolverStatusLine.style.color = colorMap[statusObj.level] || 'var(--text-dim)';
     iceWallSolverStatusLine.style.display = '';
 }
@@ -2318,7 +2318,7 @@ function renderSimpleDecryptSolverStatus(statusObj) {
         return;
     }
     const colorMap = { success: 'var(--accent-green)', error: 'var(--accent-red, #ff5555)', warn: 'var(--accent-orange)', info: 'var(--accent-cyan)' };
-    simpleDecryptSolverStatusLine.textContent = '\uD83D\uDD13 ' + statusObj.message;
+    simpleDecryptSolverStatusLine.textContent = statusObj.message;
     simpleDecryptSolverStatusLine.style.color = colorMap[statusObj.level] || 'var(--text-dim)';
     simpleDecryptSolverStatusLine.style.display = '';
 }

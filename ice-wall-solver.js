@@ -129,7 +129,7 @@
 		const groups = document.querySelectorAll(
 			'[data-component-name="TargetPreview"] > g'
 		);
-		if (groups.length < 3) return null;
+		if (groups.length === 0) return null;
 
 		// Fast path: 9-triangle case uses hardcoded offsets (proven)
 		if (groups.length >= 9) {
@@ -150,17 +150,33 @@
 				parsed.push({ ...pos, fingerprint: glyphFingerprint(g) });
 			}
 		}
-		if (parsed.length < 3) return null;
+		if (parsed.length === 0) return null;
 
-		// Pick the first "up" triangle as the anchor
-		const anchorIdx = parsed.findIndex(p => p.orientation === 'up');
-		if (anchorIdx === -1) return null;
-		const anchor = parsed[anchorIdx];
+		// Pick the most-centered "up" triangle as anchor (matches working script)
+		// For the 3-triangle case (one up-top, one down-mid, one up-bottom),
+		// this picks the bottom "up" triangle — which is the correct click target.
+		const upTriangles = parsed.filter(p => p.orientation === 'up');
+		if (upTriangles.length === 0) return null;
+
+		// Calculate centroid of ALL parsed triangles
+		const centroidCol = parsed.reduce((s, p) => s + p.col, 0) / parsed.length;
+		const centroidRow = parsed.reduce((s, p) => s + p.row, 0) / parsed.length;
+
+		// Pick the "up" triangle closest to the centroid
+		let anchor = upTriangles[0];
+		let bestDist = Infinity;
+		for (const p of upTriangles) {
+			const dist = Math.abs(p.col - centroidCol) + Math.abs(p.row - centroidRow);
+			if (dist < bestDist) {
+				bestDist = dist;
+				anchor = p;
+			}
+		}
 
 		// Build offsets relative to the anchor
 		const offsets = [];
 		for (let i = 0; i < parsed.length; i++) {
-			if (i === anchorIdx) continue;
+			if (parsed[i] === anchor) continue;
 			const p = parsed[i];
 			offsets.push({
 				dc: p.col - anchor.col,
@@ -202,11 +218,13 @@
 
 	// --- Candidate Finding ----------------------------------------------------
 
-	// Find board positions where the target pattern matches.
-	// minMatches: minimum number of offset fingerprints that must match (default 3).
+	// Find board positions where the target pattern matches (positive matching).
+	// minMatches: minimum number of offset fingerprints that must match.
 	// excludeSet: set of "col,row" strings to skip (previous false positives).
+	// Missing neighbors count as mismatches (matches working script behavior).
 	function findCandidates(boardMap, targetPattern, excludeSet, minMatches) {
 		const { anchorFingerprint, offsets } = targetPattern;
+		const totalHints = 1 + offsets.length;
 		const results = [];
 
 		for (const [, cell] of boardMap) {
@@ -227,18 +245,71 @@
 				const neighbor = boardMap.get(
 					(cell.col + dc) + ',' + (cell.row + dr) + ',' + orient
 				);
-				if (neighbor && neighbor.fingerprint !== null && fingerprint !== null) {
+				if (!neighbor) {
+					// Missing neighbor = mismatch (matches working script)
+					mismatches++;
+				} else if (neighbor.fingerprint !== null && fingerprint !== null) {
 					if (neighbor.fingerprint === fingerprint) matches++;
 					else mismatches++;
 				}
 			}
 
 			if (mismatches === 0 && matches >= minMatches) {
-				results.push({ col: cell.col, row: cell.row, matches, mismatches });
+				results.push({
+					col: cell.col, row: cell.row, matches, mismatches,
+					isCompleteMatch: matches === totalHints
+				});
 			}
 		}
 
 		return results.sort((a, b) => b.matches - a.matches);
+	}
+
+	// Elimination-based candidate finding (matches working script's r() function).
+	// Returns positions where NO offset has a definite mismatch or missing neighbor.
+	// This is stricter than findCandidates and is used as a fallback when positive
+	// matching returns 0 candidates — if only 1 position survives elimination, use it.
+	function findByElimination(boardMap, targetPattern, excludeSet) {
+		const { anchorFingerprint, offsets } = targetPattern;
+		const results = [];
+
+		for (const [, cell] of boardMap) {
+			if (cell.orientation !== 'up') continue;
+			if (excludeSet && excludeSet.has(cell.col + ',' + cell.row)) continue;
+
+			let eliminated = false;
+
+			// Check anchor
+			if (cell.fingerprint !== null && anchorFingerprint !== null) {
+				if (cell.fingerprint !== anchorFingerprint) eliminated = true;
+			}
+
+			// Check offsets
+			if (!eliminated) {
+				for (const { dc, dr, orient, fingerprint } of offsets) {
+					const neighbor = boardMap.get(
+						(cell.col + dc) + ',' + (cell.row + dr) + ',' + orient
+					);
+					if (!neighbor) {
+						// Missing neighbor = eliminated
+						eliminated = true;
+						break;
+					}
+					if (neighbor.fingerprint !== null && fingerprint !== null) {
+						if (neighbor.fingerprint !== fingerprint) {
+							eliminated = true;
+							break;
+						}
+					}
+				}
+			}
+
+			if (!eliminated) {
+				results.push({ col: cell.col, row: cell.row });
+			}
+		}
+
+		return results;
 	}
 
 	// --- Click Simulation -----------------------------------------------------
@@ -301,7 +372,28 @@
 				const boardMap = buildBoardMap();
 				const candidates = findCandidates(boardMap, targetPattern, excludeSet, minMatches);
 
-				if (candidates.length === 0) return; // keep watching
+				// If positive matching found 0 candidates, try elimination
+				if (candidates.length === 0) {
+					const eliminated = findByElimination(boardMap, targetPattern, excludeSet);
+					if (eliminated.length === 1) {
+						done = true;
+						observer.disconnect();
+						console.log(
+							'%c\uD83D\uDD13 [COR3 Helper] Eliminated to single candidate at col=' +
+							eliminated[0].col + ' row=' + eliminated[0].row,
+							'color: #a0d070; font-weight: bold'
+						);
+						return resolve(boardMap);
+					}
+					return; // keep watching
+				}
+
+				// Accept immediately if any candidate is a complete match
+				if (candidates.some(c => c.isCompleteMatch)) {
+					done = true;
+					observer.disconnect();
+					return resolve(boardMap);
+				}
 
 				if (candidates.length === 1) {
 					done = true;
@@ -309,26 +401,9 @@
 					return resolve(boardMap);
 				}
 
-				// With fewer hints, we may never narrow to 1 candidate.
-				// Accept if best candidate has ALL hints matching and leads the runner-up.
-				// With ≤5 hints, lead by 1 is enough; with more hints, lead by 2.
+				// Multiple candidates — log only when state changes to avoid spam
 				const totalHints = 1 + targetPattern.offsets.length;
 				const bestMatches = candidates[0].matches;
-				const runnerUp = candidates.length > 1 ? candidates[1].matches : 0;
-				const minLead = totalHints <= 5 ? 1 : 2;
-				if (bestMatches >= totalHints && bestMatches - runnerUp >= minLead) {
-					done = true;
-					observer.disconnect();
-					console.log(
-						'%c\uD83D\uDD13 [COR3 Helper] Best candidate has ' + bestMatches +
-						'/' + totalHints + ' matches (runner-up: ' + runnerUp +
-						') — proceeding immediately',
-						'color: #8fb24e'
-					);
-					return resolve(boardMap);
-				}
-
-				// Multiple candidates — log only when state changes to avoid spam
 				const logKey = candidates.length + ':' + bestMatches;
 				if (logKey !== lastLogKey) {
 					lastLogKey = logKey;
@@ -386,30 +461,49 @@
 			const boardMap = await waitForUniqueMatch(targetPattern, excludeSet, minMatches, remaining);
 			if (!boardMap) return; // game closed
 
+			// Try positive matching first
 			const candidates = findCandidates(boardMap, targetPattern, excludeSet, minMatches);
-			if (candidates.length === 0) {
-				// Don't give up — keep waiting for more glyph reveals until game timer expires
-				if (Date.now() - roundStart >= roundTimerMs) {
-					console.warn('\u26a0\ufe0f [COR3 Helper] Round timer expired with no candidates');
-					postStatus(roundLabel + ': timer expired, no match found', 'error');
-					return;
-				}
-				console.log(
-					'%c\uD83D\uDD13 [COR3 Helper] No candidates yet — waiting for more reveals... (' +
-					Math.round((roundTimerMs - (Date.now() - roundStart)) / 1000) + 's left)',
-					'color: #76C1D1'
-				);
-				await sleep(500);
-				continue;
-			}
+			let best = null;
 
-			const best = candidates[0];
-			console.log(
-				'%c\uD83D\uDD13 [COR3 Helper] \u2705 Match at col=' + best.col +
-				' row=' + best.row + ' (' + best.matches + ' matches)',
-				'color: #8fb24e; font-weight: bold'
-			);
-			postStatus(roundLabel + ': clicking match (' + best.matches + ' hits)', 'info');
+			if (candidates.length > 0) {
+				// Prefer complete match, otherwise best candidate
+				best = candidates.find(c => c.isCompleteMatch) || candidates[0];
+				console.log(
+					'%c\uD83D\uDD13 [COR3 Helper] \u2705 Match at col=' + best.col +
+					' row=' + best.row + ' (' + best.matches + ' matches' +
+					(best.isCompleteMatch ? ', complete' : '') + ')',
+					'color: #8fb24e; font-weight: bold'
+				);
+				postStatus(roundLabel + ': clicking match (' + best.matches + ' hits)', 'info');
+			} else {
+				// Fallback: elimination-based matching
+				const eliminated = findByElimination(boardMap, targetPattern, excludeSet);
+				if (eliminated.length === 1) {
+					best = eliminated[0];
+					console.log(
+						'%c\uD83D\uDD13 [COR3 Helper] \u2705 Eliminated to col=' + best.col +
+						' row=' + best.row + ' (no other valid position)',
+						'color: #a0d070; font-weight: bold'
+					);
+					postStatus(roundLabel + ': clicking eliminated match', 'info');
+				} else {
+					// No candidates from either method — wait for more reveals
+					if (Date.now() - roundStart >= roundTimerMs) {
+						console.warn('\u26a0\ufe0f [COR3 Helper] Round timer expired with no candidates');
+						postStatus(roundLabel + ': timer expired, no match found', 'error');
+						return;
+					}
+					console.log(
+						'%c\uD83D\uDD13 [COR3 Helper] No candidates yet (' +
+						(eliminated.length > 1 ? eliminated.length + ' survived elimination' : 'still scanning') +
+						') — waiting for more reveals... (' +
+						Math.round((roundTimerMs - (Date.now() - roundStart)) / 1000) + 's left)',
+						'color: #76C1D1'
+					);
+					await sleep(500);
+					continue;
+				}
+			}
 
 			const anchorCell = boardMap.get(best.col + ',' + best.row + ',up');
 			const snapshot = stateSnapshot();
@@ -489,11 +583,11 @@
 			}
 			lastFingerprint = currentFingerprint;
 
-			// Dynamic minimum matches based on hint count:
-			// With 3 hints (1 anchor + 2 offsets) max possible = 3, require at least 2
-			// With 9 hints (1 anchor + 8 offsets) max possible = 9, require at least 3
+			// Dynamic minimum matches based on hint count (matches working script):
+			// Formula: max(2, ceil(hintCount / 3))
+			// 3 hints → min 2, 5 hints → min 2, 7 hints → min 3, 9 hints → min 3
 			const hintCount = 1 + targetPattern.offsets.length; // anchor + offsets
-			const minMatches = Math.max(2, Math.min(3, hintCount - 1));
+			const minMatches = Math.max(2, Math.ceil(hintCount / 3));
 
 			roundNum++;
 			const counter = getRoundCounter();
