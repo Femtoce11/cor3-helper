@@ -6,14 +6,46 @@ function isContextValid() {
 }
 
 // Auto Update Markets toggle: when OFF, only explicit refresh operations update market data in storage
-let _autoUpdateMarkets = true;
+let _autoUpdateMarkets = false;
 let _marketRefreshInProgress = false;
 let _autoUpdateMarketsLastRefresh = 0;
 let _seqRefreshRunning = false;
 const _AUTO_UPDATE_MARKETS_INTERVAL = 10 * 60 * 1000; // 10 minutes
 try { chrome.storage.sync.get('autoUpdateMarkets', (data) => {
     if (data.autoUpdateMarkets !== undefined) _autoUpdateMarkets = data.autoUpdateMarkets;
+    // If enabled on load, check how fresh markets are and set timer accordingly
+    if (_autoUpdateMarkets) _initAutoUpdateMarketsTimer();
 }); } catch (e) {}
+
+// Check market freshness and set the last-refresh timer so we only refresh when actually stale
+function _initAutoUpdateMarketsTimer() {
+    if (!isContextValid()) { _autoUpdateMarketsLastRefresh = Date.now(); return; }
+    try {
+        chrome.storage.local.get(['marketDataUpdatedAt', 'darkMarketDataUpdatedAt', 'soyuzMarketDataUpdatedAt'], (result) => {
+            const now = Date.now();
+            const timestamps = [
+                result.marketDataUpdatedAt || 0,
+                result.darkMarketDataUpdatedAt || 0,
+                result.soyuzMarketDataUpdatedAt || 0
+            ].filter(t => t > 0);
+            if (timestamps.length === 0) {
+                // No market data at all — trigger immediate refresh
+                _autoUpdateMarketsLastRefresh = 0;
+                return;
+            }
+            const oldestUpdate = Math.min(...timestamps);
+            const timeSinceOldest = now - oldestUpdate;
+            if (timeSinceOldest >= _AUTO_UPDATE_MARKETS_INTERVAL) {
+                // At least one market is stale (>10min) — trigger immediate refresh
+                _autoUpdateMarketsLastRefresh = 0;
+            } else {
+                // All markets are fresh — pretend last refresh was at the oldest update time
+                // so the next refresh fires when the 10-min window expires
+                _autoUpdateMarketsLastRefresh = oldestUpdate;
+            }
+        });
+    } catch (e) { _autoUpdateMarketsLastRefresh = Date.now(); }
+}
 
 // Periodic market refresh when Auto Update Markets is enabled
 setInterval(() => {
@@ -94,19 +126,14 @@ window.addEventListener('message', (event) => {
         });
     }
     if (event.data && event.data.type === 'COR3_WS_MARKET') {
-        if (_autoUpdateMarkets || _marketRefreshInProgress) {
-            chrome.storage.local.set({ marketData: event.data.market, marketDataUpdatedAt: now });
-        }
+        // Always store market data: initial page load, auto-update, or manual refresh
+        chrome.storage.local.set({ marketData: event.data.market, marketDataUpdatedAt: now });
     }
     if (event.data && event.data.type === 'COR3_WS_DARK_MARKET') {
-        if (_autoUpdateMarkets || _marketRefreshInProgress) {
-            chrome.storage.local.set({ darkMarketData: event.data.market, darkMarketAvailable: true, darkMarketDataUpdatedAt: now });
-        }
+        chrome.storage.local.set({ darkMarketData: event.data.market, darkMarketAvailable: true, darkMarketDataUpdatedAt: now });
     }
     if (event.data && event.data.type === 'COR3_WS_SOYUZ_MARKET') {
-        if (_autoUpdateMarkets || _marketRefreshInProgress) {
-            chrome.storage.local.set({ soyuzMarketData: event.data.market, soyuzMarketAvailable: true, soyuzMarketDataUpdatedAt: now });
-        }
+        chrome.storage.local.set({ soyuzMarketData: event.data.market, soyuzMarketAvailable: true, soyuzMarketDataUpdatedAt: now });
     }
     // Handle dark market unreachable — keep cached data, set flag
     if (event.data && event.data.type === 'COR3_WS_DARK_MARKET_UNREACHABLE') {
@@ -689,7 +716,10 @@ try { chrome.storage.onChanged.addListener((changes, area) => {
         autoRefreshSettings = changes.autoRefresh.newValue;
     }
     if (area === 'sync' && changes.autoUpdateMarkets !== undefined) {
+        const wasOff = !_autoUpdateMarkets;
         _autoUpdateMarkets = changes.autoUpdateMarkets.newValue !== false;
+        // When toggled ON from OFF, check market freshness before scheduling
+        if (_autoUpdateMarkets && wasOff) _initAutoUpdateMarketsTimer();
     }
     // Clear expired retry cooldown when market data arrives with a future nextJobsResetAt
     if (area === 'local') {
@@ -1050,24 +1080,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             .catch(e => { cor3LogError('content.js', e, { action: 'fetchDailyOps' }); sendResponse({ error: e.message || 'fetch failed' }); });
         });
         return true; // keep channel open for async sendResponse
-    } else if (request.action === "disableSystemMessages") {
-        // Disable system message notifications
-        chrome.storage.sync.get('disableSystemMessages', (result) => {
-            if (!result.disableSystemMessages) {
-                chrome.storage.sync.set({ disableSystemMessages: true });
-                // Apply system message hiding
-                hideSystemMessages();
-                console.log('[COR3 Helper] System messages disabled');
-            }
-            sendResponse({ success: true });
-        });
-    } else if (request.action === "enableSystemMessages") {
-        // Enable system message notifications
-        chrome.storage.sync.set({ disableSystemMessages: false });
-        // Show system messages again
-        showSystemMessages();
-        console.log('[COR3 Helper] System messages enabled');
-        sendResponse({ success: true });
     } else if (request.action === "disableBackground") {
         // Disable background elements (delete them)
         chrome.storage.sync.set({ disableBackground: true });
@@ -1128,108 +1140,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         // Relay auto-clear-ips WS commands to MAIN world
         window.postMessage({ type: 'COR3_AUTOJOB_CMD', cmd: request.cmd, data: request.data || {} }, '*');
         sendResponse({ success: true });
+    } else if (request.action === "devtoolsSendWs") {
+        // DevTools panel: send a raw WS message via the intercepted socket
+        window.postMessage({ type: 'COR3_DEVTOOLS_WS_SEND', message: request.message }, '*');
+        sendResponse({ success: true });
     }
 });
-
-// --- System Message Notifications ---
-function hideSystemMessages() {
-    // Hide system message notifications on the page
-    // This targets common system message selectors in the cor3.gg interface
-    const systemMessageSelectors = [
-        '[class*="system-message"]',
-        '[class*="notification"]',
-        '[class*="alert"]',
-        '[id*="system-message"]',
-        '[id*="notification"]',
-        '.toast-container',
-        '.notification-container',
-        '[role="alert"]'
-    ];
-
-    systemMessageSelectors.forEach(selector => {
-        try {
-            const elements = document.querySelectorAll(selector);
-            elements.forEach(el => {
-                if (el && el.style) {
-                    el.style.display = 'none';
-                    el.setAttribute('data-cor3-hidden', 'true');
-                }
-            });
-        } catch (e) {
-            // Ignore errors for selectors that might not exist
-        }
-    });
-
-    // Also hide any system messages that might appear later
-    observeAndHideSystemMessages();
-}
-
-function showSystemMessages() {
-    // Show previously hidden system message notifications
-    const hiddenElements = document.querySelectorAll('[data-cor3-hidden="true"]');
-    hiddenElements.forEach(el => {
-        if (el && el.style) {
-            el.style.display = '';
-            el.removeAttribute('data-cor3-hidden');
-        }
-    });
-
-    // Stop observing for new system messages
-    if (systemMessageObserver) {
-        systemMessageObserver.disconnect();
-        systemMessageObserver = null;
-    }
-}
-
-let systemMessageObserver = null;
-
-function observeAndHideSystemMessages() {
-    if (systemMessageObserver) return;
-
-    systemMessageObserver = new MutationObserver((mutations) => {
-        mutations.forEach((mutation) => {
-            mutation.addedNodes.forEach((node) => {
-                if (node.nodeType === Node.ELEMENT_NODE) {
-                    // Check if this element or its children are system messages
-                    const systemMessageSelectors = [
-                        '[class*="system-message"]',
-                        '[class*="notification"]',
-                        '[class*="alert"]',
-                        '[id*="system-message"]',
-                        '[id*="notification"]',
-                        '.toast-container',
-                        '.notification-container',
-                        '[role="alert"]'
-                    ];
-
-                    systemMessageSelectors.forEach(selector => {
-                        if (node.matches && node.matches(selector)) {
-                            node.style.display = 'none';
-                            node.setAttribute('data-cor3-hidden', 'true');
-                        }
-
-                        // Also check children
-                        try {
-                            const children = node.querySelectorAll(selector);
-                            children.forEach(child => {
-                                child.style.display = 'none';
-                                child.setAttribute('data-cor3-hidden', 'true');
-                            });
-                        } catch (e) {
-                            // Ignore errors
-                        }
-                    });
-                }
-            });
-        });
-    });
-
-    // Observe the entire document for new elements
-    systemMessageObserver.observe(document.body, {
-        childList: true,
-        subtree: true
-    });
-}
 
 // --- Background Elements Functions ---
 function deleteBackgroundElements() {
@@ -1253,16 +1169,6 @@ function deleteBackgroundElements() {
         }
     });
 }
-
-// Apply system message hiding on page load if setting is enabled
-chrome.storage.sync.get('disableSystemMessages', (result) => {
-    if (result.disableSystemMessages) {
-        // Wait a bit for the page to load
-        setTimeout(() => {
-            hideSystemMessages();
-        }, 1000);
-    }
-});
 
 // Apply background elements deletion on page load if setting is enabled
 chrome.storage.sync.get('disableBackground', (result) => {
@@ -1482,6 +1388,12 @@ window.addEventListener('message', (event) => {
         _marketRefreshInProgress = false;
         // Signal background.js that sequential refresh is complete
         chrome.storage.local.set({ _allMarketsRefreshed: Date.now() });
+    }
+    if (event.data && event.data.type === 'COR3_TOKEN_EXPIRED') {
+        // Clear in-progress flags so auto-refresh can restart after WS reconnect
+        _marketRefreshInProgress = false;
+        _seqRefreshRunning = false;
+        console.log('[COR3 Helper] Token expired — cleared market refresh flags');
     }
     if (event.data && event.data.type === 'COR3_AUTOJOB_SAVE_COMPLETED') {
         // Merge completed job results into storage (accumulate across runs within same reset cycle)

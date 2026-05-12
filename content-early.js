@@ -19,6 +19,10 @@ var webVersion = null;
     let pendingRetryOps = []; // operations to retry when new socket opens
     let tokenExpiredFlag = false;
 
+    // Market refresh abort mechanism: each refresh captures the current abortId.
+    // On token-expired, the ID increments, causing all in-flight refreshes to abort.
+    var __cor3MarketRefreshAbortId = 0;
+
     function queueRetryOp(opName) {
         if (!pendingRetryOps.includes(opName)) {
             pendingRetryOps.push(opName);
@@ -34,8 +38,6 @@ var webVersion = null;
         ops.forEach(function (op) {
             setTimeout(function () {
                 if (op === 'expeditions') window.__cor3RequestExpeditions();
-                else if (op === 'market') window.__cor3RequestMarket();
-                else if (op === 'darkMarket') window.__cor3RequestDarkMarket();
                 else if (op === 'stash') window.__cor3RequestStash();
                 else if (op === 'dailyOps') window.postMessage({ type: 'COR3_FETCH_DAILY_OPS' }, '*');
                 else if (op.startsWith('decision:')) {
@@ -245,6 +247,17 @@ var webVersion = null;
                     trackedSockets.push(ws);
                 }
 
+                // Intercept ALL send() calls on this socket to log user-triggered messages
+                var origSend = ws.send.bind(ws);
+                ws.send = function (data) {
+                    try {
+                        if (typeof data === 'string') {
+                            window.postMessage({ type: 'COR3_WS_LOG', direction: 'sent', message: data }, '*');
+                        }
+                    } catch (e) { /* silent */ }
+                    return origSend(data);
+                };
+
                 ws.addEventListener('message', function (event) {
                     try {
                         // Only promote non-minigame sockets to activeSocket
@@ -303,10 +316,8 @@ var webVersion = null;
     function handleWsMessage(rawData, socket) {
         if (typeof rawData !== 'string') return;
 
-        // Log inbound WS message to content.js for storage
-        if (rawData.startsWith('42')) {
-            window.postMessage({ type: 'COR3_WS_LOG', direction: 'received', message: rawData }, '*');
-        }
+        // Log ALL inbound WS messages to content.js for storage (not just 42-prefixed)
+        window.postMessage({ type: 'COR3_WS_LOG', direction: 'received', message: rawData }, '*');
 
         // Socket.IO v4 messages start with "42[" for event frames
         if (!rawData.startsWith('42')) return;
@@ -328,10 +339,13 @@ var webVersion = null;
         if (eventName === 'error' && payload && payload.message === 'token-expired') {
             console.log('[COR3 Helper] Token expired detected — closing sockets to force reconnect');
             tokenExpiredFlag = true;
-            // Queue all data fetches for retry after reconnect
+            // Abort all in-flight market refreshes by bumping the abort ID
+            __cor3MarketRefreshAbortId++;
+            console.log('[COR3 Helper] Bumped market refresh abort ID to', __cor3MarketRefreshAbortId);
+            // Reset initial fetch so reconnect does a full fresh fetch (not partial retry)
+            if (window.__cor3ResetInitialFetch) window.__cor3ResetInitialFetch();
+            // Queue NON-market data fetches for retry (markets will be handled by initialFetch)
             queueRetryOp('expeditions');
-            queueRetryOp('market');
-            queueRetryOp('darkMarket');
             queueRetryOp('stash');
             queueRetryOp('dailyOps');
             window.postMessage({ type: 'COR3_TOKEN_EXPIRED' }, '*');
@@ -513,9 +527,10 @@ var webVersion = null;
         }
 
         // Intercept market responses — handle get.options, get.lots, get.jobs separately
-        // Markets are fetched sequentially (one at a time) to avoid confusion since
-        // get.lots/get.jobs responses don't contain the market ID.
-        // __cor3CurrentMarketFetch tracks which market we're currently fetching.
+        // Markets are fetched one at a time (sequential per market) but within each market,
+        // get.options + get.lots + get.jobs are sent as a parallel batch.
+        // get.lots/get.jobs responses don't contain the market ID, so
+        // __cor3CurrentMarketFetch (set by get.options response) tracks which market we're fetching.
         if (eventName === 'market' && payload && payload.data) {
             var mktAction = payload.event ? payload.event.action : null;
 
@@ -545,14 +560,16 @@ var webVersion = null;
                 // Track which market we're currently fetching (for get.lots/get.jobs routing)
                 window.__cor3CurrentMarketFetch = mkt.id;
                 // Initialize or reset cache with get.options data
-                // Preserve existing jobs/recentJobs/nextJobsResetAt so UI doesn't flicker
+                // Preserve existing jobs/recentJobs/nextJobsResetAt/lots so UI doesn't flicker
                 var prevJobs = window[cacheKey] ? window[cacheKey].jobs : undefined;
                 var prevRecentJobs = window[cacheKey] ? window[cacheKey].recentJobs : undefined;
                 var prevNextJobsResetAt = window[cacheKey] ? window[cacheKey].nextJobsResetAt : undefined;
+                var prevLots = window[cacheKey] ? window[cacheKey].lots : undefined;
                 window[cacheKey] = Object.assign({}, payload.data);
                 if (prevJobs !== undefined) window[cacheKey].jobs = prevJobs;
                 if (prevRecentJobs !== undefined) window[cacheKey].recentJobs = prevRecentJobs;
                 if (prevNextJobsResetAt !== undefined) window[cacheKey].nextJobsResetAt = prevNextJobsResetAt;
+                if (prevLots !== undefined) window[cacheKey].lots = prevLots;
                 postMarketUpdate(marketType, window[cacheKey]);
                 if (marketType === 'home') window.__cor3LastMarketId = mkt.id;
             }
@@ -991,8 +1008,8 @@ var webVersion = null;
     var wsSendFlushTimer = null;
 
     function wsSendRaw(msg) {
-        // Log outbound WS message to content.js for storage
-        window.postMessage({ type: 'COR3_WS_LOG', direction: 'sent', message: msg }, '*');
+        // NOTE: Outbound WS logging is handled by the ws.send() intercept in the Proxy construct.
+        // No need to post COR3_WS_LOG here — it would cause duplicate entries.
 
         // Prefer the activeSocket if it's still open
         if (activeSocket && activeSocket.readyState === OrigWebSocket.OPEN) {
@@ -1241,36 +1258,37 @@ var webVersion = null;
         wsSend(msg);
     };
 
-    // HOME Market: send get.options → wait → get.lots → wait → get.jobs (sequential)
+    // HOME Market: send get.options + get.lots + get.jobs in parallel batch
     var HOME_MARKET_ID = '019d3ea4-85bd-7389-904d-8f7c85841134';
     window.__cor3RequestMarket = function (callback) {
-        console.log('[COR3 Helper] Requesting HOME market options');
+        var myAbortId = __cor3MarketRefreshAbortId;
+        console.log('[COR3 Helper] Requesting HOME market (batch: options+lots+jobs)');
         var getOptions = '42["event",{"event":{"name":"market","action":"get.options"},"data":{"marketId":"' + HOME_MARKET_ID + '"}}]';
+        var getLots = '42["event",{"event":{"name":"market","action":"get.lots"},"data":{"marketId":"' + HOME_MARKET_ID + '"}}]';
+        var getJobs = '42["event",{"event":{"name":"market","action":"get.jobs"},"data":{"marketId":"' + HOME_MARKET_ID + '"}}]';
+        // Send all three at once — server processes in order, responses arrive in order
         wsSend(getOptions);
-        // Wait for get.options response (COR3_WS_MARKET), then send get.lots
-        var step = 0;
-        function onMarketMsg(evt) {
+        wsSend(getLots);
+        wsSend(getJobs);
+        // Wait for COR3_MARKET_FETCH_COMPLETE (fired after get.jobs response is processed)
+        function onComplete(evt) {
             if (!evt.data) return;
-            if (step === 0 && evt.data.type === 'COR3_WS_MARKET') {
-                step = 1;
-                console.log('[COR3 Helper] Requesting HOME market lots');
-                var lotsMsg = '42["event",{"event":{"name":"market","action":"get.lots"},"data":{"marketId":"' + HOME_MARKET_ID + '"}}]';
-                wsSend(lotsMsg);
-            } else if (step === 1 && evt.data.type === 'COR3_WS_MARKET') {
-                step = 2;
-                console.log('[COR3 Helper] Requesting HOME market jobs');
-                var jobsMsg = '42["event",{"event":{"name":"market","action":"get.jobs"},"data":{"marketId":"' + HOME_MARKET_ID + '"}}]';
-                wsSend(jobsMsg);
-            } else if (step === 2 && evt.data.type === 'COR3_MARKET_FETCH_COMPLETE' && evt.data.marketType === 'home') {
-                window.removeEventListener('message', onMarketMsg);
+            if (myAbortId !== __cor3MarketRefreshAbortId) {
+                window.removeEventListener('message', onComplete);
+                clearTimeout(homeTimer);
+                console.log('[COR3 Helper] HOME market fetch aborted (token-expired)');
+                return;
+            }
+            if (evt.data.type === 'COR3_MARKET_FETCH_COMPLETE' && evt.data.marketType === 'home') {
+                window.removeEventListener('message', onComplete);
                 clearTimeout(homeTimer);
                 console.log('[COR3 Helper] HOME market fetch complete');
                 if (callback) callback();
             }
         }
-        window.addEventListener('message', onMarketMsg);
+        window.addEventListener('message', onComplete);
         var homeTimer = setTimeout(function () {
-            window.removeEventListener('message', onMarketMsg);
+            window.removeEventListener('message', onComplete);
             console.log('[COR3 Helper] HOME market fetch timeout');
             if (callback) callback();
         }, 15000);
@@ -1473,36 +1491,41 @@ var webVersion = null;
     }
 
     window.__cor3RequestDarkMarket = function (callback) {
+        var myAbortId = __cor3MarketRefreshAbortId;
         console.log('[COR3 Helper] Setting D4RK endpoint');
         var setEndpoint = '42["event",{"event":{"name":"network-map","action":"set.endpoint"},"data":{"serverId":"' + DARK_SERVER_ID + '"}}]';
-        var getOptions = '42["event",{"event":{"name":"market","action":"get.options"},"data":{"marketId":"' + DARK_MARKET_ID + '"}}]';
         wsSend(setEndpoint);
 
-        function fetchDarkLotsAndJobs(cb) {
-            // Sequential: get.options already sent → wait for response → get.lots → wait → get.jobs
-            var step = 0;
-            function onDarkMarketMsg(evt) {
+        function fetchDarkBatch(cb) {
+            if (myAbortId !== __cor3MarketRefreshAbortId) {
+                console.log('[COR3 Helper] D4RK market fetch aborted (token-expired)');
+                return;
+            }
+            console.log('[COR3 Helper] Requesting D4RK market (batch: options+lots+jobs)');
+            var getOptions = '42["event",{"event":{"name":"market","action":"get.options"},"data":{"marketId":"' + DARK_MARKET_ID + '"}}]';
+            var getLots = '42["event",{"event":{"name":"market","action":"get.lots"},"data":{"marketId":"' + DARK_MARKET_ID + '"}}]';
+            var getJobs = '42["event",{"event":{"name":"market","action":"get.jobs"},"data":{"marketId":"' + DARK_MARKET_ID + '"}}]';
+            wsSend(getOptions);
+            wsSend(getLots);
+            wsSend(getJobs);
+            function onComplete(evt) {
                 if (!evt.data) return;
-                if (step === 0 && evt.data.type === 'COR3_WS_DARK_MARKET') {
-                    step = 1;
-                    console.log('[COR3 Helper] Requesting D4RK market lots');
-                    var lotsMsg = '42["event",{"event":{"name":"market","action":"get.lots"},"data":{"marketId":"' + DARK_MARKET_ID + '"}}]';
-                    wsSend(lotsMsg);
-                } else if (step === 1 && evt.data.type === 'COR3_WS_DARK_MARKET') {
-                    step = 2;
-                    console.log('[COR3 Helper] Requesting D4RK market jobs');
-                    var jobsMsg = '42["event",{"event":{"name":"market","action":"get.jobs"},"data":{"marketId":"' + DARK_MARKET_ID + '"}}]';
-                    wsSend(jobsMsg);
-                } else if (step === 2 && evt.data.type === 'COR3_MARKET_FETCH_COMPLETE' && evt.data.marketType === 'dark') {
-                    window.removeEventListener('message', onDarkMarketMsg);
-                    clearTimeout(darkMktTimer);
+                if (myAbortId !== __cor3MarketRefreshAbortId) {
+                    window.removeEventListener('message', onComplete);
+                    clearTimeout(tmr);
+                    console.log('[COR3 Helper] D4RK market fetch aborted (token-expired)');
+                    return;
+                }
+                if (evt.data.type === 'COR3_MARKET_FETCH_COMPLETE' && evt.data.marketType === 'dark') {
+                    window.removeEventListener('message', onComplete);
+                    clearTimeout(tmr);
                     console.log('[COR3 Helper] D4RK market fetch complete');
                     if (cb) cb();
                 }
             }
-            window.addEventListener('message', onDarkMarketMsg);
-            var darkMktTimer = setTimeout(function () {
-                window.removeEventListener('message', onDarkMarketMsg);
+            window.addEventListener('message', onComplete);
+            var tmr = setTimeout(function () {
+                window.removeEventListener('message', onComplete);
                 console.log('[COR3 Helper] D4RK market fetch timeout');
                 if (cb) cb();
             }, 15000);
@@ -1512,14 +1535,18 @@ var webVersion = null;
         var handled = false;
         function onDarkEndpoint(evt) {
             if (handled) return;
+            if (myAbortId !== __cor3MarketRefreshAbortId) {
+                handled = true;
+                window.removeEventListener('message', onDarkEndpoint);
+                clearTimeout(darkEpTimer);
+                console.log('[COR3 Helper] D4RK endpoint aborted (token-expired)');
+                return;
+            }
             if (evt.data && evt.data.type === 'COR3_WS_ENDPOINT_RESULT') {
                 handled = true;
                 window.removeEventListener('message', onDarkEndpoint);
                 clearTimeout(darkEpTimer);
-                // Success — send get.options, then sequential lots/jobs
-                console.log('[COR3 Helper] Requesting D4RK market options');
-                wsSend(getOptions);
-                fetchDarkLotsAndJobs(callback);
+                fetchDarkBatch(callback);
             }
             if (evt.data && evt.data.type === 'COR3_WS_DARK_MARKET_UNREACHABLE') {
                 handled = true;
@@ -1536,11 +1563,9 @@ var webVersion = null;
             if (!handled) {
                 handled = true;
                 window.removeEventListener('message', onDarkEndpoint);
-                // Timeout — assume endpoint was set (may already be set), send get.options
-                console.log('[COR3 Helper] D4RK endpoint timeout — requesting market options anyway');
-                wsSend(getOptions);
-                fetchDarkLotsAndJobs(callback);
-
+                // Timeout — assume endpoint was set (may already be set), send batch
+                console.log('[COR3 Helper] D4RK endpoint timeout — requesting market data anyway');
+                fetchDarkBatch(callback);
             }
         }, 5000);
         return true;
@@ -1675,36 +1700,42 @@ var webVersion = null;
     }
 
     window.__cor3RequestSoyuzMarket = function (callback) {
+        var myAbortId = __cor3MarketRefreshAbortId;
         console.log('[COR3 Helper] Setting SOYUZ endpoint');
         var setEndpoint = '42["event",{"event":{"name":"network-map","action":"set.endpoint"},"data":{"serverId":"' + SOYUZ_SERVER_ID + '"}}]';
-        var getOptions = '42["event",{"event":{"name":"market","action":"get.options"},"data":{"marketId":"' + SOYUZ_MARKET_ID + '"}}]';
         window.__cor3SoyuzMarketPending = true;
         wsSend(setEndpoint);
 
-        function fetchSoyuzLotsAndJobs(cb) {
-            var step = 0;
-            function onSoyuzMarketMsg(evt) {
+        function fetchSoyuzBatch(cb) {
+            if (myAbortId !== __cor3MarketRefreshAbortId) {
+                console.log('[COR3 Helper] SOYUZ market fetch aborted (token-expired)');
+                return;
+            }
+            console.log('[COR3 Helper] Requesting SOYUZ market (batch: options+lots+jobs)');
+            var getOptions = '42["event",{"event":{"name":"market","action":"get.options"},"data":{"marketId":"' + SOYUZ_MARKET_ID + '"}}]';
+            var getLots = '42["event",{"event":{"name":"market","action":"get.lots"},"data":{"marketId":"' + SOYUZ_MARKET_ID + '"}}]';
+            var getJobs = '42["event",{"event":{"name":"market","action":"get.jobs"},"data":{"marketId":"' + SOYUZ_MARKET_ID + '"}}]';
+            wsSend(getOptions);
+            wsSend(getLots);
+            wsSend(getJobs);
+            function onComplete(evt) {
                 if (!evt.data) return;
-                if (step === 0 && evt.data.type === 'COR3_WS_SOYUZ_MARKET') {
-                    step = 1;
-                    console.log('[COR3 Helper] Requesting SOYUZ market lots');
-                    var lotsMsg = '42["event",{"event":{"name":"market","action":"get.lots"},"data":{"marketId":"' + SOYUZ_MARKET_ID + '"}}]';
-                    wsSend(lotsMsg);
-                } else if (step === 1 && evt.data.type === 'COR3_WS_SOYUZ_MARKET') {
-                    step = 2;
-                    console.log('[COR3 Helper] Requesting SOYUZ market jobs');
-                    var jobsMsg = '42["event",{"event":{"name":"market","action":"get.jobs"},"data":{"marketId":"' + SOYUZ_MARKET_ID + '"}}]';
-                    wsSend(jobsMsg);
-                } else if (step === 2 && evt.data.type === 'COR3_MARKET_FETCH_COMPLETE' && evt.data.marketType === 'soyuz') {
-                    window.removeEventListener('message', onSoyuzMarketMsg);
-                    clearTimeout(soyuzMktTimer);
+                if (myAbortId !== __cor3MarketRefreshAbortId) {
+                    window.removeEventListener('message', onComplete);
+                    clearTimeout(tmr);
+                    console.log('[COR3 Helper] SOYUZ market fetch aborted (token-expired)');
+                    return;
+                }
+                if (evt.data.type === 'COR3_MARKET_FETCH_COMPLETE' && evt.data.marketType === 'soyuz') {
+                    window.removeEventListener('message', onComplete);
+                    clearTimeout(tmr);
                     console.log('[COR3 Helper] SOYUZ market fetch complete');
                     if (cb) cb();
                 }
             }
-            window.addEventListener('message', onSoyuzMarketMsg);
-            var soyuzMktTimer = setTimeout(function () {
-                window.removeEventListener('message', onSoyuzMarketMsg);
+            window.addEventListener('message', onComplete);
+            var tmr = setTimeout(function () {
+                window.removeEventListener('message', onComplete);
                 console.log('[COR3 Helper] SOYUZ market fetch timeout');
                 if (cb) cb();
             }, 15000);
@@ -1713,15 +1744,20 @@ var webVersion = null;
         var handled = false;
         function onSoyuzEndpoint(evt) {
             if (handled) return;
+            if (myAbortId !== __cor3MarketRefreshAbortId) {
+                handled = true;
+                window.removeEventListener('message', onSoyuzEndpoint);
+                clearTimeout(soyuzEpTimer);
+                window.__cor3SoyuzMarketPending = false;
+                console.log('[COR3 Helper] SOYUZ endpoint aborted (token-expired)');
+                return;
+            }
             if (evt.data && evt.data.type === 'COR3_WS_ENDPOINT_RESULT') {
                 handled = true;
                 window.removeEventListener('message', onSoyuzEndpoint);
                 clearTimeout(soyuzEpTimer);
                 window.__cor3SoyuzMarketPending = false;
-                // Success — send get.options, then sequential lots/jobs
-                console.log('[COR3 Helper] Requesting SOYUZ market options');
-                wsSend(getOptions);
-                fetchSoyuzLotsAndJobs(callback);
+                fetchSoyuzBatch(callback);
             }
             if (evt.data && evt.data.type === 'COR3_WS_SOYUZ_MARKET_UNREACHABLE') {
                 handled = true;
@@ -1754,15 +1790,22 @@ var webVersion = null;
     };
 
     // --- Sequential all-markets refresh (one at a time: SOYUZ → D4RK → HOME) ---
-    // Each market fully completes (set.endpoint → get.options → get.lots → get.jobs) before the next starts.
+    // Each market fully completes (set.endpoint → batch options+lots+jobs) before the next starts.
     // This prevents interleaved WS messages that confuse the server and our response handlers.
+    // On token-expired, the abortId check stops the sequence.
     window.__cor3RefreshAllMarketsSequential = function (callback, opts) {
         opts = opts || {};
         var order = opts.order || ['soyuz', 'dark', 'home']; // default: furthest first
         var skipLots = !!opts.skipLots; // auto-jobs mode: skip get.lots
         var idx = 0;
+        var myAbortId = __cor3MarketRefreshAbortId;
 
         function refreshNext() {
+            if (myAbortId !== __cor3MarketRefreshAbortId) {
+                console.log('[COR3 Helper] Sequential refresh aborted (token-expired)');
+                window.postMessage({ type: 'COR3_ALL_MARKETS_REFRESHED' }, '*');
+                return;
+            }
             if (idx >= order.length) {
                 console.log('[COR3 Helper] Sequential refresh: all markets done');
                 window.postMessage({ type: 'COR3_ALL_MARKETS_REFRESHED' }, '*');
@@ -1796,61 +1839,71 @@ var webVersion = null;
         return true;
     };
 
-    // --- Jobs-only market fetch variants (get.options → get.jobs, skip get.lots) ---
+    // --- Jobs-only market fetch variants (get.options + get.jobs in parallel, skip get.lots) ---
     // Used by auto-jobs refresh to reduce unnecessary WS traffic.
 
     window.__cor3RequestMarketJobsOnly = function (callback) {
-        console.log('[COR3 Helper] Requesting HOME market options (jobs-only)');
+        var myAbortId = __cor3MarketRefreshAbortId;
+        console.log('[COR3 Helper] Requesting HOME market (batch: options+jobs, jobs-only)');
         var getOptions = '42["event",{"event":{"name":"market","action":"get.options"},"data":{"marketId":"' + HOME_MARKET_ID + '"}}]';
+        var getJobs = '42["event",{"event":{"name":"market","action":"get.jobs"},"data":{"marketId":"' + HOME_MARKET_ID + '"}}]';
         wsSend(getOptions);
-        var step = 0;
-        function onMsg(evt) {
+        wsSend(getJobs);
+        function onComplete(evt) {
             if (!evt.data) return;
-            if (step === 0 && evt.data.type === 'COR3_WS_MARKET') {
-                step = 1;
-                console.log('[COR3 Helper] Requesting HOME market jobs (jobs-only)');
-                var jobsMsg = '42["event",{"event":{"name":"market","action":"get.jobs"},"data":{"marketId":"' + HOME_MARKET_ID + '"}}]';
-                wsSend(jobsMsg);
-            } else if (step === 1 && evt.data.type === 'COR3_MARKET_FETCH_COMPLETE' && evt.data.marketType === 'home') {
-                window.removeEventListener('message', onMsg);
+            if (myAbortId !== __cor3MarketRefreshAbortId) {
+                window.removeEventListener('message', onComplete);
+                clearTimeout(tmr);
+                return;
+            }
+            if (evt.data.type === 'COR3_MARKET_FETCH_COMPLETE' && evt.data.marketType === 'home') {
+                window.removeEventListener('message', onComplete);
                 clearTimeout(tmr);
                 console.log('[COR3 Helper] HOME market jobs-only fetch complete');
                 if (callback) callback();
             }
         }
-        window.addEventListener('message', onMsg);
+        window.addEventListener('message', onComplete);
         var tmr = setTimeout(function () {
-            window.removeEventListener('message', onMsg);
+            window.removeEventListener('message', onComplete);
             console.log('[COR3 Helper] HOME market jobs-only fetch timeout');
             if (callback) callback();
         }, 15000);
     };
 
     window.__cor3RequestDarkMarketJobsOnly = function (callback) {
+        var myAbortId = __cor3MarketRefreshAbortId;
         console.log('[COR3 Helper] Setting D4RK endpoint (jobs-only)');
         var setEndpoint = '42["event",{"event":{"name":"network-map","action":"set.endpoint"},"data":{"serverId":"' + DARK_SERVER_ID + '"}}]';
-        var getOptions = '42["event",{"event":{"name":"market","action":"get.options"},"data":{"marketId":"' + DARK_MARKET_ID + '"}}]';
         wsSend(setEndpoint);
 
-        function fetchDarkJobsOnly(cb) {
-            var step = 0;
-            function onMsg(evt) {
+        function fetchDarkJobsBatch(cb) {
+            if (myAbortId !== __cor3MarketRefreshAbortId) {
+                console.log('[COR3 Helper] D4RK market jobs-only fetch aborted (token-expired)');
+                return;
+            }
+            console.log('[COR3 Helper] Requesting D4RK market (batch: options+jobs, jobs-only)');
+            var getOptions = '42["event",{"event":{"name":"market","action":"get.options"},"data":{"marketId":"' + DARK_MARKET_ID + '"}}]';
+            var getJobs = '42["event",{"event":{"name":"market","action":"get.jobs"},"data":{"marketId":"' + DARK_MARKET_ID + '"}}]';
+            wsSend(getOptions);
+            wsSend(getJobs);
+            function onComplete(evt) {
                 if (!evt.data) return;
-                if (step === 0 && evt.data.type === 'COR3_WS_DARK_MARKET') {
-                    step = 1;
-                    console.log('[COR3 Helper] Requesting D4RK market jobs (jobs-only)');
-                    var jobsMsg = '42["event",{"event":{"name":"market","action":"get.jobs"},"data":{"marketId":"' + DARK_MARKET_ID + '"}}]';
-                    wsSend(jobsMsg);
-                } else if (step === 1 && evt.data.type === 'COR3_MARKET_FETCH_COMPLETE' && evt.data.marketType === 'dark') {
-                    window.removeEventListener('message', onMsg);
+                if (myAbortId !== __cor3MarketRefreshAbortId) {
+                    window.removeEventListener('message', onComplete);
+                    clearTimeout(tmr);
+                    return;
+                }
+                if (evt.data.type === 'COR3_MARKET_FETCH_COMPLETE' && evt.data.marketType === 'dark') {
+                    window.removeEventListener('message', onComplete);
                     clearTimeout(tmr);
                     console.log('[COR3 Helper] D4RK market jobs-only fetch complete');
                     if (cb) cb();
                 }
             }
-            window.addEventListener('message', onMsg);
+            window.addEventListener('message', onComplete);
             var tmr = setTimeout(function () {
-                window.removeEventListener('message', onMsg);
+                window.removeEventListener('message', onComplete);
                 console.log('[COR3 Helper] D4RK market jobs-only fetch timeout');
                 if (cb) cb();
             }, 15000);
@@ -1859,13 +1912,17 @@ var webVersion = null;
         var handled = false;
         function onEndpoint(evt) {
             if (handled) return;
+            if (myAbortId !== __cor3MarketRefreshAbortId) {
+                handled = true;
+                window.removeEventListener('message', onEndpoint);
+                clearTimeout(epTmr);
+                return;
+            }
             if (evt.data && evt.data.type === 'COR3_WS_ENDPOINT_RESULT') {
                 handled = true;
                 window.removeEventListener('message', onEndpoint);
                 clearTimeout(epTmr);
-                console.log('[COR3 Helper] Requesting D4RK market options (jobs-only)');
-                wsSend(getOptions);
-                fetchDarkJobsOnly(callback);
+                fetchDarkJobsBatch(callback);
             }
             if (evt.data && evt.data.type === 'COR3_WS_DARK_MARKET_UNREACHABLE') {
                 handled = true;
@@ -1881,39 +1938,46 @@ var webVersion = null;
             if (!handled) {
                 handled = true;
                 window.removeEventListener('message', onEndpoint);
-                console.log('[COR3 Helper] D4RK endpoint timeout (jobs-only) — requesting options anyway');
-                wsSend(getOptions);
-                fetchDarkJobsOnly(callback);
+                console.log('[COR3 Helper] D4RK endpoint timeout (jobs-only) — requesting data anyway');
+                fetchDarkJobsBatch(callback);
             }
         }, 5000);
     };
 
     window.__cor3RequestSoyuzMarketJobsOnly = function (callback) {
+        var myAbortId = __cor3MarketRefreshAbortId;
         console.log('[COR3 Helper] Setting SOYUZ endpoint (jobs-only)');
         var setEndpoint = '42["event",{"event":{"name":"network-map","action":"set.endpoint"},"data":{"serverId":"' + SOYUZ_SERVER_ID + '"}}]';
-        var getOptions = '42["event",{"event":{"name":"market","action":"get.options"},"data":{"marketId":"' + SOYUZ_MARKET_ID + '"}}]';
         window.__cor3SoyuzMarketPending = true;
         wsSend(setEndpoint);
 
-        function fetchSoyuzJobsOnly(cb) {
-            var step = 0;
-            function onMsg(evt) {
+        function fetchSoyuzJobsBatch(cb) {
+            if (myAbortId !== __cor3MarketRefreshAbortId) {
+                console.log('[COR3 Helper] SOYUZ market jobs-only fetch aborted (token-expired)');
+                return;
+            }
+            console.log('[COR3 Helper] Requesting SOYUZ market (batch: options+jobs, jobs-only)');
+            var getOptions = '42["event",{"event":{"name":"market","action":"get.options"},"data":{"marketId":"' + SOYUZ_MARKET_ID + '"}}]';
+            var getJobs = '42["event",{"event":{"name":"market","action":"get.jobs"},"data":{"marketId":"' + SOYUZ_MARKET_ID + '"}}]';
+            wsSend(getOptions);
+            wsSend(getJobs);
+            function onComplete(evt) {
                 if (!evt.data) return;
-                if (step === 0 && evt.data.type === 'COR3_WS_SOYUZ_MARKET') {
-                    step = 1;
-                    console.log('[COR3 Helper] Requesting SOYUZ market jobs (jobs-only)');
-                    var jobsMsg = '42["event",{"event":{"name":"market","action":"get.jobs"},"data":{"marketId":"' + SOYUZ_MARKET_ID + '"}}]';
-                    wsSend(jobsMsg);
-                } else if (step === 1 && evt.data.type === 'COR3_MARKET_FETCH_COMPLETE' && evt.data.marketType === 'soyuz') {
-                    window.removeEventListener('message', onMsg);
+                if (myAbortId !== __cor3MarketRefreshAbortId) {
+                    window.removeEventListener('message', onComplete);
+                    clearTimeout(tmr);
+                    return;
+                }
+                if (evt.data.type === 'COR3_MARKET_FETCH_COMPLETE' && evt.data.marketType === 'soyuz') {
+                    window.removeEventListener('message', onComplete);
                     clearTimeout(tmr);
                     console.log('[COR3 Helper] SOYUZ market jobs-only fetch complete');
                     if (cb) cb();
                 }
             }
-            window.addEventListener('message', onMsg);
+            window.addEventListener('message', onComplete);
             var tmr = setTimeout(function () {
-                window.removeEventListener('message', onMsg);
+                window.removeEventListener('message', onComplete);
                 console.log('[COR3 Helper] SOYUZ market jobs-only fetch timeout');
                 if (cb) cb();
             }, 15000);
@@ -1922,14 +1986,19 @@ var webVersion = null;
         var handled = false;
         function onEndpoint(evt) {
             if (handled) return;
+            if (myAbortId !== __cor3MarketRefreshAbortId) {
+                handled = true;
+                window.removeEventListener('message', onEndpoint);
+                clearTimeout(epTmr);
+                window.__cor3SoyuzMarketPending = false;
+                return;
+            }
             if (evt.data && evt.data.type === 'COR3_WS_ENDPOINT_RESULT') {
                 handled = true;
                 window.removeEventListener('message', onEndpoint);
                 clearTimeout(epTmr);
                 window.__cor3SoyuzMarketPending = false;
-                console.log('[COR3 Helper] Requesting SOYUZ market options (jobs-only)');
-                wsSend(getOptions);
-                fetchSoyuzJobsOnly(callback);
+                fetchSoyuzJobsBatch(callback);
             }
             if (evt.data && evt.data.type === 'COR3_WS_SOYUZ_MARKET_UNREACHABLE') {
                 handled = true;
@@ -2147,6 +2216,13 @@ var webVersion = null;
             else if (cmd === 'file.delete') window.__cor3AutoJobFileDelete(d.serverId, d.fileId);
             else if (cmd === 'file.upload') window.__cor3AutoJobFileUpload(d.serverId, d.name, d.sizeMb);
             else if (cmd === 'transit.remove') window.__cor3AutoJobTransitRemove(d.serverId, d.ip);
+        }
+        // --- DevTools panel: send raw WS message ---
+        if (event.data && event.data.type === 'COR3_DEVTOOLS_WS_SEND') {
+            var msg = event.data.message;
+            if (msg && typeof msg === 'string') {
+                wsSendRaw(msg);
+            }
         }
     });
 

@@ -118,6 +118,98 @@
             --btn-small-hover: #2a3325;
         }
 
+        /* Theme: Cyberpunk — neon pink & yellow on dark */
+        body.theme-cyberpunk {
+            --bg-primary: #0a0a12;
+            --bg-card: #12101e;
+            --bg-option: #1b1730;
+            --border: #2d2550;
+            --text: #f0e6ff;
+            --text-secondary: #ddd0f0;
+            --text-muted: #a090c0;
+            --text-dim: #6a5a8a;
+            --accent: #ff2d95;
+            --accent-purple: #bf5af2;
+            --accent-cyan: #00f0ff;
+            --accent-green: #39ff14;
+            --accent-orange: #ff6e27;
+            --accent-yellow: #ffe600;
+            --accent-red: #ff1744;
+            --btn-bg: #3a1050;
+            --btn-hover: #6b1a6b;
+            --btn-small-bg: #1b1730;
+            --btn-small-hover: #2d2550;
+        }
+
+        /* Theme: Ocean — deep sea blues */
+        body.theme-ocean {
+            --bg-primary: #071318;
+            --bg-card: #0d1f2d;
+            --bg-option: #142b3d;
+            --border: #1c3a50;
+            --text: #dce8f0;
+            --text-secondary: #b8ccd9;
+            --text-muted: #7a9aad;
+            --text-dim: #4a6a7d;
+            --accent: #00b4d8;
+            --accent-purple: #7b68ee;
+            --accent-cyan: #48cae4;
+            --accent-green: #2dd4bf;
+            --accent-orange: #ffa94d;
+            --accent-yellow: #ffd43b;
+            --accent-red: #ff6b6b;
+            --btn-bg: #0e3454;
+            --btn-hover: #1565c0;
+            --btn-small-bg: #142b3d;
+            --btn-small-hover: #1c3a50;
+        }
+
+        /* Theme: Ember — warm dark with amber/orange glow */
+        body.theme-ember {
+            --bg-primary: #120c08;
+            --bg-card: #1a120c;
+            --bg-option: #251a12;
+            --border: #3a2a1c;
+            --text: #f0e0d0;
+            --text-secondary: #dbc8b4;
+            --text-muted: #a08868;
+            --text-dim: #6a5840;
+            --accent: #f59e0b;
+            --accent-purple: #d4a0ff;
+            --accent-cyan: #7dd3fc;
+            --accent-green: #a3e635;
+            --accent-orange: #fb923c;
+            --accent-yellow: #facc15;
+            --accent-red: #ef4444;
+            --btn-bg: #3a2008;
+            --btn-hover: #7c4a15;
+            --btn-small-bg: #251a12;
+            --btn-small-hover: #3a2a1c;
+        }
+
+        /* Theme: Arctic — cold ice blue-white */
+        body.theme-arctic {
+            --bg-primary: #0e1520;
+            --bg-card: #151e2d;
+            --bg-option: #1c2838;
+            --border: #283848;
+            --text: #eaf4ff;
+            --text-secondary: #c8ddf0;
+            --text-muted: #8aaec8;
+            --text-dim: #506878;
+            --accent: #7dd3fc;
+            --accent-purple: #c4b5fd;
+            --accent-cyan: #a5f3fc;
+            --accent-green: #86efac;
+            --accent-orange: #fdba74;
+            --accent-yellow: #fde68a;
+            --accent-red: #fca5a5;
+            --btn-bg: #1e3a5f;
+            --btn-hover: #3b82f6;
+            --btn-small-bg: #1c2838;
+            --btn-small-hover: #283848;
+        }
+
         /* ===== Base Styles (using variables) ===== */
         body {
             width: 300px;
@@ -1060,7 +1152,8 @@
             z-index: 100;
             min-width: 130px;
             box-shadow: 0 4px 12px rgba(0,0,0,0.5);
-            overflow: hidden;
+            overflow-y: auto;
+            max-height: 320px;
         }
         .theme-dropdown.open {
             display: block;
@@ -1457,11 +1550,15 @@
             <button class="header-icon-btn" id="themeToggleBtn" title="Change theme">🎨</button>
         </div>
         <div class="theme-dropdown" id="themeDropdown">
-            <div class="theme-option active" data-theme="default"><span class="theme-swatch" style="background:#1e1e2f;"></span> Default</div>
-            <div class="theme-option" data-theme="abyss"><span class="theme-swatch" style="background:#0a0e1a;"></span> Abyss</div>
-            <div class="theme-option" data-theme="void"><span class="theme-swatch" style="background:#000000;"></span> Void</div>
-            <div class="theme-option" data-theme="nebula"><span class="theme-swatch" style="background:#0d0b14;"></span> Nebula</div>
-            <div class="theme-option" data-theme="tactical"><span class="theme-swatch" style="background:#0c0f0a;"></span> Tactical</div>
+            <div class="theme-option active" data-theme="default"><span class="theme-swatch" style="background:#1e1e2f;border:1px solid #61dafb"></span> Default</div>
+            <div class="theme-option" data-theme="abyss"><span class="theme-swatch" style="background:#0a0e1a;border:1px solid #38bdf8;"></span> Abyss</div>
+            <div class="theme-option" data-theme="void"><span class="theme-swatch" style="background:#000000;border:1px solid #ff3c3c;"></span> Void</div>
+            <div class="theme-option" data-theme="nebula"><span class="theme-swatch" style="background:#0d0b14;border:1px solid #c084fc;"></span> Nebula</div>
+            <div class="theme-option" data-theme="tactical"><span class="theme-swatch" style="background:#0c0f0a;border:1px solid #84cc16;"></span> Tactical</div>
+            <div class="theme-option" data-theme="cyberpunk"><span class="theme-swatch" style="background:#0a0a12;border:1px solid #ff2d95;"></span> Cyberpunk</div>
+            <div class="theme-option" data-theme="ocean"><span class="theme-swatch" style="background:#071318;border:1px solid #00b4d8;"></span> Ocean</div>
+            <div class="theme-option" data-theme="ember"><span class="theme-swatch" style="background:#120c08;border:1px solid #f59e0b;"></span> Ember</div>
+            <div class="theme-option" data-theme="arctic"><span class="theme-swatch" style="background:#0e1520;border:1px solid #7dd3fc;"></span> Arctic</div>
         </div>
     </div>
 
@@ -1543,17 +1640,6 @@
                 <span class="decrypt-status" id="autoUpdateMarketsStatus">Off</span>
                 <label class="alarm-toggle-switch">
                     <input type="checkbox" id="autoUpdateMarketsToggle">
-                    <span class="slider-track"></span>
-                </label>
-            </div>
-        </div>
-        <!-- System Message Notifications -->
-        <div class="auto-decrypt-row" style="margin-top:8px;">
-            <span class="decrypt-label">🔕 Disable System Message</span>
-            <div style="display:flex;align-items:center;gap:8px;">
-                <span class="decrypt-status" id="systemMessageStatus">Off</span>
-                <label class="alarm-toggle-switch">
-                    <input type="checkbox" id="disableSystemMessagesToggle">
                     <span class="slider-track"></span>
                 </label>
             </div>

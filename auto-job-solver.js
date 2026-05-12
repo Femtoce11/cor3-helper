@@ -23,17 +23,17 @@
     var SERVER_PRIORITY = ['RM7-N1L1', 'RM7-W3NCP', 'RM7-N2L3', 'RM7-N2L2', 'RM7-N2ECP', 'D4RK RM7CE', 'RM7-S4L4', 'RM7-E1SCP', 'RM7-E1L2CT', 'RM7-E1L5', 'RM7-E1L3'];
 
     // Job type priority (lower index = processed first per server)
-    // Transit-affecting jobs first, then simple jobs, then complex multi-step jobs
+    // Transit-affecting jobs last, simple first
     var JOB_TYPE_PRIORITY = [
+        'File Decryption',
+        'Log Deletion',
+        'File Elimination',
+        'Log Download',
+        'Data Download',
+        'Decrypt & Extract',
         'IP Injection',
         'IP Cleanup',
-        'Data Upload',
-        'Data Download',
-        'Log Deletion',
-        'Log Download',
-        'File Elimination',
-        'File Decryption',
-        'Decrypt & Extract'
+        'Data Upload'
     ];
 
     // Server connection tree — maps each server name to all server IDs on the path
@@ -104,6 +104,7 @@
     }
 
     function getServerPriority(serverName) {
+        if (!serverName || serverName === 'None') return -1; // No-server jobs (e.g. File Decryption) always first
         var idx = SERVER_PRIORITY.indexOf(serverName);
         return idx >= 0 ? idx : SERVER_PRIORITY.length;
     }
@@ -347,7 +348,7 @@
                 var intResult = await _sendSetEndpoint(intermediate.id);
                 if (intResult.unreachable) {
                     log('⚡ Path-through: ' + intermediate.name + ' also unreachable — maintenance?', 'warn');
-                    throw new Error('Path-through failed: ' + intermediate.name + ' unreachable');
+                    throw new Error('Path-through failed: ' + intermediate.name + ' unreachable (maintenance)');
                 }
                 await delay(humanDelay());
                 // Login/hack to this intermediate server
@@ -417,23 +418,53 @@
             try {
                 hackResult = await waitForEvent('COR3_AUTOJOB_SAI_HACK_START', 30000);
             } catch (e) {
+                // Hack start timed out — but the hack may have already completed.
+                // Check login status before giving up.
+                log('Hack start event timed out — checking if hack already completed...', 'warn');
+                sendCmd('get.login.status', { serverId: serverId });
+                try {
+                    var fallbackLogin = await waitForEvent('COR3_AUTOJOB_SAI_LOGIN_STATUS', 10000);
+                    if (fallbackLogin.data && fallbackLogin.data.activeAccesses && fallbackLogin.data.activeAccesses.length > 0) {
+                        var fbAccessId = fallbackLogin.data.activeAccesses[0].id;
+                        log('Hack already completed (found active access after timeout) — logging in', 'success');
+                        sendCmd('login.with-access', { serverId: serverId, accessGrantId: fbAccessId });
+                        try { await waitForEvent('COR3_AUTOJOB_SAI_LOGIN_RESULT', 10000); } catch (e2) { /* proceed */ }
+                        // Skip the rest of hack flow — we're logged in
+                        await delay(humanDelay());
+                        return;
+                    }
+                } catch (e2) { /* login status also failed */ }
                 throw new Error('Hack start timed out');
             }
             if (hackResult.error) {
+                // Hack error — but check login status in case we already have access
+                log('Hack returned error: ' + (hackResult.error.message || JSON.stringify(hackResult.error)) + ' — checking access...', 'warn');
+                sendCmd('get.login.status', { serverId: serverId });
+                try {
+                    var errLogin = await waitForEvent('COR3_AUTOJOB_SAI_LOGIN_STATUS', 10000);
+                    if (errLogin.data && errLogin.data.activeAccesses && errLogin.data.activeAccesses.length > 0) {
+                        var errAccessId = errLogin.data.activeAccesses[0].id;
+                        log('Already have access despite hack error — logging in', 'success');
+                        sendCmd('login.with-access', { serverId: serverId, accessGrantId: errAccessId });
+                        try { await waitForEvent('COR3_AUTOJOB_SAI_LOGIN_RESULT', 10000); } catch (e2) { /* proceed */ }
+                        await delay(humanDelay());
+                        return;
+                    }
+                } catch (e2) { /* login status also failed */ }
                 throw new Error('Hack failed: ' + (hackResult.error.message || JSON.stringify(hackResult.error)));
             }
             log('Hack minigame started, waiting for solver to complete...');
 
             // Detect which hack minigame appeared to set appropriate timeout
-            var hackSolverTimeout = 30000; // default 30s for decrypt/simple
+            var hackSolverTimeout = 60000; // default 60s for decrypt/simple-decrypt
             var hackType = await detectHackType(5000);
             if (hackType === 'ice-wall') {
                 hackSolverTimeout = 120000; // 2 minutes for ICE Wall
                 log('ICE Wall hack detected — waiting up to 2 minutes');
             } else if (hackType) {
-                log(hackType + ' hack detected');
+                log(hackType + ' hack detected — waiting up to 60s');
             } else {
-                log('Could not detect hack type — using default 30s timeout', 'warn');
+                log('Could not detect hack type — using default 60s timeout', 'warn');
             }
 
             // Wait for SAI update OR minigame close (whichever comes first)
@@ -477,7 +508,7 @@
                 await waitForHackMinigameClose(30000);
             }
             await delay(humanDelay());
-            var maxRetries = 3;
+            var maxRetries = 5;
             var loggedIn = false;
             for (var attempt = 0; attempt < maxRetries; attempt++) {
                 sendCmd('get.login.status', { serverId: serverId });
@@ -498,7 +529,7 @@
                     break;
                 } else {
                     log('No active access after hack (attempt ' + (attempt + 1) + '/' + maxRetries + '), retrying...', 'warn');
-                    await delay(3000);
+                    await delay(5000);
                 }
             }
             if (!loggedIn) {
@@ -1792,9 +1823,16 @@
                     log('Job completion returned no reward: ' + job.name, 'warn');
                 }
             } catch (e) {
-                job.status = 'failed';
-                job.error = e.message;
-                log('❌ Job failed: ' + job.name + ' — ' + e.message, 'error');
+                // If failure is maintenance-related, mark as skipped so background.js can reschedule
+                if (e.message && (e.message.includes('maintenance') || e.message.includes('unreachable'))) {
+                    job.status = 'skipped';
+                    job.error = e.message;
+                    log('⚠️ Job skipped (unreachable): ' + job.name + ' — ' + e.message, 'warn');
+                } else {
+                    job.status = 'failed';
+                    job.error = e.message;
+                    log('❌ Job failed: ' + job.name + ' — ' + e.message, 'error');
+                }
             }
 
             updateTracker();
@@ -1845,6 +1883,9 @@
             };
         });
         window.postMessage({ type: 'COR3_AUTOJOB_SAVE_COMPLETED', jobs: completedResults }, '*');
+
+        // Brief pause to let summary log persist before market refresh logs
+        await delay(500);
 
         // Refresh all markets sequentially at the end to ensure UI is fully updated
         log('Refreshing all markets sequentially...');

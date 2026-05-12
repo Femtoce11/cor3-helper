@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', Consolas, monospace;
+            background: #1e1e2e;
+            color: #cdd6f4;
+            font-size: 12px;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
+            --col-dir: 22px;
+            --col-time: 72px;
+            --col-event: 110px;
+            --col-action: 100px;
+            --col-server: 90px;
+            --col-size: 54px;
+        }
+
+        /* ===== Toolbar ===== */
+        .toolbar {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 8px;
+            background: #181825;
+            border-bottom: 1px solid #313244;
+            flex-shrink: 0;
+            flex-wrap: wrap;
+        }
+        .toolbar button {
+            background: #313244;
+            border: 1px solid #45475a;
+            color: #cdd6f4;
+            padding: 3px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 11px;
+            white-space: nowrap;
+        }
+        .toolbar button:hover { background: #45475a; }
+        .toolbar button.active { background: #585b70; border-color: #89b4fa; color: #89b4fa; }
+        .toolbar button.danger { color: #f38ba8; border-color: #f38ba8; }
+        .toolbar button.danger:hover { background: #45172a; }
+
+        .toolbar .separator {
+            width: 1px;
+            height: 18px;
+            background: #45475a;
+            margin: 0 2px;
+        }
+
+        .toolbar input[type="text"] {
+            background: #11111b;
+            border: 1px solid #45475a;
+            color: #cdd6f4;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            min-width: 180px;
+            flex: 1;
+        }
+        .toolbar input[type="text"]::placeholder { color: #6c7086; }
+        .toolbar input[type="text"]:focus { outline: none; border-color: #89b4fa; }
+
+        .toolbar select {
+            background: #11111b;
+            border: 1px solid #45475a;
+            color: #cdd6f4;
+            padding: 3px 6px;
+            border-radius: 4px;
+            font-size: 11px;
+        }
+
+        .toolbar label {
+            font-size: 11px;
+            color: #a6adc8;
+            display: flex;
+            align-items: center;
+            gap: 3px;
+            white-space: nowrap;
+        }
+
+        .stats {
+            font-size: 10px;
+            color: #6c7086;
+            margin-left: auto;
+            white-space: nowrap;
+        }
+
+        /* ===== Main content ===== */
+        .main-content {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        /* ===== Message list ===== */
+        .message-list-container {
+            flex: 1;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .message-list-header {
+            display: grid;
+            grid-template-columns: var(--col-dir) var(--col-time) var(--col-event) var(--col-action) var(--col-server) 1fr var(--col-size);
+            padding: 3px 8px;
+            background: #181825;
+            border-bottom: 1px solid #313244;
+            font-size: 10px;
+            font-weight: bold;
+            color: #a6adc8;
+            flex-shrink: 0;
+            position: relative;
+            user-select: none;
+        }
+
+        .col-header {
+            position: relative;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            padding-right: 6px;
+        }
+
+        .col-resize {
+            position: absolute;
+            right: 0;
+            top: 0;
+            bottom: 0;
+            width: 4px;
+            cursor: col-resize;
+            background: transparent;
+            z-index: 2;
+        }
+        .col-resize:hover, .col-resize.active {
+            background: #89b4fa;
+        }
+
+        .message-list {
+            flex: 1;
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+
+        .msg-row {
+            display: grid;
+            grid-template-columns: var(--col-dir) var(--col-time) var(--col-event) var(--col-action) var(--col-server) 1fr var(--col-size);
+            padding: 2px 8px;
+            border-bottom: 1px solid #1e1e2e;
+            cursor: pointer;
+            align-items: center;
+            min-height: 22px;
+        }
+        .msg-row:hover { background: #313244; }
+        .msg-row.selected { background: #45475a; }
+
+        .msg-dir {
+            font-size: 11px;
+            font-weight: bold;
+            text-align: center;
+        }
+        .msg-dir.sent { color: #a6e3a1; }
+        .msg-dir.received { color: #89b4fa; }
+
+        .msg-time {
+            font-size: 10px;
+            color: #6c7086;
+            font-family: Consolas, monospace;
+        }
+
+        .msg-event {
+            font-size: 11px;
+            color: #f9e2af;
+            font-weight: 500;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .msg-action {
+            font-size: 10px;
+            color: #cba6f7;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .msg-server {
+            font-size: 10px;
+            color: #94e2d5;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .msg-preview {
+            font-size: 10px;
+            color: #6c7086;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .msg-size {
+            font-size: 10px;
+            color: #585b70;
+            text-align: right;
+            font-family: Consolas, monospace;
+        }
+
+        /* ===== Detail panel ===== */
+        .detail-panel {
+            width: 0;
+            min-width: 0;
+            overflow: hidden;
+            border-left: 1px solid #313244;
+            background: #11111b;
+            transition: width 0.15s ease;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+        .detail-panel.open {
+            width: 45%;
+            min-width: 200px;
+        }
+        .detail-panel.resizing {
+            transition: none;
+        }
+
+        .detail-resize-handle {
+            position: absolute;
+            left: -3px;
+            top: 0;
+            bottom: 0;
+            width: 6px;
+            cursor: col-resize;
+            z-index: 10;
+            background: transparent;
+        }
+        .detail-resize-handle:hover,
+        .detail-resize-handle.active {
+            background: #89b4fa;
+        }
+
+        .detail-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 6px 10px;
+            background: #181825;
+            border-bottom: 1px solid #313244;
+            flex-shrink: 0;
+            gap: 6px;
+        }
+        .detail-header span { font-weight: bold; font-size: 11px; }
+        .detail-header-actions {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .detail-close {
+            background: none;
+            border: none;
+            color: #6c7086;
+            cursor: pointer;
+            font-size: 14px;
+            line-height: 1;
+        }
+        .detail-close:hover { color: #f38ba8; }
+
+        .detail-format-select {
+            background: #313244;
+            border: 1px solid #45475a;
+            color: #cdd6f4;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+            cursor: pointer;
+        }
+        .detail-format-select:hover { background: #45475a; }
+        .detail-format-select:focus { outline: none; border-color: #89b4fa; }
+
+        .detail-search-bar {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 10px;
+            background: #181825;
+            border-bottom: 1px solid #313244;
+            flex-shrink: 0;
+        }
+        .detail-search-bar input {
+            flex: 1;
+            background: #11111b;
+            border: 1px solid #45475a;
+            color: #cdd6f4;
+            padding: 3px 6px;
+            border-radius: 3px;
+            font-size: 11px;
+        }
+        .detail-search-bar input:focus { outline: none; border-color: #89b4fa; }
+        .detail-search-bar button {
+            background: #313244;
+            border: 1px solid #45475a;
+            color: #cdd6f4;
+            padding: 3px 8px;
+            border-radius: 3px;
+            font-size: 10px;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .detail-search-bar button:hover { background: #45475a; }
+        .detail-search-bar .search-count {
+            font-size: 10px;
+            color: #6c7086;
+            white-space: nowrap;
+        }
+        .search-highlight { background: #f9e2af33; color: #f9e2af; border-radius: 2px; }
+        .search-highlight.current { background: #f9e2af88; }
+
+        /* Tree view */
+        .tree-view { font-family: Consolas, monospace; font-size: 11px; line-height: 1.6; }
+        .tree-node { }
+        .tree-toggle {
+            cursor: pointer;
+            user-select: none;
+            color: #89b4fa;
+            display: inline-block;
+            width: 14px;
+            text-align: center;
+        }
+        .tree-toggle:hover { color: #cdd6f4; }
+        .tree-key { color: #cba6f7; }
+        .tree-string { color: #a6e3a1; }
+        .tree-number { color: #fab387; }
+        .tree-boolean { color: #89b4fa; }
+        .tree-null { color: #6c7086; }
+        .tree-bracket { color: #6c7086; }
+        .tree-children { margin-left: 18px; }
+        .tree-children.collapsed { display: none; }
+
+        /* Export dropdown */
+        .export-dropdown {
+            position: relative;
+            display: inline-block;
+        }
+        .export-menu {
+            display: none;
+            position: absolute;
+            top: 100%;
+            left: 0;
+            background: #313244;
+            border: 1px solid #45475a;
+            border-radius: 4px;
+            z-index: 100;
+            min-width: 140px;
+            margin-top: 2px;
+        }
+        .export-menu.open { display: block; }
+        .export-menu button {
+            display: block;
+            width: 100%;
+            text-align: left;
+            padding: 5px 10px;
+            border: none;
+            background: none;
+            color: #cdd6f4;
+            font-size: 11px;
+            cursor: pointer;
+        }
+        .export-menu button:hover { background: #45475a; }
+
+        .detail-body {
+            flex: 1;
+            overflow: auto;
+            padding: 8px 10px;
+        }
+        .detail-body pre {
+            font-family: Consolas, 'Courier New', monospace;
+            font-size: 11px;
+            white-space: pre-wrap;
+            word-break: break-all;
+            line-height: 1.5;
+            color: #cdd6f4;
+        }
+
+        .detail-meta {
+            font-size: 10px;
+            color: #6c7086;
+            margin-bottom: 8px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid #313244;
+        }
+        .detail-meta span { margin-right: 12px; }
+        .detail-meta .dir-sent { color: #a6e3a1; font-weight: bold; }
+        .detail-meta .dir-received { color: #89b4fa; font-weight: bold; }
+
+        /* ===== Send panel ===== */
+        .send-panel {
+            border-top: 1px solid #313244;
+            background: #181825;
+            padding: 6px 8px;
+            flex-shrink: 0;
+            display: none;
+        }
+        .send-panel.open { display: flex; gap: 6px; align-items: flex-start; }
+
+        .send-panel textarea {
+            flex: 1;
+            background: #11111b;
+            border: 1px solid #45475a;
+            color: #cdd6f4;
+            padding: 6px 8px;
+            border-radius: 4px;
+            font-family: Consolas, monospace;
+            font-size: 11px;
+            resize: vertical;
+            min-height: 36px;
+            max-height: 120px;
+        }
+        .send-panel textarea:focus { outline: none; border-color: #89b4fa; }
+        .send-panel button {
+            background: #313244;
+            border: 1px solid #a6e3a1;
+            color: #a6e3a1;
+            padding: 6px 14px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 11px;
+            white-space: nowrap;
+        }
+        .send-panel button:hover { background: #1a3a1a; }
+
+        /* ===== Empty state ===== */
+        .empty-state {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex: 1;
+            color: #6c7086;
+            font-size: 13px;
+            text-align: center;
+            padding: 20px;
+        }
+
+        /* Scrollbar styling */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #11111b; }
+        ::-webkit-scrollbar-thumb { background: #45475a; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #585b70; }
+    </style>
+</head>
+<body>
+<!-- Toolbar -->
+<div class="toolbar">
+    <button id="btnRefresh" title="Pull latest WS messages from extension logger">⟳ Pull History</button>
+    <button id="btnLive" title="Toggle live auto-refresh">● Live</button>
+    <div class="separator"></div>
+    <label><input type="checkbox" id="filterSent" checked> Sent</label>
+    <label><input type="checkbox" id="filterReceived" checked> Received</label>
+    <div class="separator"></div>
+    <input type="text" id="searchInput" placeholder="Filter by event or content...">
+    <div class="separator"></div>
+    <button id="btnSendToggle" title="Toggle send panel">✉ Send</button>
+    <button id="btnClear" class="danger" title="Clear all messages">✕ Clear</button>
+    <div class="separator"></div>
+    <div class="export-dropdown">
+        <button id="btnExport" title="Export filtered messages">⬇ Export</button>
+        <div class="export-menu" id="exportMenu">
+            <button id="btnExportJson">📄 Export as JSON</button>
+            <button id="btnExportMd">📋 Export as MD Table</button>
+        </div>
+    </div>
+    <span class="stats" id="statsLabel">0 messages</span>
+</div>
+
+<!-- Main content: list + detail -->
+<div class="main-content">
+    <div class="message-list-container">
+        <div class="message-list-header" id="listHeader">
+            <span class="col-header" data-col="dir"></span>
+            <span class="col-header" data-col="time">Time<span class="col-resize" data-col="time"></span></span>
+            <span class="col-header" data-col="event">Event<span class="col-resize" data-col="event"></span></span>
+            <span class="col-header" data-col="action">Action<span class="col-resize" data-col="action"></span></span>
+            <span class="col-header" data-col="server">Server<span class="col-resize" data-col="server"></span></span>
+            <span class="col-header">Preview</span>
+            <span class="col-header" style="text-align:right">Size</span>
+        </div>
+        <div class="message-list" id="messageList">
+            <div class="empty-state" id="emptyState">
+                No WebSocket messages yet.<br>Click "Pull History" to load from the extension logger,<br>or enable "Live" for auto-refresh.
+            </div>
+        </div>
+    </div>
+    <div class="detail-panel" id="detailPanel">
+        <div class="detail-resize-handle" id="detailResizeHandle"></div>
+        <div class="detail-header">
+            <div class="detail-header-actions" style="gap:6px;">
+                <span style="font-weight:bold;font-size:11px;">Message Detail</span>
+                <select class="detail-format-select" id="detailFormatSelect" title="Display format">
+                    <option value="raw">Raw</option>
+                    <option value="pretty" selected>JSON-pretty</option>
+                    <option value="tree">Tree View</option>
+                </select>
+            </div>
+            <button class="detail-close" id="detailClose">✕</button>
+        </div>
+        <div class="detail-search-bar">
+            <input type="text" id="detailSearchInput" placeholder="Search in message...">
+            <button id="detailSearchBtn" title="Find next (Enter)">🔍</button>
+            <span class="search-count" id="detailSearchCount"></span>
+        </div>
+        <div class="detail-meta" id="detailMeta"></div>
+        <div class="detail-body"><pre id="detailBody"></pre></div>
+    </div>
+</div>
+
+<!-- Send panel -->
+<div class="send-panel" id="sendPanel">
+    <textarea id="sendInput" placeholder='Enter WS message, e.g. 42["desktop",{"action":"get.options"}]' rows="2"></textarea>
+    <button id="btnSend">▶ Send</button>
+</div>
+
+<script src="devtools-panel.js"></script>
+</body>
+</html>

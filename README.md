@@ -39,6 +39,7 @@ The use of automation tools may be detectable by the site's developers and could
 - **Check for Updates** — Compare your installed extension, web, and system versions against the latest on GitHub. It lets user know if an update is required for extension or if web/system versions are different from what's stored.
 - **Cache-First Design** — Data loads instantly from cache on popup open. Use the "Refresh All" button or per-section refresh buttons to fetch fresh data
 - **Real-Time Updates** — WebSocket listeners auto-update daily ops, markets, expeditions, decisions, inventory, mercenaries, and archived expeditions live when data arrives — even if the popup is opened before data is ready
+- **DevTools WS Inspector** — Built-in Chrome DevTools panel for real-time WebSocket message inspection. Features include: direction/event/action/server column filtering, format dropdown (Raw / JSON-pretty / Interactive Tree View), search with highlight & navigation inside message detail, export filtered data as JSON or Markdown table, live mode with timestamp-based incremental message pulling, and resizable columns/detail pane
 - **Lightweight** — Only intercepts existing WebSocket traffic and re-triggers some API calls that the game already sends
 
 ## Installation
@@ -79,6 +80,7 @@ The use of automation tools may be detectable by the site's developers and could
 - **Enable auto choose mercenary** for extension to choose which mercenary to send for next expedition according to their cost and risk values. It only works if "auto-send" feature is turned on.
 - **Alarms** — Click ➕ in the Alarms section to create a new alarm. Choose a timer source, set a threshold, and configure volume/continuous beeping. Toggle alarms on/off or edit/delete them anytime.
 - **Check for Updates** — Click the button at the bottom of the popup to see if a new version of extension is available on GitHub. It also shows if web/system versions are changed recently.
+- **DevTools WS Inspector** — Open Chrome DevTools (F12) and navigate to the "COR3 Helper" tab. Pull messages to view WebSocket traffic. Use the filter inputs, format dropdown, search bar, and export buttons to analyze message data. Toggle Live mode for real-time updates.
 
 ## Files
 
@@ -96,6 +98,10 @@ The use of automation tools may be detectable by the site's developers and could
 | `simple-decrypt-solver.js` | Auto-solver for Simple Decrypt hacking minigame — clicks decrypt button and monitors progress                                     |
 | `daily-hack-solver.js`     | Fully automated daily ops solver — opens tab, starts task, detects puzzle, solves it, closes windows, auto-disables toggle        |
 | `auto-job-solver.js`       | MAIN world auto job solver engine — handles 9 job types with promise-based WS event orchestration                                 |
+| `devtools.html`            | DevTools entry point — registers the WS Inspector panel                                                                           |
+| `devtools.js`              | DevTools page script — creates the panel tab                                                                                      |
+| `devtools-panel.html`      | DevTools panel UI — message table, detail pane, export/search/format controls                                                     |
+| `devtools-panel.js`        | DevTools panel logic — filtering, raw/json-pretty/tree-view, search, export, live mode, pull-history, WS send                     |
 | `versions.json`            | Version tracking file for update checks (extension, web, system, patch)                                                           |
 
 ## Requirements

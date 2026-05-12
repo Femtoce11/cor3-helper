@@ -267,7 +267,10 @@ function collectJobsBg(marketData, darkMarketData, completedResults, serverMaint
     jobs.sort((a, b) => {
         const idxA = SERVER_PRIORITY.indexOf(a.serverName);
         const idxB = SERVER_PRIORITY.indexOf(b.serverName);
-        const sp = (idxA >= 0 ? idxA : SERVER_PRIORITY.length) - (idxB >= 0 ? idxB : SERVER_PRIORITY.length);
+        // No-server jobs (e.g. File Decryption, serverName='None') sort first (-1)
+        const spA = (a.serverName === 'None' || !a.serverName) ? -1 : (idxA >= 0 ? idxA : SERVER_PRIORITY.length);
+        const spB = (b.serverName === 'None' || !b.serverName) ? -1 : (idxB >= 0 ? idxB : SERVER_PRIORITY.length);
+        const sp = spA - spB;
         if (sp !== 0) return sp;
         const tpA = JOB_TYPE_PRIORITY.indexOf(a.name);
         const tpB = JOB_TYPE_PRIORITY.indexOf(b.name);
@@ -511,6 +514,27 @@ async function runAutoFinishAllBg() {
         }
 
         if (attempt < 3) {
+            // Re-check updated job timers: if all markets now have future reset times,
+            // reschedule at the earliest reset instead of waiting 60s for another attempt
+            const { marketData: mdTimerCheck, darkMarketData: dmdTimerCheck, soyuzMarketData: smdTimerCheck } = await chrome.storage.local.get(['marketData', 'darkMarketData', 'soyuzMarketData']);
+            const nowTimerCheck = Date.now();
+            let allFuture = true;
+            let earliestResetMs = Infinity;
+            for (const md of [mdTimerCheck, dmdTimerCheck, smdTimerCheck]) {
+                if (!md || !md.nextJobsResetAt) { allFuture = false; break; }
+                const resetMs = new Date(md.nextJobsResetAt).getTime();
+                if (resetMs <= nowTimerCheck) { allFuture = false; break; }
+                if (resetMs < earliestResetMs) earliestResetMs = resetMs;
+            }
+            if (allFuture && earliestResetMs < Infinity) {
+                // All markets have future timers — no point retrying, schedule at earliest reset
+                const waitMs = earliestResetMs - nowTimerCheck + 15000;
+                const mins = Math.max(waitMs / 60000, 0.25);
+                bgAutoJobLog(`🔄 Auto Finish All: all markets have future reset timers — scheduling next run in ${Math.floor(waitMs / 60000)}m ${Math.floor((waitMs % 60000) / 1000)}s`);
+                await chrome.alarms.create('autoFinishAllJobs', { delayInMinutes: mins });
+                return;
+            }
+
             bgAutoJobLog(`🔄 Auto Finish All: no jobs found yet, retrying in 60s (attempt ${attempt}/3)...`, 'warn');
             await new Promise(r => setTimeout(r, 60000));
             // Re-check if still enabled
@@ -835,7 +859,28 @@ chrome.storage.onChanged.addListener((changes, area) => {
             const newReset = change.newValue && change.newValue.nextJobsResetAt;
             return newReset && newReset !== oldReset;
         };
-        if (resetChanged(changes.marketData) || resetChanged(changes.darkMarketData) || resetChanged(changes.soyuzMarketData)) {
+        const homeReset = resetChanged(changes.marketData);
+        const darkReset = resetChanged(changes.darkMarketData);
+        const soyuzReset = resetChanged(changes.soyuzMarketData);
+        if (homeReset || darkReset || soyuzReset) {
+            // Clear old tracker/completedResults for reset markets (works even when popup is closed)
+            chrome.storage.local.get(['autoJobsTracker', 'autoJobsCompletedResults'], (result) => {
+                let tracker = Array.isArray(result.autoJobsTracker) ? result.autoJobsTracker : [];
+                let cr = Array.isArray(result.autoJobsCompletedResults) ? result.autoJobsCompletedResults : [];
+                if (homeReset) {
+                    tracker = tracker.filter(j => (j.marketKey || 'home') !== 'home');
+                    cr = cr.filter(j => j.marketKey !== 'home');
+                }
+                if (darkReset) {
+                    tracker = tracker.filter(j => j.marketKey !== 'dark');
+                    cr = cr.filter(j => j.marketKey !== 'dark');
+                }
+                if (soyuzReset) {
+                    tracker = tracker.filter(j => j.marketKey !== 'soyuz');
+                    cr = cr.filter(j => j.marketKey !== 'soyuz');
+                }
+                chrome.storage.local.set({ autoJobsTracker: tracker, autoJobsCompletedResults: cr });
+            });
             chrome.storage.sync.get('autoFinishAllJobsEnabled', (data) => {
                 if (data.autoFinishAllJobsEnabled) scheduleAutoFinishAllBgDebounced();
             });

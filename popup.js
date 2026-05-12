@@ -1303,21 +1303,26 @@ function renderMarketInto(container, data, labelPrefix, idPrefix) {
     }
     html += `</div>`;
 
-    // Jobs List (expandable) - 3 columns: Category, Server, Reward — sorted by server
-    html += `<div class="expandable-header" id="${idPrefix}JobsToggle"><span class="expand-arrow">▶</span><span class="expand-label">Jobs List (${availableJobs}/${jobCount})</span></div>`;
+    // Jobs List (expandable) - 4 columns: Job, Server, Status, Reward — sorted by server
+    // Combine open jobs + in-progress (TAKEN) + failed (FAILED) from recentJobs
+    const openJobs = (md.jobs || []).filter(j => !j.isCompleted && !j.isExpired).map(j => ({ ...j, _status: 'OPEN' }));
+    const recentActive = (md.recentJobs || []).filter(j => j.status === 'TAKEN' || j.status === 'FAILED').map(j => ({ ...j, _status: j.status === 'FAILED' ? 'FAILED' : 'IN PROGRESS' }));
+    const completedJobs = (md.jobs || []).filter(j => j.isCompleted || j.isExpired).map(j => ({ ...j, _status: j.isCompleted ? 'COMPLETED' : 'EXPIRED' }));
+    const allJobsList = [...openJobs, ...recentActive, ...completedJobs];
+    const activeJobCount = openJobs.length + recentActive.length;
+    html += `<div class="expandable-header" id="${idPrefix}JobsToggle"><span class="expand-arrow">▶</span><span class="expand-label">Jobs List (${activeJobCount}/${allJobsList.length})</span></div>`;
     html += `<div class="expandable-body" id="${idPrefix}JobsBody">`;
-    if (md.jobs && md.jobs.length > 0) {
-        // Sort jobs by server name
-        const sortedJobs = [...md.jobs].sort((a, b) => {
+    if (allJobsList.length > 0) {
+        // Sort by server name
+        allJobsList.sort((a, b) => {
             const sA = (a.relatedServers && a.relatedServers[0] ? a.relatedServers[0].serverName : '') || '';
             const sB = (b.relatedServers && b.relatedServers[0] ? b.relatedServers[0].serverName : '') || '';
             return sA.localeCompare(sB);
         });
         html += `<table style="width:100%;font-size:10px;border-collapse:collapse;margin-bottom:4px;">`;
-        html += `<tr style="color:var(--text-dim);border-bottom:1px solid var(--border);"><th style="text-align:left;padding:3px 4px;">Job</th><th style="text-align:left;padding:3px 4px;">Server</th><th style="text-align:right;padding:3px 4px;">Reward</th></tr>`;
-        for (const job of sortedJobs) {
-            const jobStatus = job.isCompleted ? '✅' : job.isExpired ? '❌' : '🔹';
-            const dimStyle = (job.isCompleted || job.isExpired) ? 'opacity:0.5;' : '';
+        html += `<tr style="color:var(--text-dim);border-bottom:1px solid var(--border);"><th style="text-align:left;padding:3px 4px;">Job</th><th style="text-align:left;padding:3px 4px;">Server</th><th style="text-align:center;padding:3px 4px;">Status</th><th style="text-align:right;padding:3px 4px;">Reward</th></tr>`;
+        for (const job of allJobsList) {
+            const dimStyle = (job._status === 'COMPLETED' || job._status === 'EXPIRED') ? 'opacity:0.5;' : '';
             const jobName = job.name || job.id || 'Unknown';
             const serverName = (job.relatedServers && job.relatedServers[0]) ? job.relatedServers[0].serverName : 'N/A';
             let rewardStr = '--';
@@ -1327,9 +1332,20 @@ function renderMarketInto(container, data, labelPrefix, idPrefix) {
             if (job.rewardReputation) {
                 rewardStr += ` · ⭐ ${job.rewardReputation}`;
             }
+            // Status badge
+            let statusColor, statusIcon;
+            switch (job._status) {
+                case 'OPEN': statusColor = 'var(--accent-blue, #89b4fa)'; statusIcon = '🔹'; break;
+                case 'IN PROGRESS': statusColor = 'var(--accent-orange, #fab387)'; statusIcon = '🔄'; break;
+                case 'FAILED': statusColor = 'var(--accent-red, #f38ba8)'; statusIcon = '❌'; break;
+                case 'COMPLETED': statusColor = 'var(--accent-green, #a6e3a1)'; statusIcon = '✅'; break;
+                case 'EXPIRED': statusColor = 'var(--text-dim, #6c7086)'; statusIcon = '⏰'; break;
+                default: statusColor = 'var(--text-dim)'; statusIcon = '—'; break;
+            }
             html += `<tr style="${dimStyle}border-bottom:1px solid var(--border);">`;
-            html += `<td style="padding:3px 4px;color:var(--text-secondary);">${jobStatus} ${jobName}</td>`;
+            html += `<td style="padding:3px 4px;color:var(--text-secondary);">${jobName}</td>`;
             html += `<td style="padding:3px 4px;color:var(--text-muted);">${serverName}</td>`;
+            html += `<td style="padding:3px 4px;text-align:center;color:${statusColor};font-size:9px;">${statusIcon} ${job._status}</td>`;
             html += `<td style="padding:3px 4px;text-align:right;color:var(--accent-green);">${rewardStr}</td>`;
             html += `</tr>`;
         }
@@ -2991,10 +3007,6 @@ checkUpdateBtn.addEventListener('click', async () => {
     }
 });
 
-// --- System Message Notifications Toggle ---
-const disableSystemMessagesToggle = document.getElementById('disableSystemMessagesToggle');
-const systemMessageStatus = document.getElementById('systemMessageStatus');
-
 // --- Background Elements Toggle ---
 const disableBackgroundToggle = document.getElementById('disableBackgroundToggle');
 const backgroundStatus = document.getElementById('backgroundStatus');
@@ -3033,11 +3045,7 @@ function updateAutoUpdateMarketsStatus() {
 }
 
 // Load saved settings
-chrome.storage.sync.get(['disableSystemMessages', 'disableBackground', 'disableNetworkFog', 'moveNotificationsLeft', 'autoUpdateMarkets'], (result) => {
-    if (disableSystemMessagesToggle) {
-        disableSystemMessagesToggle.checked = result.disableSystemMessages || false;
-        updateSystemMessageStatus();
-    }
+chrome.storage.sync.get(['disableBackground', 'disableNetworkFog', 'moveNotificationsLeft', 'autoUpdateMarkets'], (result) => {
     if (disableBackgroundToggle) {
         disableBackgroundToggle.checked = result.disableBackground || false;
         updateBackgroundStatus();
@@ -3055,51 +3063,6 @@ chrome.storage.sync.get(['disableSystemMessages', 'disableBackground', 'disableN
         updateAutoUpdateMarketsStatus();
     }
 });
-
-// Handle system message toggle changes
-if (disableSystemMessagesToggle) {
-    disableSystemMessagesToggle.addEventListener('change', async () => {
-        const isEnabled = disableSystemMessagesToggle.checked;
-
-        // Save setting
-        chrome.storage.sync.set({ disableSystemMessages: isEnabled });
-
-        // Update status
-        updateSystemMessageStatus();
-
-        // Apply change immediately
-        if (isEnabled) {
-            // Disable system messages
-            try {
-                const tab = await getCor3Tab();
-                if (tab) {
-                    await chrome.tabs.sendMessage(tab.id, { action: "disableSystemMessages" });
-                    console.log('[COR3 Helper] System messages disabled');
-                }
-            } catch (e) {
-                console.error('[COR3 Helper] Failed to disable system messages:', e);
-                cor3LogError('popup.js', e, { action: 'disableSystemMessages' });
-            }
-        } else {
-            // Re-enable system messages - may require page restart
-            systemMessageStatus.textContent = 'System messages re-enabled. Page restart may be required.';
-            systemMessageStatus.style.color = 'var(--accent-orange)';
-
-            try {
-                const tab = await getCor3Tab();
-                if (tab) {
-                    await chrome.tabs.sendMessage(tab.id, { action: "enableSystemMessages" });
-                    console.log('[COR3 Helper] System messages re-enabled');
-                }
-            } catch (e) {
-                console.error('[COR3 Helper] Failed to re-enable system messages:', e);
-                cor3LogError('popup.js', e, { action: 'enableSystemMessages' });
-                systemMessageStatus.textContent = 'System messages re-enabled. Page restart required to apply changes.';
-                systemMessageStatus.style.color = 'var(--accent-orange)';
-            }
-        }
-    });
-}
 
 // Handle background toggle changes
 if (disableBackgroundToggle) {
@@ -3131,14 +3094,6 @@ if (disableBackgroundToggle) {
             cor3LogError('popup.js', e, { action: 'toggleBackground' });
         }
     });
-}
-
-function updateSystemMessageStatus() {
-    if (!disableSystemMessagesToggle || !systemMessageStatus) return;
-
-    const isEnabled = disableSystemMessagesToggle.checked;
-    systemMessageStatus.textContent = isEnabled ? 'Active' : 'Off';
-    systemMessageStatus.style.color = isEnabled ? 'var(--accent-green)' : 'var(--text-dim)';
 }
 
 function updateBackgroundStatus() {
@@ -3203,7 +3158,6 @@ if (autoUpdateMarketsToggle) {
 }
 
 // Initialize status on load
-updateSystemMessageStatus();
 updateBackgroundStatus();
 updateNetworkFogStatus();
 updateMoveNotificationsStatus();
@@ -3852,7 +3806,7 @@ async function renderDebugJobs() {
     const marketSources = [
         { key: 'home', label: '🏠 HOME', data: marketData },
         { key: 'dark', label: '🌑 D4RK', data: darkMarketData },
-        { key: 'soyuz', label: '<span style="color:#c33b3b;margin-left:2px;margin-right:3px">☭</span> SOYUZ', data: soyuzMarketData }
+        { key: 'soyuz', label: '<span style="color:#c33b3b;margin-left:2px;margin-right:2px">☭</span> SOYUZ', data: soyuzMarketData }
     ];
 
     let hasAny = false;
