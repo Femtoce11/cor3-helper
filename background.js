@@ -194,11 +194,11 @@ function collectJobsBg(marketData, darkMarketData, completedResults, serverMaint
     const JOB_TYPE_PRIORITY = ['IP Injection', 'IP Cleanup', 'Data Upload', 'Data Download', 'Log Deletion', 'Log Download', 'File Elimination', 'File Decryption', 'Decrypt & Extract'];
     const maint = serverMaintenanceMap || {};
     const now = Date.now();
-    // Build set of job IDs that already failed/bugged — skip them
+    // Build set of job IDs that already failed/bugged/skipped — skip them
     const skipIds = new Set();
     if (completedResults && completedResults.length > 0) {
         for (const cr of completedResults) {
-            if (cr.status === 'failed' || cr.status === 'bugged') {
+            if (cr.status === 'failed' || cr.status === 'bugged' || cr.status === 'skipped') {
                 skipIds.add(cr.jobId);
             }
         }
@@ -351,7 +351,7 @@ async function scheduleAutoFinishAllBg() {
         }
     }
 
-    // Maintenance end times for blocker servers on path to skipped jobs
+    // Maintenance end times for blocker servers on path to skipped jobs (from collectJobsBg path check)
     const skipped = availableNow._skippedMaintenance || [];
     if (skipped.length > 0) {
         const seenBlockerIds = new Set();
@@ -371,6 +371,35 @@ async function scheduleAutoFinishAllBg() {
             s.blockerName === s.serverName ? s.serverName : `${s.serverName} (blocked by ${s.blockerName})`
         ))].join(', ');
         bgAutoJobLog(`🔄 Auto Finish All: skipped jobs due to maintenance: ${blockedPairs}`, 'warn');
+    }
+
+    // Also check completedResults for previously skipped (maintenance) jobs — their
+    // maintenanceEndsAt may provide the best schedule time, especially when the
+    // serverMaintenanceMap is stale (maintenance discovered at runtime, not in map).
+    const skippedFromResults = (crSched || []).filter(cr => cr.status === 'skipped');
+    if (skippedFromResults.length > 0) {
+        let hasEndTimeInfo = false;
+        for (const sr of skippedFromResults) {
+            if (sr.maintenanceEndsAt) {
+                hasEndTimeInfo = true;
+                const diff = new Date(sr.maintenanceEndsAt).getTime() - now;
+                if (diff > 0 && diff < minWaitMs) {
+                    minWaitMs = diff;
+                    scheduledReason = `maintenance end (${sr.serverName || 'unknown server'})`;
+                } else if (diff <= 0 && minWaitMs === Infinity) {
+                    // Maintenance should have ended — retry soon
+                    minWaitMs = 30 * 1000; // 30 seconds
+                    scheduledReason = `maintenance ended (${sr.serverName || 'unknown server'}) — rechecking`;
+                }
+            }
+        }
+        // If skipped jobs exist but none have a known end time, use a 10-minute fallback
+        // to avoid infinite immediate retries
+        if (!hasEndTimeInfo && minWaitMs === Infinity) {
+            minWaitMs = 10 * 60 * 1000; // 10 minutes
+            scheduledReason = 'maintenance fallback (no end time known)';
+            bgAutoJobLog(`🔄 Auto Finish All: ${skippedFromResults.length} job(s) skipped (maintenance) with unknown end time — waiting 10m`, 'warn');
+        }
     }
 
     if (minWaitMs < Infinity) {
@@ -406,6 +435,14 @@ async function runAutoFinishAllBg() {
         await chrome.tabs.sendMessage(tab.id, { action: 'autoClearIpsCmd', cmd: 'get.map', data: {} });
     } catch (e) { /* best effort */ }
     await new Promise(r => setTimeout(r, 2000));
+
+    // Clear previously skipped (maintenance) jobs from completedResults so they can be retried.
+    // collectJobsBg will re-evaluate reachability using the freshly updated serverMaintenanceMap.
+    const { autoJobsCompletedResults: crPre } = await chrome.storage.local.get('autoJobsCompletedResults');
+    if (Array.isArray(crPre) && crPre.some(cr => cr.status === 'skipped')) {
+        const cleared = crPre.filter(cr => cr.status !== 'skipped');
+        await chrome.storage.local.set({ autoJobsCompletedResults: cleared });
+    }
 
     // Try up to 3 times with ~1 min intervals to find jobs after reset
     for (let attempt = 1; attempt <= 3; attempt++) {

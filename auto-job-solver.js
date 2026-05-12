@@ -138,7 +138,8 @@
                 jobId: j.jobId, name: j.name, type: j.type,
                 serverName: j.serverName, marketKey: j.marketKey,
                 status: j.status, reward: j.reward || null,
-                error: j.error || null, completedAt: Date.now()
+                error: j.error || null, completedAt: Date.now(),
+                maintenanceEndsAt: j.maintenanceEndsAt || null
             };
         });
         if (results.length > 0) {
@@ -1704,6 +1705,7 @@
                                     : mj.serverName + ' unreachable (' + srv.name + ' in maintenance)';
                                 mj.status = 'skipped';
                                 mj.error = mMsg + ' (~' + mMins + 'm remaining)';
+                                mj.maintenanceEndsAt = srvInfo.maintenanceEndsAt || null;
                                 log('⚠️ Skipping job: ' + mj.name + ' — ' + mMsg + ' (~' + mMins + 'm left)', 'warn');
                                 skippedCount++;
                                 break;
@@ -1795,6 +1797,7 @@
                         : job.serverName + ' unreachable (' + pathCheck.blockerName + ' in maintenance)';
                     job.status = 'skipped';
                     job.error = blockerMsg + ' (~' + mins + 'm remaining)';
+                    job.maintenanceEndsAt = pathCheck.endsAt || null;
                     log('⚠️ Skipping job: ' + job.name + ' — ' + blockerMsg + ' (~' + mins + 'm left)', 'warn');
                     updateTracker();
                     continue;
@@ -1827,6 +1830,7 @@
                 if (e.message && (e.message.includes('maintenance') || e.message.includes('unreachable'))) {
                     job.status = 'skipped';
                     job.error = e.message;
+                    job.maintenanceEndsAt = null;
                     log('⚠️ Job skipped (unreachable): ' + job.name + ' — ' + e.message, 'warn');
                 } else {
                     job.status = 'failed';
@@ -1879,7 +1883,8 @@
                 status: j.status,
                 reward: j.reward || null,
                 error: j.error || null,
-                completedAt: Date.now()
+                completedAt: Date.now(),
+                maintenanceEndsAt: j.maintenanceEndsAt || null
             };
         });
         window.postMessage({ type: 'COR3_AUTOJOB_SAVE_COMPLETED', jobs: completedResults }, '*');
