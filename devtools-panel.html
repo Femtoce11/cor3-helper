@@ -451,6 +451,11 @@
             padding: 20px;
         }
 
+        #pageSelector {
+            background: #1e1e2e; color: #cdd6f4; border: 1px solid #45475a; border-radius: 4px;
+            padding: 2px 4px; font-size: 11px; cursor: pointer; max-width: 140px;
+        }
+        #pageSelector:focus { outline: 1px solid #89b4fa; }
         /* Scrollbar styling */
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-track { background: #11111b; }
@@ -461,7 +466,6 @@
 <body>
 <!-- Toolbar -->
 <div class="toolbar">
-    <button id="btnRefresh" title="Pull latest WS messages from extension logger">⟳ Pull History</button>
     <button id="btnLive" title="Toggle live auto-refresh">● Live</button>
     <div class="separator"></div>
     <label><input type="checkbox" id="filterSent" checked> Sent</label>
@@ -479,7 +483,8 @@
             <button id="btnExportMd">📋 Export as MD Table</button>
         </div>
     </div>
-    <span class="stats" id="statsLabel">0 messages</span>
+    <select id="pageSelector" title="Log section"></select>
+    <span class="stats" id="statsLabel">(▲0 ▼0)</span>
 </div>
 
 <!-- Main content: list + detail -->
@@ -496,7 +501,7 @@
         </div>
         <div class="message-list" id="messageList">
             <div class="empty-state" id="emptyState">
-                No WebSocket messages yet.<br>Click "Pull History" to load from the extension logger,<br>or enable "Live" for auto-refresh.
+                No WebSocket messages yet.<br>Enable "Live" for real-time updates<br>or select a log section to browse history.
             </div>
         </div>
     </div>

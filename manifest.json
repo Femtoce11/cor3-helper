@@ -5,6 +5,7 @@
   "description": "Monitor markets, expeditions, daily ops, and get timer alerts for cor3.gg.",
   "permissions": [
     "storage",
+    "scripting",
     "activeTab",
     "tabs",
     "sidePanel",

@@ -3,7 +3,6 @@
 (function () {
     'use strict';
 
-    // --- Server/Market ID → Name lookup ---
     const SERVER_ID_MAP = {
         '019d1b0a-13a9-77dd-b41f-33f06f2df284': 'RM7-E1L3',
         '019d1b0a-13a9-77dd-b41f-374ee144bd07': 'RM7-E1L5',
@@ -27,8 +26,128 @@
         '019da731-2db5-7d76-9447-1ea3b9b78001': 'SOYUZ'
     };
 
-    // Actions that are map/network requests (no meaningful server to show)
     const NO_SERVER_ACTIONS = new Set(['get.map', 'network-map']);
+    const PAGE_SIZE = 1000;
+
+    // --- IndexedDB access via chrome.scripting.executeScript ---
+    // The DB lives on the cor3.gg origin (written by content script ws-messages.js).
+    // DevTools panel runs on chrome-extension:// origin and cannot access it directly.
+    // We use chrome.scripting.executeScript to run queries in the inspected tab's context.
+
+    function getInspectedTabId() {
+        return chrome.devtools.inspectedWindow.tabId;
+    }
+
+    async function runInTab(fn, args) {
+        const tabId = getInspectedTabId();
+        if (!tabId) {
+            console.warn('[COR3 Panel] No inspected tab ID');
+            return null;
+        }
+        try {
+            const results = await chrome.scripting.executeScript({
+                target: { tabId },
+                func: fn,
+                args: args || []
+            });
+            if (results && results[0]) return results[0].result;
+            return null;
+        } catch (e) {
+            console.error('[COR3 Panel] executeScript failed:', e);
+            return null;
+        }
+    }
+
+    async function dbCount() {
+        const result = await runInTab(() => {
+            return new Promise((resolve) => {
+                const req = indexedDB.open('cor3_ws_db', 1);
+                req.onsuccess = (e) => {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains('messages')) { db.close(); resolve(0); return; }
+                    const tx = db.transaction('messages', 'readonly');
+                    const cr = tx.objectStore('messages').count();
+                    cr.onsuccess = () => { resolve(cr.result); db.close(); };
+                    cr.onerror = () => { resolve(0); db.close(); };
+                };
+                req.onerror = () => resolve(0);
+            });
+        });
+        console.log('[COR3 Panel] dbCount =', result);
+        return result || 0;
+    }
+
+    async function dbGetPage(start, limit) {
+        const result = await runInTab((s, l) => {
+            return new Promise((resolve) => {
+                const req = indexedDB.open('cor3_ws_db', 1);
+                req.onsuccess = (e) => {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains('messages')) { db.close(); resolve([]); return; }
+                    const tx = db.transaction('messages', 'readonly');
+                    const store = tx.objectStore('messages');
+                    const results = [];
+                    let skipped = 0;
+                    const cur = store.openCursor();
+                    cur.onsuccess = (ev) => {
+                        const cursor = ev.target.result;
+                        if (!cursor || results.length >= l) { resolve(results); db.close(); return; }
+                        if (skipped < s) { skipped++; cursor.continue(); return; }
+                        results.push(cursor.value);
+                        cursor.continue();
+                    };
+                    cur.onerror = () => { resolve(results); db.close(); };
+                };
+                req.onerror = () => resolve([]);
+            });
+        }, [start, limit]);
+        console.log('[COR3 Panel] dbGetPage(' + start + ',' + limit + ') returned', (result || []).length, 'entries');
+        return result || [];
+    }
+
+    async function dbGetAfter(isoTs) {
+        const result = await runInTab((ts) => {
+            return new Promise((resolve) => {
+                const req = indexedDB.open('cor3_ws_db', 1);
+                req.onsuccess = (e) => {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains('messages')) { db.close(); resolve([]); return; }
+                    const tx = db.transaction('messages', 'readonly');
+                    const idx = tx.objectStore('messages').index('timestamp');
+                    const range = IDBKeyRange.lowerBound(ts, true);
+                    const results = [];
+                    const cur = idx.openCursor(range);
+                    cur.onsuccess = (ev) => {
+                        const cursor = ev.target.result;
+                        if (!cursor) { resolve(results); db.close(); return; }
+                        results.push(cursor.value);
+                        cursor.continue();
+                    };
+                    cur.onerror = () => { resolve(results); db.close(); };
+                };
+                req.onerror = () => resolve([]);
+            });
+        }, [isoTs]);
+        return result || [];
+    }
+
+    async function dbClear() {
+        await runInTab(() => {
+            return new Promise((resolve) => {
+                const req = indexedDB.open('cor3_ws_db', 1);
+                req.onsuccess = (e) => {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains('messages')) { db.close(); resolve(); return; }
+                    const tx = db.transaction('messages', 'readwrite');
+                    tx.objectStore('messages').clear();
+                    tx.oncomplete = () => { db.close(); resolve(); };
+                    tx.onerror = () => { db.close(); resolve(); };
+                };
+                req.onerror = () => resolve();
+            });
+        });
+        console.log('[COR3 Panel] dbClear completed');
+    }
 
     // --- State ---
     let allMessages = [];
@@ -36,14 +155,16 @@
     let selectedIndex = -1;
     let liveMode = false;
     let liveTimer = null;
-    let lastLiveTimestamp = null; // ISO string of last message seen in live mode
-    let displayCleared = false; // true when user clicked Clear (display only, storage still has data)
-    let detailFormat = 'pretty'; // 'raw' | 'pretty' | 'tree'
-    let selectedRawMessage = ''; // raw message for the currently selected detail
+    let lastLiveTimestamp = null;
+    let detailFormat = 'pretty';
+    let selectedRawMessage = '';
+    let currentPage = -1; // -1 = latest page (XXX-now)
+    let totalCount = 0;
 
     // Detail search state
     let detailSearchMatches = [];
     let detailSearchCurrent = -1;
+    let detailSearchQuery = '';
 
     // --- DOM refs ---
     const messageList = document.getElementById('messageList');
@@ -61,7 +182,7 @@
     const filterSent = document.getElementById('filterSent');
     const filterReceived = document.getElementById('filterReceived');
     const statsLabel = document.getElementById('statsLabel');
-    const btnRefresh = document.getElementById('btnRefresh');
+    const pageSelector = document.getElementById('pageSelector');
     const btnLive = document.getElementById('btnLive');
     const btnClear = document.getElementById('btnClear');
     const btnSendToggle = document.getElementById('btnSendToggle');
@@ -177,7 +298,7 @@
         return raw;
     }
 
-    // --- Tree View Renderer ---
+    // --- Tree View Renderer (Chrome Network tab style previews) ---
     function buildTreeView(raw) {
         let data;
         const match = raw.match(/^42(?:\/[^,]*,)?(\[.+)$/s);
@@ -193,6 +314,14 @@
         container.className = 'tree-view';
         renderTreeNode(container, data, null, true);
         return container;
+    }
+
+    function objectPreview(value, maxLen) {
+        if (value === null || typeof value !== 'object') return '';
+        try {
+            const s = JSON.stringify(value);
+            return s.length > maxLen ? s.substring(0, maxLen) + '…' : s;
+        } catch (e) { return ''; }
     }
 
     function renderTreeNode(parent, value, key, expanded) {
@@ -219,8 +348,20 @@
 
             const bracket = document.createElement('span');
             bracket.className = 'tree-bracket';
-            bracket.textContent = openBracket + (entries.length === 0 ? closeBracket : ` (${entries.length})`);
+            if (entries.length === 0) {
+                bracket.textContent = openBracket + closeBracket;
+            } else {
+                bracket.textContent = openBracket;
+            }
             node.appendChild(bracket);
+
+            const previewSpan = document.createElement('span');
+            previewSpan.className = 'tree-preview';
+            previewSpan.style.color = '#6c7086';
+            if (entries.length > 0) {
+                previewSpan.textContent = expanded ? '' : ' ' + objectPreview(value, 120);
+            }
+            node.appendChild(previewSpan);
 
             const children = document.createElement('div');
             children.className = 'tree-children' + (expanded ? '' : ' collapsed');
@@ -229,7 +370,6 @@
                 renderTreeNode(children, v, k, false);
             }
 
-            // Closing bracket
             const closeLine = document.createElement('div');
             closeLine.className = 'tree-node';
             const closeBr = document.createElement('span');
@@ -244,9 +384,9 @@
             toggle.addEventListener('click', () => {
                 const isCollapsed = children.classList.toggle('collapsed');
                 toggle.textContent = isCollapsed ? '▶' : '▼';
+                previewSpan.textContent = isCollapsed && entries.length > 0 ? ' ' + objectPreview(value, 120) : '';
             });
         } else {
-            // Leaf node
             const indent = document.createElement('span');
             indent.style.display = 'inline-block';
             indent.style.width = '14px';
@@ -278,15 +418,17 @@
         }
     }
 
-    // --- Detail Search ---
+    // --- Detail Search (works in raw/pretty AND tree view) ---
     function performDetailSearch() {
         const query = detailSearchInput.value.trim();
+        detailSearchQuery = query;
         detailSearchMatches = [];
         detailSearchCurrent = -1;
         detailSearchCount.textContent = '';
+        if (!query) return;
 
-        if (!query || detailFormat === 'tree') {
-            // For tree view, use browser-native text search; we don't highlight manually
+        if (detailFormat === 'tree') {
+            performTreeSearch(query);
             return;
         }
 
@@ -308,6 +450,48 @@
 
         detailSearchCurrent = 0;
         highlightDetailMatches();
+    }
+
+    function performTreeSearch(query) {
+        const queryLower = query.toLowerCase();
+        const nodes = detailBody.querySelectorAll('.tree-node');
+        detailSearchMatches = [];
+        nodes.forEach(node => {
+            const text = node.textContent.toLowerCase();
+            if (text.includes(queryLower)) {
+                detailSearchMatches.push({ node });
+            }
+        });
+        if (detailSearchMatches.length === 0) {
+            detailSearchCount.textContent = '0 matches';
+            return;
+        }
+        detailSearchCurrent = 0;
+        highlightTreeMatch();
+    }
+
+    function highlightTreeMatch() {
+        detailBody.querySelectorAll('.tree-node').forEach(n => n.style.background = '');
+        if (detailSearchMatches.length === 0) return;
+        const m = detailSearchMatches[detailSearchCurrent];
+        if (!m || !m.node) return;
+        let el = m.node;
+        while (el && el !== detailBody) {
+            if (el.classList && el.classList.contains('tree-children') && el.classList.contains('collapsed')) {
+                el.classList.remove('collapsed');
+                const prev = el.previousElementSibling;
+                if (prev) {
+                    const tog = prev.querySelector('.tree-toggle');
+                    if (tog) tog.textContent = '▼';
+                    const pv = prev.querySelector('.tree-preview');
+                    if (pv) pv.textContent = '';
+                }
+            }
+            el = el.parentElement;
+        }
+        m.node.style.background = '#f9e2af33';
+        m.node.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        detailSearchCount.textContent = `${detailSearchCurrent + 1}/${detailSearchMatches.length}`;
     }
 
     function highlightDetailMatches() {
@@ -337,7 +521,6 @@
         detailBody.appendChild(fragment);
         detailSearchCount.textContent = `${detailSearchCurrent + 1}/${detailSearchMatches.length}`;
 
-        // Scroll to current match
         const current = document.getElementById('currentSearchMatch');
         if (current) current.scrollIntoView({ block: 'center', behavior: 'smooth' });
     }
@@ -348,47 +531,63 @@
             return;
         }
         detailSearchCurrent = (detailSearchCurrent + 1) % detailSearchMatches.length;
-        highlightDetailMatches();
-    }
-
-    // --- Pull messages from extension storage ---
-    async function pullMessages() {
-        try {
-            const data = await chrome.storage.local.get('cor3_ws_messages');
-            const msgs = data.cor3_ws_messages || [];
-            allMessages = msgs;
-            displayCleared = false; // Pull History restores full view
-            applyFilters();
-        } catch (e) {
-            console.error('[CORE Helper] Failed to pull WS messages:', e);
+        if (detailFormat === 'tree') {
+            highlightTreeMatch();
+        } else {
+            highlightDetailMatches();
         }
     }
 
-    // Pull only new messages since lastLiveTimestamp (for efficient live mode)
-    async function pullNewMessages() {
-        try {
-            const data = await chrome.storage.local.get('cor3_ws_messages');
-            const msgs = data.cor3_ws_messages || [];
-
-            if (!lastLiveTimestamp || allMessages.length === 0) {
-                // First pull in live mode — load everything
-                allMessages = msgs;
-                if (msgs.length > 0) {
-                    lastLiveTimestamp = msgs[msgs.length - 1].timestamp;
-                }
-            } else {
-                // Only add messages newer than our last seen timestamp
-                const newMsgs = msgs.filter(m => m.timestamp > lastLiveTimestamp);
-                if (newMsgs.length > 0) {
-                    allMessages = allMessages.concat(newMsgs);
-                    lastLiveTimestamp = newMsgs[newMsgs.length - 1].timestamp;
-                } else {
-                    return; // No new messages — skip re-render
-                }
+    // --- Page selector ---
+    async function refreshPageSelector() {
+        totalCount = await dbCount();
+        const pages = Math.ceil(totalCount / PAGE_SIZE);
+        const prevVal = pageSelector.value;
+        pageSelector.innerHTML = '';
+        if (pages === 0) {
+            const opt = document.createElement('option');
+            opt.value = '-1';
+            opt.textContent = '0-now';
+            pageSelector.appendChild(opt);
+        } else {
+            for (let i = 0; i < pages; i++) {
+                const start = i * PAGE_SIZE;
+                const isLast = i === pages - 1;
+                const opt = document.createElement('option');
+                opt.value = String(i);
+                opt.textContent = isLast ? `${start}-now` : `${start}-${start + PAGE_SIZE}`;
+                pageSelector.appendChild(opt);
             }
+        }
+        if (currentPage === -1 || currentPage >= pages) {
+            pageSelector.value = String(Math.max(0, pages - 1));
+            currentPage = Math.max(0, pages - 1);
+        } else {
+            pageSelector.value = String(currentPage);
+        }
+    }
+
+    async function loadCurrentPage() {
+        const start = currentPage * PAGE_SIZE;
+        allMessages = await dbGetPage(start, PAGE_SIZE);
+        applyFilters();
+    }
+
+    async function pullLiveMessages() {
+        try {
+            if (!lastLiveTimestamp) return;
+            const newMsgs = await dbGetAfter(lastLiveTimestamp);
+            if (newMsgs.length === 0) return;
+            console.log('[COR3 Panel] Live pull:', newMsgs.length, 'new messages');
+            for (const m of newMsgs) allMessages.push(m);
+            if (allMessages.length > PAGE_SIZE) {
+                allMessages = allMessages.slice(allMessages.length - PAGE_SIZE);
+            }
+            lastLiveTimestamp = newMsgs[newMsgs.length - 1].timestamp;
             applyFilters();
+            await refreshPageSelector();
         } catch (e) {
-            console.error('[CORE Helper] Failed to pull new WS messages:', e);
+            console.error('[COR3 Panel] Failed to pull live WS messages:', e);
         }
     }
 
@@ -438,41 +637,35 @@
             row.className = 'msg-row' + (i === selectedIndex ? ' selected' : '');
             row.dataset.index = i;
 
-            // Direction arrow
             const dir = document.createElement('span');
             dir.className = 'msg-dir ' + m.direction;
             dir.textContent = m.direction === 'sent' ? '▲' : '▼';
             dir.title = m.direction;
             row.appendChild(dir);
 
-            // Time
             const time = document.createElement('span');
             time.className = 'msg-time';
             time.textContent = formatTime(m.timestamp);
             row.appendChild(time);
 
-            // Event
             const evt = document.createElement('span');
             evt.className = 'msg-event';
             evt.textContent = parsed.event;
             evt.title = parsed.event;
             row.appendChild(evt);
 
-            // Action
             const act = document.createElement('span');
             act.className = 'msg-action';
             act.textContent = action;
             act.title = action;
             row.appendChild(act);
 
-            // Server
             const srv = document.createElement('span');
             srv.className = 'msg-server';
             srv.textContent = server;
             srv.title = server;
             row.appendChild(srv);
 
-            // Preview — show a compact JSON-ish summary, not raw frame
             const preview = document.createElement('span');
             preview.className = 'msg-preview';
             let previewText = '';
@@ -486,7 +679,6 @@
             preview.title = previewText;
             row.appendChild(preview);
 
-            // Size
             const size = document.createElement('span');
             size.className = 'msg-size';
             size.textContent = formatSize(m.message);
@@ -498,7 +690,6 @@
 
         messageList.replaceChildren(fragment);
 
-        // Auto-scroll to bottom if live mode
         if (liveMode) {
             messageList.scrollTop = messageList.scrollHeight;
         }
@@ -510,11 +701,9 @@
         const m = filteredMessages[index];
         if (!m) return;
 
-        // Highlight selected row
         const rows = messageList.querySelectorAll('.msg-row');
         rows.forEach((r, i) => r.classList.toggle('selected', i === index));
 
-        // Show detail panel
         detailPanel.classList.add('open');
 
         const parsed = parseEvent(m.message);
@@ -533,10 +722,10 @@
         selectedRawMessage = m.message;
         renderDetailBody();
 
-        // Clear search state
         detailSearchInput.value = '';
         detailSearchMatches = [];
         detailSearchCurrent = -1;
+        detailSearchQuery = '';
         detailSearchCount.textContent = '';
     }
 
@@ -571,35 +760,42 @@
 
     // --- Stats ---
     function updateStats() {
-        const total = allMessages.length;
-        const shown = filteredMessages.length;
-        const sent = allMessages.filter(m => m.direction === 'sent').length;
-        const recv = allMessages.filter(m => m.direction === 'received').length;
-        statsLabel.textContent = `${shown}/${total} shown (▲${sent} ▼${recv})`;
+        const sent = filteredMessages.filter(m => m.direction === 'sent').length;
+        const recv = filteredMessages.filter(m => m.direction === 'received').length;
+        statsLabel.textContent = `(▲${sent} ▼${recv})`;
     }
 
-    // --- Live mode (timestamp-based incremental pull) ---
     function toggleLive() {
         liveMode = !liveMode;
         btnLive.classList.toggle('active', liveMode);
         btnLive.textContent = liveMode ? '● Live ON' : '● Live';
 
         if (liveMode) {
-            // Set initial timestamp from existing messages
-            if (allMessages.length > 0) {
-                lastLiveTimestamp = allMessages[allMessages.length - 1].timestamp;
-            } else {
-                lastLiveTimestamp = null;
-            }
-            pullNewMessages();
-            liveTimer = setInterval(pullNewMessages, 1500);
+            lastLiveTimestamp = new Date().toISOString();
+            allMessages = [];
+            applyFilters();
+            liveTimer = setInterval(pullLiveMessages, 1500);
+            console.log('[COR3 Panel] Live mode ON from', lastLiveTimestamp);
         } else {
             if (liveTimer) clearInterval(liveTimer);
             liveTimer = null;
+            console.log('[COR3 Panel] Live mode OFF');
+            refreshPageSelector().then(() => loadCurrentPage());
         }
     }
 
     // --- Export ---
+    function getPreviewText(msgData, raw) {
+        let previewText = '';
+        if (msgData) {
+            try { previewText = JSON.stringify(msgData); } catch (e) { previewText = raw || ''; }
+        } else {
+            previewText = raw || '';
+        }
+        if (previewText.length > 200) previewText = previewText.substring(0, 200) + '…';
+        return previewText;
+    }
+
     function exportAsJson() {
         const data = filteredMessages.map(m => {
             const parsed = parseEvent(m.message);
@@ -610,6 +806,7 @@
                 event: parsed.event,
                 action: msgData ? extractAction(msgData) : '—',
                 server: msgData ? resolveServer(msgData) : '—',
+                preview: getPreviewText(msgData, m.message),
                 raw: m.message,
                 data: msgData
             };
@@ -618,15 +815,17 @@
     }
 
     function exportAsMd() {
-        let md = '| Dir | Time | Event | Action | Server | Size |\n';
-        md += '|-----|------|-------|--------|--------|------|\n';
+        let md = '| Dir | Time | Event | Action | Server | Preview | Size |\n';
+        md += '|-----|------|-------|--------|--------|---------|------|\n';
         for (const m of filteredMessages) {
             const parsed = parseEvent(m.message);
             const msgData = parseMsgData(m.message);
             const action = msgData ? extractAction(msgData) : '—';
             const server = msgData ? resolveServer(msgData) : '—';
             const dir = m.direction === 'sent' ? '▲' : '▼';
-            md += `| ${dir} | ${formatTime(m.timestamp)} | ${parsed.event} | ${action} | ${server} | ${formatSize(m.message)} |\n`;
+            let preview = getPreviewText(msgData, m.message);
+            preview = preview.replace(/\|/g, '\\|');
+            md += `| ${dir} | ${formatTime(m.timestamp)} | ${parsed.event} | ${action} | ${server} | ${preview} | ${formatSize(m.message)} |\n`;
         }
         downloadFile('cor3-ws-export.md', md, 'text/markdown');
     }
@@ -641,40 +840,33 @@
         URL.revokeObjectURL(url);
     }
 
-    // --- Send WS message ---
     async function sendWsMessage() {
         const msg = sendInput.value.trim();
         if (!msg) return;
 
         try {
-            // Find the cor3.gg tab
-            const tabs = await chrome.tabs.query({ url: ['https://cor3.gg/*', 'https://os.cor3.gg/*'] });
-            if (tabs.length === 0) {
-                alert('No cor3.gg tab found. Please open cor3.gg first.');
-                return;
-            }
-            const tab = tabs[0];
-            await chrome.tabs.sendMessage(tab.id, {
+            const tabId = getInspectedTabId();
+            await chrome.tabs.sendMessage(tabId, {
                 action: 'devtoolsSendWs',
                 message: msg
             });
             sendInput.value = '';
-            // Pull immediately to see the sent message
-            setTimeout(pullMessages, 500);
+            console.log('[COR3 Panel] Sent WS message to tab', tabId);
         } catch (e) {
-            console.error('[CORE Helper] Failed to send WS message:', e);
+            console.error('[COR3 Panel] Failed to send WS message:', e);
             alert('Failed to send: ' + e.message);
         }
     }
 
-    // --- Clear display (does NOT delete from storage — Pull History can restore) ---
-    function clearMessages() {
+    // --- Clear messages (deletes from IndexedDB) ---
+    async function clearMessages() {
         allMessages = [];
         filteredMessages = [];
         selectedIndex = -1;
-        displayCleared = true;
-        lastLiveTimestamp = new Date().toISOString(); // Reset live baseline to now
+        lastLiveTimestamp = new Date().toISOString();
         closeDetail();
+        await dbClear();
+        await refreshPageSelector();
         applyFilters();
     }
 
@@ -713,34 +905,45 @@
         resizeState = null;
     });
 
-    // Attach resize handlers to all .col-resize elements
     listHeader.querySelectorAll('.col-resize').forEach(handle => {
         handle.addEventListener('mousedown', onResizeStart);
     });
 
     // --- Event Listeners ---
-    btnRefresh.addEventListener('click', pullMessages);
     btnLive.addEventListener('click', toggleLive);
     btnClear.addEventListener('click', clearMessages);
     detailClose.addEventListener('click', closeDetail);
 
-    // Detail format dropdown
     detailFormatSelect.addEventListener('change', () => {
         detailFormat = detailFormatSelect.value;
         if (selectedRawMessage) {
             renderDetailBody();
-            // Re-apply search if active
             if (detailSearchInput.value.trim()) performDetailSearch();
         }
     });
 
-    // Detail search
     detailSearchInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') { e.preventDefault(); nextDetailMatch(); }
     });
-    detailSearchBtn.addEventListener('click', nextDetailMatch);
+    detailSearchInput.addEventListener('input', () => {
+        performDetailSearch();
+    });
+    detailSearchBtn.addEventListener('click', () => {
+        performDetailSearch();
+    });
 
-    // Export dropdown
+    pageSelector.addEventListener('change', () => {
+        currentPage = parseInt(pageSelector.value) || 0;
+        if (liveMode) {
+            liveMode = false;
+            btnLive.classList.remove('active');
+            btnLive.textContent = '● Live';
+            if (liveTimer) clearInterval(liveTimer);
+            liveTimer = null;
+        }
+        loadCurrentPage();
+    });
+
     btnExport.addEventListener('click', (e) => {
         e.stopPropagation();
         exportMenu.classList.toggle('open');
@@ -749,7 +952,6 @@
     btnExportMd.addEventListener('click', () => { exportMenu.classList.remove('open'); exportAsMd(); });
     document.addEventListener('click', () => exportMenu.classList.remove('open'));
 
-    // Detail panel resize (drag left edge)
     (function initDetailResize() {
         let startX, startW;
         function onMouseDown(e) {
@@ -793,7 +995,6 @@
     filterSent.addEventListener('change', applyFilters);
     filterReceived.addEventListener('change', applyFilters);
 
-    // Keyboard navigation
     document.addEventListener('keydown', (e) => {
         if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
         if (e.key === 'Escape') { closeDetail(); return; }
@@ -814,26 +1015,11 @@
         }
     });
 
-    // Listen for storage changes for live updates
-    chrome.storage.onChanged.addListener((changes, area) => {
-        if (area === 'local' && changes.cor3_ws_messages && liveMode && !displayCleared) {
-            // Use incremental approach: only add genuinely new messages
-            const newAll = changes.cor3_ws_messages.newValue || [];
-            if (lastLiveTimestamp) {
-                const fresh = newAll.filter(m => m.timestamp > lastLiveTimestamp);
-                if (fresh.length > 0) {
-                    allMessages = allMessages.concat(fresh);
-                    lastLiveTimestamp = fresh[fresh.length - 1].timestamp;
-                    applyFilters();
-                }
-            } else {
-                allMessages = newAll;
-                if (newAll.length > 0) lastLiveTimestamp = newAll[newAll.length - 1].timestamp;
-                applyFilters();
-            }
-        }
-    });
-
-    // Initial pull
-    pullMessages();
+    // --- Initial load: populate page selector and load latest page ---
+    (async function init() {
+        console.log('[COR3 Panel] Initializing, inspected tab:', getInspectedTabId());
+        await refreshPageSelector();
+        await loadCurrentPage();
+        console.log('[COR3 Panel] Init complete — totalCount:', totalCount, 'loaded:', allMessages.length);
+    })();
 })();
