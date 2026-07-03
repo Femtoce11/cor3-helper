@@ -6,7 +6,7 @@
 
 (function () {
     if (window.__dailyHackActive) {
-        console.warn('[COR3 Daily Hack] Solver already active.');
+        console.log('[COR3 Daily Hack] Solver already active.');
         return;
     }
     window.__dailyHackActive = true;
@@ -233,7 +233,7 @@
             const bar = g.querySelector('.pulse-bar');
             if (bar?.classList.contains('short')) return 'S';
             if (bar?.classList.contains('long')) return 'L';
-            console.warn(`[COR3 Daily Hack] Pulse group #${i} couldn't be classified. Using "?".`);
+            console.log(`[COR3 Daily Hack] Pulse group #${i} couldn't be classified. Using "?".`);
             return '?';
         });
 
@@ -442,7 +442,7 @@
                 issues = match ? match.issues : null;
             }
             if (!issues || !issues.length) {
-                console.warn('[COR3 Daily Hack] Could not map analysis block to picked issues:', lineText);
+                console.log('[COR3 Daily Hack] Could not map analysis block to picked issues:', lineText);
                 continue;
             }
 
@@ -457,7 +457,7 @@
                         click(errBtn);
                         await sleep(25);
                     } else {
-                        console.warn('[COR3 Daily Hack] Could not find error-type-button for:', label);
+                        console.log('[COR3 Daily Hack] Could not find error-type-button for:', label);
                     }
                 }
                 hlog(`Fixed: ${lineText.substring(0, 40)}...`);
@@ -555,7 +555,7 @@
             }
         } catch (e) {
             hlog('Error: ' + (e.message || e), 'error');
-            console.error('[COR3 Daily Hack] Error:', e);
+            console.log('[COR3 Daily Hack] Error:', e);
             solved = false;
         }
 

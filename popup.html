@@ -251,6 +251,71 @@
             width: auto;
             min-width: 300px;
             max-width: 100vw;
+            min-height: 100vh;
+            background-attachment: fixed;
+        }
+        /* Multi-column responsive layout for popout/side panel using CSS columns for masonry-like packing */
+        body.mode-popout #popoutGrid,
+        body.mode-sidepanel #popoutGrid {
+            columns: 300px auto;
+            column-gap: 10px;
+        }
+        body.mode-popout .popout-card,
+        body.mode-sidepanel .popout-card {
+            display: block;
+            margin-bottom: 10px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 6px 8px;
+            box-sizing: border-box;
+            overflow: hidden;        /* clip overflowing children within card */
+            break-inside: avoid;     /* prevent cards from splitting across columns */
+        }
+        /* Prevent horizontal scroll when sections expand (e.g. item lists, debug console) */
+        body.mode-popout,
+        body.mode-sidepanel {
+            overflow-x: hidden;
+        }
+        /* Override section styles inside popout cards to remove redundant borders/padding */
+        body.mode-popout .popout-card > .section,
+        body.mode-sidepanel .popout-card > .section,
+        body.mode-popout .popout-card > .toggles-section,
+        body.mode-sidepanel .popout-card > .toggles-section,
+        body.mode-popout .popout-card > .auto-jobs-section,
+        body.mode-sidepanel .popout-card > .auto-jobs-section,
+        body.mode-popout .popout-card > .valuable-section,
+        body.mode-sidepanel .popout-card > .valuable-section,
+        body.mode-popout .popout-card > .sub-section,
+        body.mode-sidepanel .popout-card > .sub-section,
+        body.mode-popout .popout-card > .section-header-row,
+        body.mode-sidepanel .popout-card > .section-header-row {
+            border: none;
+            margin: 0;
+            padding: 0;
+            background: transparent;
+        }
+        /* Remove inline border-top separators inside popout cards */
+        body.mode-popout .popout-card > div[style*="border-top"],
+        body.mode-sidepanel .popout-card > div[style*="border-top"] {
+            border-top: none !important;
+            margin-top: 0 !important;
+            padding-top: 0 !important;
+        }
+        /* Ensure block-level content doesn't overflow its card */
+        body.mode-popout .popout-card table,
+        body.mode-popout .popout-card textarea,
+        body.mode-popout .popout-card pre,
+        body.mode-popout .popout-card .debug-console,
+        body.mode-popout .popout-card .debug-console-body,
+        body.mode-sidepanel .popout-card table,
+        body.mode-sidepanel .popout-card textarea,
+        body.mode-sidepanel .popout-card pre,
+        body.mode-sidepanel .popout-card .debug-console,
+        body.mode-sidepanel .popout-card .debug-console-body {
+            max-width: 100%;
+            overflow-x: auto;
+            box-sizing: border-box;
         }
         h3 {
             margin-top: 0;
@@ -1262,6 +1327,18 @@
         .merc-status.contracted { background: var(--accent-cyan); color: var(--bg-primary); }
         .merc-rest-timer { font-size: 10px; color: var(--accent-orange); margin-left: 6px; }
         .merc-info { font-size: 10px; color: var(--text-muted); }
+        .merc-market-row { margin-bottom: 6px; }
+        .merc-market-header { display: flex; justify-content: space-between; align-items: center; gap: 6px; cursor: pointer; padding: 4px 6px; border-radius: 6px; background: var(--bg-secondary); border: 1px solid var(--border); margin-bottom: 4px; }
+        .merc-market-header:hover { border-color: var(--accent-cyan); }
+        .merc-market-header img { width: 30px; height: 30px; border-radius: 50%; }
+        .merc-market-header .expand-arrow-sub { display: inline-block; font-size: 8px; transition: transform 0.2s; vertical-align: 1px; }
+        .merc-market-header.expanded .expand-arrow-sub { transform: rotate(90deg); vertical-align: 1px; }
+        .merc-market-label { font-size: 11px; font-weight: bold; padding-left: 5px; color: var(--accent-cyan); }
+        .merc-market-body { display: none; padding-left: 4px; }
+        .merc-market-body.expanded { display: block; }
+        .merc-elite-badge { font-size: 9px; font-weight: bold; color: #ffd700; background: rgba(255,215,0,0.15); padding: 1px 5px; border-radius: 3px; margin-left: 5px; vertical-align: 1px; }
+        .merc-faction { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; color: var(--text-muted); }
+        .merc-faction img { width: 12px; height: 12px; border-radius: 50%; }
         /* Archived expedition cards */
         .archived-exp-card { background: var(--bg-card); border-radius: 8px; padding: 8px 10px; margin-bottom: 6px; border: 1px solid var(--border); }
         .archived-exp-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
@@ -2023,6 +2100,30 @@
             color: var(--accent-orange);
             font-style: italic;
         }
+        .auto-valuable-seller-select-all {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 0;
+            margin-bottom: 4px;
+            font-size: 10px;
+            color: var(--text-muted);
+        }
+        .auto-valuable-seller-select-all .job-type-label {
+            flex: 1;
+        }
+        .auto-valuable-seller-select-all .job-type-count {
+            font-size: 10px;
+            color: var(--text-dim);
+            flex-shrink: 0;
+        }
+        .auto-valuable-seller-select-all input[type="checkbox"] {
+            accent-color: var(--accent-cyan);
+            width: 14px;
+            height: 14px;
+            flex-shrink: 0;
+            margin-left: auto;
+        }
         .auto-jobs-select-all {
             display: flex;
             align-items: center;
@@ -2195,6 +2296,213 @@
             padding: 8px 0;
             text-align: center;
         }
+        /* Auto Valuable Seller */
+        .valuable-section {
+            background: var(--bg-section);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 10px;
+            margin-bottom: 8px;
+        }
+        .valuable-section .section-title {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+        .valuable-tabs {
+            display: flex;
+            gap: 0;
+            margin-bottom: 2px;
+        }
+        .valuable-tab {
+            flex: 1;
+            padding: 6px 10px;
+            font-size: 11px;
+            font-weight: bold;
+            color: var(--text-muted);
+            background: transparent;
+            border: none;
+            border-bottom: 2px solid transparent;
+            cursor: pointer;
+            text-align: center;
+            transition: color 0.2s, border-color 0.2s;
+        }
+        .valuable-tab:hover { color: var(--text); }
+        .valuable-tab.active {
+            color: var(--accent-cyan);
+            border-bottom-color: var(--accent-cyan);
+        }
+        .valuable-tab-content { display: none; }
+        .valuable-tab-content.active { display: block; max-height: 200px; overflow-y: auto; }
+        .valuable-tab-content::-webkit-scrollbar {
+            width: 6px;
+        }
+        .valuable-tab-content::-webkit-scrollbar-track {
+            background: var(--bg-primary);
+            border-radius: 3px;
+        }
+        .valuable-tab-content::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 3px;
+        }
+        .valuable-tab-content::-webkit-scrollbar-thumb:hover {
+            background: var(--text-dim);
+        }
+        .valuable-server-row {
+            border-bottom: 1px solid var(--border);
+        }
+        .valuable-server-row:last-child { border-bottom: none; }
+        .valuable-server-header {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 0;
+            font-size: 11px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            user-select: none;
+        }
+        .valuable-server-header:hover { color: var(--text); }
+        .valuable-server-header .expand-arrow {
+            font-size: 9px;
+            color: var(--text-dim);
+            width: 12px;
+            text-align: center;
+            transition: transform 0.2s;
+        }
+        .valuable-server-header .expand-arrow.open { transform: rotate(90deg); }
+        .valuable-server-header .server-name { flex: 1; }
+        .valuable-server-header .valuable-count {
+            font-size: 10px;
+            color: var(--text-dim);
+        }
+        .valuable-server-header input[type="checkbox"] {
+            accent-color: var(--accent-cyan);
+            cursor: pointer;
+            width: 14px;
+            height: 14px;
+            flex-shrink: 0;
+        }
+        .valuable-detail-table {
+            display: none;
+            margin: 0 0 4px 18px;
+            font-size: 10px;
+        }
+        .valuable-detail-table.open { display: contents; }
+        .valuable-detail-table table {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
+        }
+        .valuable-detail-table th {
+            text-align: left;
+            color: var(--text-muted);
+            font-weight: bold;
+            padding: 2px 4px;
+            border-bottom: 1px solid var(--border);
+        }
+        .valuable-detail-table th:nth-child(1) { width: 17px; }   /* Type */
+        .valuable-detail-table th:nth-child(2) { width: 45px; }    /* Name */
+        .valuable-detail-table th:nth-child(3) { width: 30px; }   /* Tags */
+        .valuable-detail-table th:nth-child(4) { width: 20px; }   /* Base Price */
+        .valuable-detail-table th:nth-child(5) { width: 15px; }   /* Detect Rate */
+        .valuable-detail-table td {
+            padding: 2px 4px;
+            color: var(--text-dim);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .valuable-detail-table td:nth-child(3) {
+            white-space: normal;
+            word-break: break-word;
+        }
+        .valuable-file-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 0;
+            font-size: 11px;
+            color: var(--text-secondary);
+            border-bottom: 1px solid var(--border);
+        }
+        .valuable-file-row:last-child { border-bottom: none; }
+        .valuable-file-row .file-server {
+            color: var(--accent-cyan);
+            font-size: 10px;
+            flex-shrink: 0;
+            min-width: 70px;
+        }
+        .valuable-file-row .file-source { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .valuable-file-row .file-tag {
+            font-size: 10px;
+            color: var(--text-dim);
+        }
+        .valuable-file-row input[type="checkbox"] {
+            accent-color: var(--accent-cyan);
+            cursor: pointer;
+            width: 14px;
+            height: 14px;
+            flex-shrink: 0;
+        }
+        .valuable-dl-server-group {
+            margin-bottom: 2px;
+        }
+        .valuable-dl-server-header {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 3px 0;
+            font-size: 11px;
+            font-weight: bold;
+            color: var(--accent-cyan);
+            border-bottom: 1px solid var(--border);
+        }
+        .valuable-dl-server-header .dl-server-name { flex: 1; }
+        .valuable-dl-server-header .dl-server-count {
+            font-size: 10px;
+            color: var(--text-muted);
+            font-weight: normal;
+        }
+        .valuable-status {
+            font-size: 9px;
+            padding: 1px 5px;
+            border-radius: 3px;
+            font-weight: bold;
+            white-space: nowrap;
+        }
+        .valuable-status.open { background: var(--border); color: var(--text-muted); }
+        .valuable-status.in-progress { background: var(--accent-purple); color: var(--bg-primary); }
+        .valuable-status.partially-downloaded { background: var(--accent-yellow); color: var(--bg-primary); }
+        .valuable-status.downloaded { background: var(--accent-cyan); color: var(--bg-primary); }
+        .valuable-status.done { background: var(--accent-green); color: var(--bg-primary); }
+        .valuable-status.skipped { background: var(--accent-orange); color: var(--bg-primary); }
+        .valuable-status.failed { background: var(--accent-red); color: #fff; }
+        .valuable-btn {
+            display: block;
+            width: 100%;
+            padding: 10px;
+            margin-top: 8px;
+            font-size: 13px;
+            font-weight: bold;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.2s, transform 0.1s;
+            text-align: center;
+        }
+        .valuable-btn.start { background: #22c55e; color: #000; }
+        .valuable-btn.start:hover { background: #16a34a; }
+        .valuable-btn.stop { background: #ef4444; color: #fff; }
+        .valuable-btn.stop:hover { background: #dc2626; }
+        .valuable-btn:active { transform: scale(0.98); }
+        .valuable-btn:disabled {
+            background: var(--border) !important;
+            color: var(--text-dim) !important;
+            cursor: not-allowed;
+            transform: none !important;
+        }
     </style>
 </head>
 <body>
@@ -2304,6 +2612,17 @@
                     </label>
                 </div>
             </div>
+            <!-- Auto Valuable Seller Toggle -->
+            <div class="auto-decrypt-row" style="margin-top:8px;">
+                <span class="decrypt-label">💎 Auto Valuable Seller</span>
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <span class="decrypt-status" id="autoValuableSellerStatus">Off</span>
+                    <label class="alarm-toggle-switch">
+                        <input type="checkbox" id="autoValuableSellerToggle">
+                        <span class="slider-track"></span>
+                    </label>
+                </div>
+            </div>
             <!-- Auto Update Markets -->
             <div class="auto-decrypt-row" style="margin-top:8px;">
                 <span class="decrypt-label">📊 Auto Update Markets</span>
@@ -2369,7 +2688,10 @@
     <div class="auto-jobs-section" id="autoJobSolverSection" style="display:none;">
         <div class="section-title">
             <span>🤖 Auto Job Solver</span>
-            <button id="refreshAutoJobsBtn" class="refresh-btn-small" title="Refresh job data">🔄</button>
+            <div style="display:flex;gap:4px;">
+                <button id="copyAllLogsBtn" class="refresh-btn-small" title="Copy all debug logs to clipboard">📋</button>
+                <button id="refreshAutoJobsBtn" class="refresh-btn-small" title="Refresh job data">🔄</button>
+            </div>
         </div>
         <!-- Market Tabs -->
         <div class="auto-jobs-tabs">
@@ -2430,6 +2752,47 @@
                 <div style="color:var(--text-dim);">No job data yet.</div>
             </div>
             <div class="debug-console-body" id="debugLogsBody">
+                <div style="color:var(--text-dim);">No logs yet.</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Auto Valuable Seller Section -->
+    <div class="valuable-section" id="autoValuableSellerSection" style="display:none;">
+        <div class="section-title">
+            <span>💎 Auto Valuable Seller</span>
+        </div>
+        <!-- Tabs -->
+        <div class="valuable-tabs">
+            <button class="valuable-tab active" data-vtab="servers" id="valuableTabServers">📡 Servers With Valuables</button>
+            <button class="valuable-tab" data-vtab="downloads" id="valuableTabDownloads">📁 Downloads Folder</button>
+        </div>
+        <!-- Servers With Valuables -->
+        <div class="valuable-tab-content active" id="valuableContentServers">
+            <div class="auto-jobs-no-jobs">No valuable data yet. Click "Start Valuable Search" to scan servers.</div>
+        </div>
+        <!-- Downloads Folder -->
+        <div class="valuable-tab-content" id="valuableContentDownloads">
+            <div class="auto-jobs-no-jobs">No download data yet. Click "Start Valuable Search" to scan.</div>
+        </div>
+        <!-- Start Valuable Seller Button -->
+        <button class="valuable-btn start" id="valuableSellerBtn">▶ Start Valuable Seller</button>
+        <!-- Start Valuable Search Button -->
+        <button class="valuable-btn start" id="valuableSearchBtn">▶ Start Valuable Search</button>
+        <!-- Debug Console Toggle -->
+        <div class="auto-decrypt-row" style="margin-top:8px;">
+            <span class="decrypt-label" style="font-size:10px;">🖥️ Debug Console</span>
+            <label class="alarm-toggle-switch">
+                <input type="checkbox" id="valuableDebugToggle">
+                <span class="slider-track"></span>
+            </label>
+        </div>
+        <!-- Debug Console -->
+        <div class="debug-console" id="valuableDebugConsole" style="display:none;">
+            <div class="debug-console-tabs">
+                <button class="debug-console-tab active" data-tab="vlogs" id="valuableDebugTabLogs">Logs</button>
+            </div>
+            <div class="debug-console-body active" id="valuableDebugLogsBody">
                 <div style="color:var(--text-dim);">No logs yet.</div>
             </div>
         </div>
@@ -2644,6 +3007,24 @@
                 </div>
             </div>
             <div class="auto-choose-row" style="margin-top:2px;">
+                <span style="font-size:10px;">Auto-choose USOL first</span>
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <label class="alarm-toggle-switch">
+                        <input type="checkbox" id="autoChooseUsolFirstToggle">
+                        <span class="slider-track"></span>
+                    </label>
+                </div>
+            </div>
+            <div class="auto-choose-row" style="margin-top:2px;">
+                <span style="font-size:10px;">Ignore elite mercenary</span>
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <label class="alarm-toggle-switch">
+                        <input type="checkbox" id="ignoreEliteMercToggle">
+                        <span class="slider-track"></span>
+                    </label>
+                </div>
+            </div>
+            <div class="auto-choose-row" style="margin-top:2px;">
                 <span style="font-size:10px;">Auto-sell cheapest items when stash is full</span>
                 <div style="display:flex;align-items:center;gap:8px;">
                     <label class="alarm-toggle-switch">
@@ -2800,6 +3181,7 @@
 </div><!-- end mainView -->
 
 
+<script src="console-logger.js"></script>
 <script src="errors.js"></script>
 <script src="popup.js"></script>
 </body>

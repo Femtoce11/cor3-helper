@@ -34,6 +34,9 @@
     // USOL market server ID — must set endpoint before interacting with USOL jobs
     var USOL_MARKET_SERVER_ID = '019e4052-c317-7388-9d71-883ffb1560cd';
 
+    // Track the last endpoint server ID to avoid duplicate set.endpoint calls
+    var _lastEndpointServerId = null;
+
     // Server priority order (furthest first)
     var SERVER_PRIORITY = ['URM7-H', 'URM7-M', 'URM7-S5L2', 'B43274N', 'B43272N', 'B43271N', 'D4RK RM7EG', 'SRM7-N3L2', 'SRM7-M', 'SRM7-N4L2', 'SRM7-N3L1', 'RM7-N1L1', 'RM7-W3NCP', 'RM7-N2L3', 'RM7-N2L2', 'RM7-N2ECP', 'D4RK RM7CE', 'RM7-S4WCP', 'RM7-S4L3', 'RM7-S4L1', 'RM7-S4L4', 'RM7-S4L2', 'RM7-E1SCP', 'RM7-E1L2CT', 'RM7-E1L5', 'RM7-E1L3'];
 
@@ -327,7 +330,7 @@
                     document.querySelector('[data-sentry-component="SimpleDecryptApplication"]')) return resolve('simple-decrypt');
                 elapsed += interval;
                 if (elapsed >= pollMs) return resolve(null);
-                setTimeout(check, interval);
+                safeTimeout(check, interval);
             }
             check();
         });
@@ -353,7 +356,7 @@
                 if (!isHackMinigameOpen()) return resolve(true);
                 elapsed += interval;
                 if (elapsed >= waitMs) return resolve(false);
-                setTimeout(check, interval);
+                safeTimeout(check, interval);
             }
             check();
         });
@@ -383,20 +386,26 @@
                 // Listen for SAI update event
                 function onEvent(evt) {
                     if (evt.data && evt.data.type === 'COR3_AUTOJOB_SAI_UPDATE') {
-                        if (!done) { done = true; window.removeEventListener('message', onEvent); clearInterval(pollTimer); clearTimeout(timeoutTimer); saiUpdateReceived = true; resolve(); }
+                        if (!done) { done = true; window.removeEventListener('message', onEvent); safeClearTimeout(pollTimerId); safeClearTimeout(timeoutTimerId); saiUpdateReceived = true; resolve(); }
                     }
                 }
                 window.addEventListener('message', onEvent);
                 // Poll for minigame close (solver finished but SAI event missed)
-                // Only if we confirmed the minigame DOM appeared
-                var pollTimer = canPollClose ? setInterval(function () {
-                    if (!isHackMinigameOpen()) {
-                        if (!done) { done = true; window.removeEventListener('message', onEvent); clearInterval(pollTimer); clearTimeout(timeoutTimer); resolve(); }
+                var pollTimerId = 0;
+                if (canPollClose) {
+                    function pollClose() {
+                        if (done) return;
+                        if (!isHackMinigameOpen()) {
+                            if (!done) { done = true; window.removeEventListener('message', onEvent); safeClearTimeout(timeoutTimerId); resolve(); }
+                        } else {
+                            pollTimerId = safeTimeout(pollClose, 500);
+                        }
                     }
-                }, 500) : 0;
+                    pollTimerId = safeTimeout(pollClose, 500);
+                }
                 // Hard timeout
-                var timeoutTimer = setTimeout(function () {
-                    if (!done) { done = true; window.removeEventListener('message', onEvent); if (pollTimer) clearInterval(pollTimer); reject(new Error('timeout')); }
+                var timeoutTimerId = safeTimeout(function () {
+                    if (!done) { done = true; window.removeEventListener('message', onEvent); safeClearTimeout(pollTimerId); reject(new Error('timeout')); }
                 }, hackSolverTimeout);
             });
         } catch (e) {
@@ -415,29 +424,111 @@
         }
     }
 
+    // Throttle-resistant tick: uses MessageChannel to bypass Chrome's
+    // background-tab setTimeout clamping (which forces 60s minimum).
+    var _mcChannel = typeof MessageChannel !== 'undefined' ? new MessageChannel() : null;
+    var _mcCallbacks = [];
+    if (_mcChannel) {
+        _mcChannel.port1.onmessage = function () {
+            var cbs = _mcCallbacks.slice();
+            _mcCallbacks.length = 0;
+            for (var i = 0; i < cbs.length; i++) cbs[i]();
+        };
+    }
+    function nextTick(fn) {
+        if (_mcChannel) {
+            _mcCallbacks.push(fn);
+            _mcChannel.port2.postMessage(0);
+        } else {
+            setTimeout(fn, 0);
+        }
+    }
+
+    var _safeTimeoutId = 0;
+    var _safeTimeouts = {};
+    function safeTimeout(fn, ms) {
+        var id = ++_safeTimeoutId;
+        var target = Date.now() + ms;
+        _safeTimeouts[id] = true;
+        function tick() {
+            if (!_safeTimeouts[id]) return;
+            if (Date.now() >= target) { delete _safeTimeouts[id]; fn(); return; }
+            var rem = target - Date.now();
+            if (rem > 200) { setTimeout(function () { nextTick(tick); }, Math.min(rem - 50, 1000)); }
+            else { nextTick(tick); }
+        }
+        nextTick(tick);
+        return id;
+    }
+    function safeClearTimeout(id) { delete _safeTimeouts[id]; }
+
+    // Delay helper — resistant to Chrome background-tab throttling
+    function delay(ms) {
+        return new Promise(function (resolve) {
+            var target = Date.now() + ms;
+            function check() {
+                if (Date.now() >= target) { resolve(); return; }
+                var remaining = target - Date.now();
+                if (remaining > 200) {
+                    setTimeout(function () { nextTick(check); }, Math.min(remaining - 50, 1000));
+                } else {
+                    nextTick(check);
+                }
+            }
+            nextTick(check);
+        });
+    }
+
     // Wait for a specific postMessage event type, with timeout
     function waitForEvent(eventType, timeoutMs) {
         timeoutMs = timeoutMs || 15000;
         return new Promise(function (resolve, reject) {
-            var timer;
+            var done = false;
+            var deadline = Date.now() + timeoutMs;
             function handler(evt) {
                 if (evt.data && evt.data.type === eventType) {
+                    if (done) return;
+                    done = true;
                     window.removeEventListener('message', handler);
-                    clearTimeout(timer);
                     resolve(evt.data);
                 }
             }
             window.addEventListener('message', handler);
-            timer = setTimeout(function () {
-                window.removeEventListener('message', handler);
-                reject(new Error('Timeout waiting for ' + eventType));
-            }, timeoutMs);
+            function checkTimeout() {
+                if (done) return;
+                if (Date.now() >= deadline) {
+                    done = true;
+                    window.removeEventListener('message', handler);
+                    reject(new Error('Timeout waiting for ' + eventType));
+                    return;
+                }
+                var remaining = deadline - Date.now();
+                if (remaining > 200) {
+                    setTimeout(function () { nextTick(checkTimeout); }, Math.min(remaining - 50, 1000));
+                } else {
+                    nextTick(checkTimeout);
+                }
+            }
+            nextTick(checkTimeout);
         });
     }
 
-    // Delay helper
-    function delay(ms) {
-        return new Promise(function (r) { setTimeout(r, ms); });
+    var _cachedMapData = null; // cached network map to avoid duplicate get.map requests
+
+    // Fetch (or use cached) network map data
+    async function fetchMapData() {
+        if (_cachedMapData) return _cachedMapData;
+        sendCmd('get.map', {});
+        try {
+            var mapData = await waitForEvent('COR3_WS_NETWORK_MAP', 10000);
+            if (mapData && mapData.servers) {
+                _cachedMapData = mapData;
+            }
+            return mapData;
+        } catch (e) {
+            log('⚠️ Could not fetch network map: ' + e.message, 'warn');
+            return null;
+        }
     }
 
     // Check if ANY server on the path to serverName is in maintenance.
@@ -445,23 +536,18 @@
     async function checkPathMaintenance(serverName) {
         var path = SERVER_PATH_MAP[serverName];
         if (!path || path.length === 0) return { blocked: false };
-        sendCmd('get.map', {});
-        try {
-            var mapData = await waitForEvent('COR3_WS_NETWORK_MAP', 10000);
-            if (mapData && mapData.servers) {
-                for (var i = 0; i < path.length; i++) {
-                    var srv = path[i];
-                    var info = mapData.servers[srv.id];
-                    if (info && info.isInMaintenance) {
-                        var remaining = info.maintenanceEndsAt ? new Date(info.maintenanceEndsAt).getTime() - Date.now() : 0;
-                        if (remaining > 0) {
-                            return { blocked: true, blockerName: srv.name, endsAt: info.maintenanceEndsAt, remainingMs: remaining };
-                        }
+        var mapData = await fetchMapData();
+        if (mapData && mapData.servers) {
+            for (var i = 0; i < path.length; i++) {
+                var srv = path[i];
+                var info = mapData.servers[srv.id];
+                if (info && info.isInMaintenance) {
+                    var remaining = info.maintenanceEndsAt ? new Date(info.maintenanceEndsAt).getTime() - Date.now() : 0;
+                    if (remaining > 0) {
+                        return { blocked: true, blockerName: srv.name, endsAt: info.maintenanceEndsAt, remainingMs: remaining };
                     }
                 }
             }
-        } catch (e) {
-            log('⚠️ Could not fetch network map for maintenance check: ' + e.message, 'warn');
         }
         return { blocked: false };
     }
@@ -650,7 +736,7 @@
     var _lastLoadoutServerType = null;
     var LOADOUT_COOLDOWN_MS = 2000;
     async function getLoadoutData(forceRefresh) {
-        if (!forceRefresh && _cachedLoadout && (Date.now() - _cachedLoadoutAt < 15000)) {
+        if (!forceRefresh && _cachedLoadout && (Date.now() - _cachedLoadoutAt < 60000)) {
             log('Loadout: using cached data (age: ' + Math.round((Date.now() - _cachedLoadoutAt) / 1000) + 's)');
             return _cachedLoadout;
         }
@@ -738,37 +824,35 @@
             var cat = (owned[i].category || '').toUpperCase();
             if (byCat[cat]) byCat[cat].push(owned[i]);
         }
-        // If any category is empty, can't build a valid loadout
         if (byCat.CPU.length === 0 || byCat.GPU.length === 0 || byCat.RAM.length === 0 || byCat.PSU.length === 0) return null;
-
-        // Simple heuristic: try top-tier items by sorting each category by total resource contribution
-        byCat.CPU.sort(function (a, b) { return ((b.specs.cpuFrequency || 0) + (b.specs.cpuCores || 0)) - ((a.specs.cpuFrequency || 0) + (a.specs.cpuCores || 0)); });
-        byCat.GPU.sort(function (a, b) { return ((b.specs.gpuPower || 0) + (b.specs.gpuMemory || 0)) - ((a.specs.gpuPower || 0) + (a.specs.gpuMemory || 0)); });
-        byCat.RAM.sort(function (a, b) { return ((b.specs.ramFrequency || 0) + (b.specs.ramMemory || 0)) - ((a.specs.ramFrequency || 0) + (a.specs.ramMemory || 0)); });
-        byCat.PSU.sort(function (a, b) { return (b.specs.psuPower || 0) - (a.specs.psuPower || 0); });
-
-        // Try top CPU/GPU combos with best PSU that covers their consumption
-        for (var ci = 0; ci < Math.min(byCat.CPU.length, 3); ci++) {
-            for (var gi = 0; gi < Math.min(byCat.GPU.length, 3); gi++) {
+        var bestHw = null;
+        var bestPower = -1;
+        for (var ci = 0; ci < byCat.CPU.length; ci++) {
+            for (var gi = 0; gi < byCat.GPU.length; gi++) {
                 var psuNeed = (byCat.CPU[ci].specs.cpuConsuming || 0) + (byCat.GPU[gi].specs.gpuConsuming || 0);
-                // Find PSU that covers demand
                 for (var pi = 0; pi < byCat.PSU.length; pi++) {
-                    if ((byCat.PSU[pi].specs.psuPower || 0) >= psuNeed) {
-                        // Try best RAM
-                        for (var rmi = 0; rmi < Math.min(byCat.RAM.length, 2); rmi++) {
-                            var testHw = { cpu: byCat.CPU[ci], gpu: byCat.GPU[gi], ram: byCat.RAM[rmi], psu: byCat.PSU[pi] };
-                            // Temporarily build analysis to check boot
-                            var testLoadout = JSON.parse(JSON.stringify(loadout));
-                            testLoadout.equippedHardware = testHw;
-                            var analysis = calculateAnalysis(testLoadout, softwareIds);
-                            if (analysis.canBoot) return testHw;
+                    if ((byCat.PSU[pi].specs.psuPower || 0) < psuNeed) continue;
+                    for (var rmi = 0; rmi < byCat.RAM.length; rmi++) {
+                        var testHw = { cpu: byCat.CPU[ci], gpu: byCat.GPU[gi], ram: byCat.RAM[rmi], psu: byCat.PSU[pi] };
+                        var testLoadout = JSON.parse(JSON.stringify(loadout));
+                        testLoadout.equippedHardware = testHw;
+                        var analysis = calculateAnalysis(testLoadout, softwareIds);
+                        if (!analysis.canBoot) continue;
+                        var totalPower = 0;
+                        for (var swId in analysis.swAnalysis) {
+                            var ab = analysis.swAnalysis[swId].abilities;
+                            for (var ai = 0; ai < ab.length; ai++) totalPower += ab[ai].computedPower;
                         }
-                        break; // This PSU was best available — no need to try weaker ones
+                        if (totalPower > bestPower) {
+                            bestPower = totalPower;
+                            bestHw = testHw;
+                        }
                     }
+                    break;
                 }
             }
         }
-        return null;
+        return bestHw;
     }
 
     async function applyLoadoutChange(loadout, targetHw, targetSwIds) {
@@ -777,35 +861,49 @@
         var currentSwIds = (loadout.equippedSoftware || []).map(function (s) { return s.id; });
         var changed = false;
 
-        // 1. Unequip software that should not be equipped
+        // 1. Unequip software that is NOT in targetSwIds
         for (var ui = 0; ui < currentSwIds.length; ui++) {
-            if (targetSwIds.indexOf(currentSwIds[ui]) < 0) {
-                var unequipName = currentSwIds[ui];
-                var eqSw = loadout.equippedSoftware || [];
-                for (var un = 0; un < eqSw.length; un++) {
-                    if (eqSw[un].id === currentSwIds[ui]) { unequipName = eqSw[un].name + ' (' + currentSwIds[ui] + ')'; break; }
-                }
-                log('Loadout: unequipping software ' + unequipName);
-                sendCmd('loadout.unequip.software', { moduleConfigId: currentSwIds[ui] });
-                await waitForEvent('COR3_AUTOJOB_LOADOUT', 8000);
-                await delay(500);
-                changed = true;
+            if (targetSwIds.indexOf(currentSwIds[ui]) >= 0) continue;
+            var unequipName = currentSwIds[ui];
+            var eqSw = loadout.equippedSoftware || [];
+            for (var un = 0; un < eqSw.length; un++) {
+                if (eqSw[un].id === currentSwIds[ui]) { unequipName = eqSw[un].name + ' (' + currentSwIds[ui] + ')'; break; }
             }
+            log('Loadout: unequipping software ' + unequipName);
+            sendCmd('loadout.unequip.software', { moduleConfigId: currentSwIds[ui] });
+            await waitForEvent('COR3_AUTOJOB_LOADOUT', 8000);
+            await delay(500);
+            changed = true;
         }
 
-        // 2. Equip hardware if changed
+        // 2. Equip hardware if changed — smart order to avoid PSU rejection
+        var hwChanges = [];
         var hwSlots = ['cpu', 'gpu', 'ram', 'psu'];
-        for (var hi = 0; hi < hwSlots.length; hi++) {
-            var slot = hwSlots[hi];
-            var curId = currentHw[slot] ? currentHw[slot].id : null;
-            var tgtId = targetHw[slot] ? targetHw[slot].id : null;
-            if (tgtId && tgtId !== curId) {
-                log('Loadout: equipping ' + slot.toUpperCase() + ' → ' + (targetHw[slot].name || tgtId));
-                sendCmd('loadout.equip.hardware', { moduleConfigId: tgtId });
-                await waitForEvent('COR3_AUTOJOB_LOADOUT', 8000);
-                await delay(500);
-                changed = true;
+        for (var hci = 0; hci < hwSlots.length; hci++) {
+            var hSlot = hwSlots[hci];
+            var hCurId = currentHw[hSlot] ? currentHw[hSlot].id : null;
+            var hTgtId = targetHw[hSlot] ? targetHw[hSlot].id : null;
+            if (hTgtId && hTgtId !== hCurId) {
+                var curConsume = 0, tgtConsume = 0;
+                if (hSlot === 'cpu') { curConsume = currentHw.cpu ? (currentHw.cpu.specs.cpuConsuming || 0) : 0; tgtConsume = targetHw.cpu.specs.cpuConsuming || 0; }
+                if (hSlot === 'gpu') { curConsume = currentHw.gpu ? (currentHw.gpu.specs.gpuConsuming || 0) : 0; tgtConsume = targetHw.gpu.specs.gpuConsuming || 0; }
+                hwChanges.push({ slot: hSlot, id: hTgtId, name: targetHw[hSlot].name || hTgtId, delta: tgtConsume - curConsume, isPsu: hSlot === 'psu' });
             }
+        }
+        var psuUpgrade = hwChanges.find(function (c) { return c.isPsu && targetHw.psu && currentHw.psu && (targetHw.psu.specs.psuPower || 0) > (currentHw.psu.specs.psuPower || 0); });
+        var orderedHwChanges = [];
+        if (psuUpgrade) orderedHwChanges.push(psuUpgrade);
+        hwChanges.sort(function (a, b) { return a.delta - b.delta; });
+        for (var hoi = 0; hoi < hwChanges.length; hoi++) {
+            if (hwChanges[hoi] !== psuUpgrade) orderedHwChanges.push(hwChanges[hoi]);
+        }
+        for (var hi = 0; hi < orderedHwChanges.length; hi++) {
+            var hc = orderedHwChanges[hi];
+            log('Loadout: equipping ' + hc.slot.toUpperCase() + ' → ' + hc.name);
+            sendCmd('loadout.equip.hardware', { moduleConfigId: hc.id });
+            await waitForEvent('COR3_AUTOJOB_LOADOUT', 8000);
+            await delay(500);
+            changed = true;
         }
 
         // 3. Equip software that should be equipped
@@ -842,6 +940,36 @@
         _lastLoadoutServerType = serverTypeName || _lastLoadoutServerType;
         log('Loadout: pre-check for job "' + (job.type || job.name || '?') + '" on server ' + (serverTypeName || serverId));
 
+        var serverDefenceRate = 0;
+        var needsHack = true;
+        try {
+            sendCmd('get.login.status', { serverId: serverId });
+            var preLoginData = await waitForEvent('COR3_AUTOJOB_SAI_LOGIN_STATUS', 5000);
+            if (preLoginData && preLoginData.data) {
+                if (preLoginData.data.serverDefenceRate) {
+                    serverDefenceRate = preLoginData.data.serverDefenceRate;
+                }
+                if (preLoginData.data.activeAccesses && preLoginData.data.activeAccesses.length > 0) {
+                    var existingAccess = preLoginData.data.activeAccesses[0];
+                    var existingType = existingAccess.accessType || existingAccess.type || 'unknown';
+                    log('Loadout: already have ' + existingType + ' access on target server — skipping hack loadout');
+                    needsHack = false;
+                }
+            }
+        } catch (e) {
+            log('Loadout: could not check login status — assuming hack needed', 'warn');
+        }
+
+        if (!needsHack) {
+            log('Loadout: pre-check complete — no hack needed for "' + (job.type || job.name || '?') + '"');
+            return true;
+        }
+
+        if (!serverTypeName) {
+            log('Loadout: cannot determine server type — skipping hack loadout');
+            return true;
+        }
+
         invalidateLoadoutCache();
         var loadout = await getLoadoutData(true);
         if (!loadout) {
@@ -849,131 +977,182 @@
             return true;
         }
 
-        var jobType = job.type || job.name || '';
-        var needsHack = true;
-        var needsDecrypt = (jobType === 'File Decryption' || jobType === 'Decrypt & Extract');
-        log('Loadout: needsHack=' + needsHack + ', needsDecrypt=' + needsDecrypt + ', serverType=' + (serverTypeName || 'unknown'));
-
-        var equippedSwIds = (loadout.equippedSoftware || []).map(function (s) { return s.id; });
         var allSw = loadout.ownedSoftware || [];
+        var equippedSwIds = (loadout.equippedSoftware || []).map(function (s) { return s.id; });
+        var hackCandidates = findHackSoftwareForServerType(allSw, serverTypeName);
+        log('Loadout: found ' + hackCandidates.length + ' hack candidate(s) for ' + serverTypeName + (hackCandidates.length > 0 ? ' — best: ' + hackCandidates[0].sw.name + ' (power ' + (hackCandidates[0].spec.power || []).join('-') + ')' : ''));
 
-        // Check hack capability for server type — ensure BEST hack software is equipped
-        if (needsHack && serverTypeName) {
-            var bestCandidates = findHackSoftwareForServerType(allSw, serverTypeName);
-            log('Loadout: found ' + bestCandidates.length + ' hack candidate(s) for ' + serverTypeName + (bestCandidates.length > 0 ? ' — best: ' + bestCandidates[0].sw.name + ' (power ' + (bestCandidates[0].spec.power || []).join('-') + ')' : ''));
-            if (bestCandidates.length > 0) {
-                var bestSw = bestCandidates[0];
-                var bestEquipped = equippedSwIds.indexOf(bestSw.sw.id) >= 0;
+        if (hackCandidates.length === 0) {
+            log('Loadout: no hack software available for ' + serverTypeName + ' — proceeding (may use existing access)', 'warn');
+            return true;
+        }
 
-                var currentBestPower = 0;
-                for (var i = 0; i < equippedSwIds.length; i++) {
-                    for (var c = 0; c < bestCandidates.length; c++) {
-                        if (bestCandidates[c].sw.id === equippedSwIds[i]) {
-                            var p = bestCandidates[c].spec.power ? bestCandidates[c].spec.power[1] : 0;
-                            if (p > currentBestPower) currentBestPower = p;
-                        }
-                    }
-                }
+        var bestHack = hackCandidates[0];
+        var targetSwIds = [bestHack.sw.id];
+        var currentHw = loadout.equippedHardware || {};
+        var analysis = calculateAnalysis(loadout, targetSwIds);
+        var targetHw = currentHw;
 
-                var targetMaxPower = bestSw.spec.power ? bestSw.spec.power[1] : 0;
-                log('Loadout: currentBestEquippedPower=' + currentBestPower + ', targetMaxPower=' + targetMaxPower + ', bestAlreadyEquipped=' + bestEquipped);
-                if (currentBestPower === 0) {
-                    log('Loadout: no hack software equipped for server type ' + serverTypeName + ' — equipping ' + bestSw.sw.name);
-                    var swapped = await trySwapForHack(loadout, serverTypeName, equippedSwIds);
-                    if (!swapped) {
-                        log('Loadout: could not equip hack software for ' + serverTypeName + ' — proceeding (may use existing access)', 'warn');
-                    } else {
-                        loadout = await getLoadoutData(true);
-                        equippedSwIds = (loadout.equippedSoftware || []).map(function (s) { return s.id; });
-                        allSw = loadout.ownedSoftware || [];
-                    }
-                } else if (currentBestPower > 0 && bestEquipped) {
-                    log('Loadout: best hack software already equipped for ' + serverTypeName + ' (power ' + currentBestPower + ')');
-                } else if (!bestEquipped && targetMaxPower > currentBestPower) {
-                    log('Loadout: upgrading hack software for ' + serverTypeName + ' (current max: ' + currentBestPower + ', best: ' + targetMaxPower + ')');
-                    var swapped2 = await trySwapForHack(loadout, serverTypeName, equippedSwIds);
-                    if (swapped2) {
-                        loadout = await getLoadoutData(true);
-                        equippedSwIds = (loadout.equippedSoftware || []).map(function (s) { return s.id; });
-                        allSw = loadout.ownedSoftware || [];
-                    }
-                }
+        var alreadyBest = equippedSwIds.length === 1 && equippedSwIds[0] === bestHack.sw.id;
+        if (alreadyBest) {
+            log('Loadout: best HACK software "' + bestHack.sw.name + '" already equipped alone');
+        }
+
+        if (!analysis.canBoot) {
+            log('Loadout: current hardware cannot boot hack software — finding compatible hardware');
+            var betterHw = findBestHardware(loadout, targetSwIds);
+            if (betterHw) {
+                targetHw = betterHw;
             } else {
-                log('Loadout: no hack software available for ' + serverTypeName + ' — proceeding (may use existing access)', 'warn');
+                log('Loadout: cannot boot hack software — skipping loadout change', 'warn');
+                return true;
             }
         }
 
-        // Pre-check decrypt capability for decrypt jobs
-        if (needsDecrypt) {
-            var hasDecrypt = false;
-            for (var di = 0; di < equippedSwIds.length; di++) {
-                for (var si = 0; si < allSw.length; si++) {
-                    if (allSw[si].id === equippedSwIds[di]) {
-                        var specs = normSpecs(allSw[si]);
-                        for (var sp = 0; sp < specs.length; sp++) {
-                            if (specs[sp].type === 'DECRYPT') { hasDecrypt = true; break; }
-                        }
-                    }
-                    if (hasDecrypt) break;
+        var checkLoadout = JSON.parse(JSON.stringify(loadout));
+        checkLoadout.equippedHardware = targetHw;
+        var checkAnalysis = calculateAnalysis(checkLoadout, targetSwIds);
+        var computedHackPower = 0;
+        var hackSa = checkAnalysis.swAnalysis[bestHack.sw.id];
+        if (hackSa) {
+            for (var ai = 0; ai < hackSa.abilities.length; ai++) {
+                if (hackSa.abilities[ai].type === 'HACK') {
+                    computedHackPower = hackSa.abilities[ai].computedPower;
+                    break;
                 }
-                if (hasDecrypt) break;
             }
-            log('Loadout: decrypt software equipped: ' + hasDecrypt);
-            if (!hasDecrypt) {
-                log('Loadout: no decrypt software equipped — searching for available decrypt software');
-                var fileType = null;
-                if (job.conditions && job.conditions.items) {
-                    for (var ci = 0; ci < job.conditions.items.length; ci++) {
-                        var cond = job.conditions.items[ci];
-                        if (cond.details && cond.details.fileExtension) {
-                            fileType = cond.details.fileExtension;
-                            if (fileType && fileType[0] !== '.') fileType = '.' + fileType;
+        }
+        if (serverDefenceRate > 0) {
+            log('Loadout: hack power comparison — hackPower: ' + computedHackPower + ' vs serverDefenceRate: ' + serverDefenceRate + (computedHackPower >= serverDefenceRate ? ' ✓' : ' ✗ INSUFFICIENT'));
+        } else {
+            log('Loadout: computed hack power: ' + computedHackPower + ' (serverDefenceRate unknown)');
+        }
+
+        if (serverDefenceRate > 0 && computedHackPower < serverDefenceRate) {
+            log('Loadout: hack power insufficient — trying hardware upgrade to boost power');
+            var hwUpgrade = findBestHardware(loadout, targetSwIds);
+            if (hwUpgrade) {
+                var upgradeLoadout = JSON.parse(JSON.stringify(loadout));
+                upgradeLoadout.equippedHardware = hwUpgrade;
+                var upgradeAnalysis = calculateAnalysis(upgradeLoadout, targetSwIds);
+                var upgradedPower = 0;
+                var upgradeSa = upgradeAnalysis.swAnalysis[bestHack.sw.id];
+                if (upgradeSa) {
+                    for (var uai = 0; uai < upgradeSa.abilities.length; uai++) {
+                        if (upgradeSa.abilities[uai].type === 'HACK') {
+                            upgradedPower = upgradeSa.abilities[uai].computedPower;
                             break;
                         }
                     }
                 }
-                if (fileType) {
-                    var decryptCandidates = findDecryptSoftwareForFileType(allSw, fileType);
-                    if (decryptCandidates.length > 0) {
-                        var bestDecrypt = decryptCandidates[0];
-                        var targetSwIds = equippedSwIds.slice();
-                        targetSwIds.push(bestDecrypt.sw.id);
-                        var analysis = calculateAnalysis(loadout, targetSwIds);
-                        if (!analysis.canBoot) {
-                            var removable = findRemovableSoftware(loadout, targetSwIds, bestDecrypt.sw.id);
-                            if (removable) {
-                                targetSwIds = targetSwIds.filter(function (id) { return id !== removable; });
-                                analysis = calculateAnalysis(loadout, targetSwIds);
-                            }
-                            if (!analysis.canBoot) {
-                                var betterHw = findBestHardware(loadout, targetSwIds);
-                                if (betterHw) {
-                                    log('Loadout: swapping hardware to accommodate decrypt software');
-                                    await applyLoadoutChange(loadout, betterHw, targetSwIds);
-                                } else {
-                                    log('Loadout: cannot equip decrypt software for ' + fileType + ' — insufficient resources', 'warn');
-                                }
-                            } else {
-                                log('Loadout: equipping ' + bestDecrypt.sw.name + ' for decrypting ' + fileType);
-                                var hw = loadout.equippedHardware || {};
-                                await applyLoadoutChange(loadout, hw, targetSwIds);
-                            }
-                        } else {
-                            log('Loadout: equipping ' + bestDecrypt.sw.name + ' for decrypting ' + fileType);
-                            var hw2 = loadout.equippedHardware || {};
-                            await applyLoadoutChange(loadout, hw2, targetSwIds);
-                        }
-                    } else {
-                        log('Loadout: no decrypt software available for ' + fileType, 'warn');
+                if (upgradedPower > computedHackPower) {
+                    targetHw = hwUpgrade;
+                    computedHackPower = upgradedPower;
+                    log('Loadout: hardware upgrade found — hack power: ' + upgradedPower + ' vs serverDefenceRate: ' + serverDefenceRate + (upgradedPower >= serverDefenceRate ? ' ✓' : ' ✗ still insufficient'));
+                    if (upgradedPower < serverDefenceRate) {
+                        log('Loadout: cannot reach required hack power (' + serverDefenceRate + ') — best achievable: ' + upgradedPower, 'error');
                     }
                 } else {
-                    log('Loadout: decrypt job but file type unknown — will retry on error', 'warn');
+                    log('Loadout: no better hardware available — best hack power: ' + computedHackPower, 'warn');
                 }
+            } else {
+                log('Loadout: no hardware upgrade available', 'warn');
             }
         }
 
+        if (!alreadyBest || targetHw !== currentHw) {
+            log('Loadout: equipping HACK-only software "' + bestHack.sw.name + '" (power ' + (bestHack.spec.power || []).join('-') + ') for ' + serverTypeName);
+            await applyLoadoutChange(loadout, targetHw, targetSwIds);
+        }
         log('Loadout: pre-check complete for "' + (job.type || job.name || '?') + '"');
         return true;
+    }
+
+    // Equip ONLY the best DECRYPT software for a file type (unequips everything else for max power).
+    // Called right before the decrypt action, after hacking/login is complete.
+    async function ensureDecryptOnlyLoadout(job) {
+        var fileType = null;
+        if (job.conditions && job.conditions.items) {
+            for (var ci = 0; ci < job.conditions.items.length; ci++) {
+                var cond = job.conditions.items[ci];
+                if (cond.details && cond.details.fileExtension) {
+                    fileType = cond.details.fileExtension;
+                    if (fileType && fileType[0] !== '.') fileType = '.' + fileType;
+                    break;
+                }
+            }
+        }
+        if (!fileType && job.fileType) {
+            fileType = job.fileType;
+        }
+        if (!fileType) {
+            log('Loadout: decrypt job but file type unknown — will rely on error retry', 'warn');
+            return;
+        }
+
+        invalidateLoadoutCache();
+        var loadout = await getLoadoutData(true);
+        if (!loadout) {
+            log('Loadout: could not fetch loadout data — proceeding without decrypt loadout', 'warn');
+            return;
+        }
+
+        var allSw = loadout.ownedSoftware || [];
+        var decryptCandidates = findDecryptSoftwareForFileType(allSw, fileType);
+        if (decryptCandidates.length === 0) {
+            log('Loadout: no decrypt software available for ' + fileType, 'warn');
+            return;
+        }
+
+        var bestDecrypt = decryptCandidates[0];
+        var equippedSwIds = (loadout.equippedSoftware || []).map(function (s) { return s.id; });
+        if (equippedSwIds.length === 1 && equippedSwIds[0] === bestDecrypt.sw.id) {
+            log('Loadout: best DECRYPT software "' + bestDecrypt.sw.name + '" already equipped alone');
+            return;
+        }
+
+        var targetSwIds = [bestDecrypt.sw.id];
+        var currentHw = loadout.equippedHardware || {};
+        var analysis = calculateAnalysis(loadout, targetSwIds);
+        var targetHw = currentHw;
+        if (!analysis.canBoot) {
+            log('Loadout: current hardware cannot boot decrypt software — finding compatible hardware');
+            var betterHw = findBestHardware(loadout, targetSwIds);
+            if (betterHw) {
+                targetHw = betterHw;
+            } else {
+                log('Loadout: cannot boot decrypt software for ' + fileType + ' — insufficient resources', 'warn');
+                return;
+            }
+        }
+
+        log('Loadout: equipping DECRYPT-only software "' + bestDecrypt.sw.name + '" (power ' + (bestDecrypt.spec.power || []).join('-') + ') for ' + fileType);
+        await applyLoadoutChange(loadout, targetHw, targetSwIds);
+    }
+
+    async function checkDecryptPowerViaAnalysis(fileId, job) {
+        try {
+            sendCmd('get.file.analysis', { fileId: fileId });
+            var analysis = await waitForEvent('COR3_AUTOJOB_FILE_ANALYSIS', 8000);
+            if (!analysis || !analysis.data) {
+                log('File analysis: no data returned — proceeding anyway');
+                return true;
+            }
+            var d = analysis.data;
+            var fileExt = d.type || '';
+            if (fileExt && !job.fileType) {
+                job.fileType = fileExt[0] === '.' ? fileExt : '.' + fileExt;
+            }
+            log('File analysis: type=' + d.type + ' cryptRate=' + d.cryptRate + ' decryptPower=' + d.decryptPower + ' canDecrypt=' + d.canDecrypt);
+            if (d.canDecrypt === false) {
+                log('File analysis: cannot decrypt — cryptRate(' + d.cryptRate + ') > decryptPower(' + d.decryptPower + ')', 'warn');
+                return false;
+            }
+            return true;
+        } catch (e) {
+            log('File analysis: timed out or failed — proceeding anyway');
+            return true;
+        }
     }
 
     async function trySwapForHack(loadout, serverTypeName, currentSwIds) {
@@ -1055,8 +1234,9 @@
         return removable.length > 0 ? removable[0].id : null;
     }
 
-    async function tryLoadoutSwapForError(errorMsg, job) {
+    async function tryLoadoutSwapForError(errorMsg, job, errorObj) {
         log('Loadout: tryLoadoutSwapForError — error="' + errorMsg + '"');
+        invalidateLoadoutCache();
         var loadout = await getLoadoutData(true);
         if (!loadout) {
             log('Loadout: cannot retry — no loadout data available', 'warn');
@@ -1073,14 +1253,123 @@
                 log('Loadout: cannot determine server type for ' + serverId, 'warn');
                 return false;
             }
-            log('Loadout: hack failed on ' + serverTypeName + ' — searching for compatible software');
-            return await trySwapForHack(loadout, serverTypeName, equippedSwIds);
+            log('Loadout: hack failed on ' + serverTypeName + ' — equipping hack-only software');
+            var hackCandidates = findHackSoftwareForServerType(allSw, serverTypeName);
+            if (hackCandidates.length === 0) {
+                log('Loadout: no hack software available for ' + serverTypeName, 'warn');
+                return false;
+            }
+            var bestHack = hackCandidates[0];
+            var targetSwIds = [bestHack.sw.id];
+
+            var serverDefenceRate = 0;
+            try {
+                sendCmd('get.login.status', { serverId: serverId });
+                var loginStatus = await waitForEvent('COR3_AUTOJOB_SAI_LOGIN_STATUS', 5000);
+                if (loginStatus && loginStatus.data && loginStatus.data.serverDefenceRate) {
+                    serverDefenceRate = loginStatus.data.serverDefenceRate;
+                }
+            } catch (e) { }
+
+            if (equippedSwIds.length === 1 && equippedSwIds[0] === bestHack.sw.id) {
+                log('Loadout: best hack software "' + bestHack.sw.name + '" already equipped alone — trying hardware upgrade');
+                var currentAnalysis = calculateAnalysis(loadout, targetSwIds);
+                var currentHackPower = 0;
+                var curSa = currentAnalysis.swAnalysis[bestHack.sw.id];
+                if (curSa) {
+                    for (var chi = 0; chi < curSa.abilities.length; chi++) {
+                        if (curSa.abilities[chi].type === 'HACK') { currentHackPower = curSa.abilities[chi].computedPower; break; }
+                    }
+                }
+                if (serverDefenceRate > 0) {
+                    log('Loadout: current hack power: ' + currentHackPower + ' vs serverDefenceRate: ' + serverDefenceRate);
+                }
+                var betterHw = findBestHardware(loadout, targetSwIds);
+                if (!betterHw) {
+                    log('Loadout: no hardware upgrade available — cannot improve hack power' + (serverDefenceRate > 0 ? ' (need ' + serverDefenceRate + ', have ' + currentHackPower + ')' : ''), 'error');
+                    return false;
+                }
+                var testLoadout = JSON.parse(JSON.stringify(loadout));
+                testLoadout.equippedHardware = betterHw;
+                var hwAnalysis = calculateAnalysis(testLoadout, targetSwIds);
+                if (!hwAnalysis.canBoot) {
+                    log('Loadout: cannot boot with better hardware — giving up', 'error');
+                    return false;
+                }
+                var upgradedHackPower = 0;
+                var hwSa = hwAnalysis.swAnalysis[bestHack.sw.id];
+                if (hwSa) {
+                    for (var uhi = 0; uhi < hwSa.abilities.length; uhi++) {
+                        if (hwSa.abilities[uhi].type === 'HACK') { upgradedHackPower = hwSa.abilities[uhi].computedPower; break; }
+                    }
+                }
+                log('Loadout: with hardware upgrade, hack power: ' + upgradedHackPower + (serverDefenceRate > 0 ? ' vs serverDefenceRate: ' + serverDefenceRate : ''));
+                if (upgradedHackPower <= currentHackPower) {
+                    log('Loadout: hardware upgrade does not improve hack power — giving up', 'error');
+                    return false;
+                }
+                if (serverDefenceRate > 0 && upgradedHackPower < serverDefenceRate) {
+                    log('Loadout: hardware upgrade still insufficient — need ' + serverDefenceRate + ', best achievable: ' + upgradedHackPower, 'error');
+                }
+                log('Loadout: swapping hardware to boost hack power for ' + serverTypeName);
+                await applyLoadoutChange(loadout, betterHw, targetSwIds);
+                return true;
+            }
+
+            var currentHw = loadout.equippedHardware || {};
+            var analysis = calculateAnalysis(loadout, targetSwIds);
+            var targetHw = currentHw;
+            if (!analysis.canBoot) {
+                var betterHw2 = findBestHardware(loadout, targetSwIds);
+                if (betterHw2) {
+                    targetHw = betterHw2;
+                } else {
+                    log('Loadout: cannot boot hack-only software — giving up', 'warn');
+                    return false;
+                }
+            }
+
+            var preCheckLoadout = JSON.parse(JSON.stringify(loadout));
+            preCheckLoadout.equippedHardware = targetHw;
+            var preCheck = calculateAnalysis(preCheckLoadout, targetSwIds);
+            var projectedPower = 0;
+            var preSa = preCheck.swAnalysis[bestHack.sw.id];
+            if (preSa) {
+                for (var phi = 0; phi < preSa.abilities.length; phi++) {
+                    if (preSa.abilities[phi].type === 'HACK') { projectedPower = preSa.abilities[phi].computedPower; break; }
+                }
+            }
+            log('Loadout: projected hack power with new loadout: ' + projectedPower + (serverDefenceRate > 0 ? ' vs serverDefenceRate: ' + serverDefenceRate : ''));
+            if (serverDefenceRate > 0 && projectedPower < serverDefenceRate) {
+                var hwRetry = findBestHardware(loadout, targetSwIds);
+                if (hwRetry) {
+                    var testLoadout2 = JSON.parse(JSON.stringify(loadout));
+                    testLoadout2.equippedHardware = hwRetry;
+                    var hwCheck = calculateAnalysis(testLoadout2, targetSwIds);
+                    var retryPower = 0;
+                    var retrySa = hwCheck.swAnalysis[bestHack.sw.id];
+                    if (retrySa) {
+                        for (var rhi = 0; rhi < retrySa.abilities.length; rhi++) {
+                            if (retrySa.abilities[rhi].type === 'HACK') { retryPower = retrySa.abilities[rhi].computedPower; break; }
+                        }
+                    }
+                    if (retryPower >= serverDefenceRate) {
+                        targetHw = hwRetry;
+                        log('Loadout: found better hardware — hack power: ' + retryPower);
+                    } else {
+                        log('Loadout: best achievable hack power: ' + retryPower + ' — still below serverDefenceRate (' + serverDefenceRate + ')', 'error');
+                    }
+                }
+            }
+
+            log('Loadout: equipping HACK-only "' + bestHack.sw.name + '" for retry');
+            await applyLoadoutChange(loadout, targetHw, targetSwIds);
+            return true;
         }
 
         // Decrypt errors: missing-software, File is encrypted, insufficient_power
         if (errorMsg.indexOf('missing-software') >= 0 || errorMsg.indexOf('File is encrypted') >= 0 ||
             errorMsg.indexOf('insufficient_power') >= 0 || errorMsg.indexOf('insufficient-power') >= 0) {
-            // We need to know the file type — check job conditions
             var fileType = null;
             if (job.conditions && job.conditions.items) {
                 for (var ci = 0; ci < job.conditions.items.length; ci++) {
@@ -1094,11 +1383,21 @@
             }
             if (!fileType && job.fileType) fileType = job.fileType;
             if (!fileType) {
+                var extMatch = errorMsg.match(/decrypt\s+(\.\w+)\s+extension/i);
+                if (extMatch) fileType = extMatch[1];
+            }
+            if (!fileType) {
                 log('Loadout: decrypt failed but file type unknown — cannot swap software', 'warn');
                 return false;
             }
 
-            log('Loadout: decrypt failed for file type ' + fileType + ' — searching for compatible software');
+            var requiredPower = (errorObj && errorObj.required) || 0;
+            var availablePower = (errorObj && errorObj.available) || 0;
+            var isInsufficientPower = errorMsg.indexOf('insufficient_power') >= 0 || errorMsg.indexOf('insufficient-power') >= 0;
+            if (isInsufficientPower && requiredPower > 0) {
+                log('Loadout: insufficient decrypt power — required: ' + requiredPower + ', available: ' + availablePower);
+            }
+
             var candidates = findDecryptSoftwareForFileType(allSw, fileType);
             if (candidates.length === 0) {
                 log('Loadout: no decrypt software available for ' + fileType, 'warn');
@@ -1106,89 +1405,101 @@
             }
 
             var best = candidates[0];
-            var isInsufficientPower = errorMsg.indexOf('insufficient_power') >= 0 || errorMsg.indexOf('insufficient-power') >= 0;
+            var targetSwIds = [best.sw.id];
 
-            if (equippedSwIds.indexOf(best.sw.id) >= 0 && isInsufficientPower) {
-                log('Loadout: best decrypt software already equipped but power insufficient — trying to free resources');
-                var targetSwIds = equippedSwIds.slice();
-                var changed = false;
-
-                for (var attempt = 0; attempt < 5; attempt++) {
-                    var removable = findRemovableSoftware(loadout, targetSwIds, best.sw.id);
-                    if (!removable) break;
-                    targetSwIds = targetSwIds.filter(function (id) { return id !== removable; });
-                    changed = true;
-                    var analysis = calculateAnalysis(loadout, targetSwIds);
-                    if (!analysis.canBoot) break;
-                    var sa = analysis.swAnalysis[best.sw.id];
-                    if (sa) {
-                        var decryptAbility = null;
-                        for (var ai = 0; ai < sa.abilities.length; ai++) {
-                            if (sa.abilities[ai].type === 'DECRYPT') { decryptAbility = sa.abilities[ai]; break; }
-                        }
-                        if (decryptAbility) {
-                            log('Loadout: after removing software, decrypt power = ' + decryptAbility.computedPower);
+            if (equippedSwIds.length === 1 && equippedSwIds[0] === best.sw.id && isInsufficientPower) {
+                log('Loadout: best decrypt software "' + best.sw.name + '" already equipped alone — trying hardware upgrade to boost power');
+                var betterHw = findBestHardware(loadout, targetSwIds);
+                if (!betterHw) {
+                    log('Loadout: failed to increase decrypt power to required level (' + requiredPower + ') — no better hardware available', 'error');
+                    return false;
+                }
+                var testLoadout = JSON.parse(JSON.stringify(loadout));
+                testLoadout.equippedHardware = betterHw;
+                var hwAnalysis = calculateAnalysis(testLoadout, targetSwIds);
+                if (!hwAnalysis.canBoot) {
+                    log('Loadout: failed to increase decrypt power to required level (' + requiredPower + ') — cannot boot with better hardware', 'error');
+                    return false;
+                }
+                var sa = hwAnalysis.swAnalysis[best.sw.id];
+                if (sa) {
+                    var decryptPower = 0;
+                    for (var ai = 0; ai < sa.abilities.length; ai++) {
+                        if (sa.abilities[ai].type === 'DECRYPT') {
+                            decryptPower = sa.abilities[ai].computedPower;
+                            break;
                         }
                     }
-                }
-
-                if (changed) {
-                    var finalAnalysis = calculateAnalysis(loadout, targetSwIds);
-                    if (!finalAnalysis.canBoot) {
-                        var betterHw = findBestHardware(loadout, targetSwIds);
-                        if (betterHw) {
-                            log('Loadout: also swapping hardware to boost decrypt power');
-                            await applyLoadoutChange(loadout, betterHw, targetSwIds);
-                            return true;
-                        }
-                        log('Loadout: cannot boot after removing software — giving up', 'warn');
+                    log('Loadout: with better hardware, decrypt power would be ' + decryptPower + ' (required: ' + requiredPower + ')');
+                    if (decryptPower < requiredPower) {
+                        log('Loadout: failed to increase decrypt power to required level (' + requiredPower + ') — best achievable: ' + decryptPower, 'error');
                         return false;
                     }
-                    log('Loadout: removing non-essential software to boost decrypt power for ' + fileType);
-                    var hw = loadout.equippedHardware || {};
-                    await applyLoadoutChange(loadout, hw, targetSwIds);
-                    return true;
                 }
+                log('Loadout: swapping hardware to boost decrypt power for ' + fileType);
+                await applyLoadoutChange(loadout, betterHw, targetSwIds);
+                return true;
+            }
 
-                var betterHw2 = findBestHardware(loadout, targetSwIds);
-                if (betterHw2) {
-                    log('Loadout: swapping hardware to boost decrypt power');
-                    await applyLoadoutChange(loadout, betterHw2, targetSwIds);
-                    return true;
-                }
-
-                log('Loadout: cannot increase decrypt power — no removable software or better hardware', 'warn');
-                return false;
-            } else if (equippedSwIds.indexOf(best.sw.id) >= 0) {
-                log('Loadout: best decrypt software already equipped', 'warn');
+            if (equippedSwIds.length === 1 && equippedSwIds[0] === best.sw.id) {
+                log('Loadout: best decrypt software already equipped alone — cannot improve', 'warn');
                 return false;
             }
 
-            // Build target: keep current + add decrypt software
-            var targetSwIds = equippedSwIds.slice();
-            targetSwIds.push(best.sw.id);
-
+            var currentHw = loadout.equippedHardware || {};
             var analysis = calculateAnalysis(loadout, targetSwIds);
+            var targetHw = currentHw;
             if (!analysis.canBoot) {
-                var removable = findRemovableSoftware(loadout, targetSwIds, best.sw.id);
-                if (removable) {
-                    targetSwIds = targetSwIds.filter(function (id) { return id !== removable; });
-                    analysis = calculateAnalysis(loadout, targetSwIds);
-                }
-                if (!analysis.canBoot) {
-                    var betterHw = findBestHardware(loadout, targetSwIds);
-                    if (betterHw) {
-                        log('Loadout: swapping hardware to accommodate decrypt software');
-                        await applyLoadoutChange(loadout, betterHw, targetSwIds);
-                        return true;
-                    }
+                var betterHw2 = findBestHardware(loadout, targetSwIds);
+                if (betterHw2) {
+                    targetHw = betterHw2;
+                } else {
+                    log('Loadout: cannot boot decrypt-only software for ' + fileType + ' — insufficient resources', 'warn');
                     return false;
                 }
             }
 
-            log('Loadout: equipping ' + best.sw.name + ' for decrypting ' + fileType);
-            var hw = loadout.equippedHardware || {};
-            await applyLoadoutChange(loadout, hw, targetSwIds);
+            if (isInsufficientPower && requiredPower > 0) {
+                var testLoadout2 = JSON.parse(JSON.stringify(loadout));
+                testLoadout2.equippedHardware = targetHw;
+                var preCheck = calculateAnalysis(testLoadout2, targetSwIds);
+                var sa2 = preCheck.swAnalysis[best.sw.id];
+                if (sa2) {
+                    var dp2 = 0;
+                    for (var ai2 = 0; ai2 < sa2.abilities.length; ai2++) {
+                        if (sa2.abilities[ai2].type === 'DECRYPT') { dp2 = sa2.abilities[ai2].computedPower; break; }
+                    }
+                    log('Loadout: projected decrypt power with new loadout: ' + dp2 + ' (required: ' + requiredPower + ')');
+                    if (dp2 < requiredPower) {
+                        var hwRetry = findBestHardware(loadout, targetSwIds);
+                        if (hwRetry) {
+                            var testLoadout3 = JSON.parse(JSON.stringify(loadout));
+                            testLoadout3.equippedHardware = hwRetry;
+                            var hwCheck = calculateAnalysis(testLoadout3, targetSwIds);
+                            var sa3 = hwCheck.swAnalysis[best.sw.id];
+                            if (sa3) {
+                                var dp3 = 0;
+                                for (var ai3 = 0; ai3 < sa3.abilities.length; ai3++) {
+                                    if (sa3.abilities[ai3].type === 'DECRYPT') { dp3 = sa3.abilities[ai3].computedPower; break; }
+                                }
+                                if (dp3 >= requiredPower) {
+                                    targetHw = hwRetry;
+                                    log('Loadout: found better hardware — decrypt power: ' + dp3);
+                                } else {
+                                    log('Loadout: failed to increase decrypt power to required level (' + requiredPower + ') — best achievable: ' + dp3, 'error');
+                                    return false;
+                                }
+                            }
+                        } else {
+                            log('Loadout: failed to increase decrypt power to required level (' + requiredPower + ') — best achievable: ' + dp2, 'error');
+                            return false;
+                        }
+                    }
+                }
+            }
+
+            log('Loadout: equipping DECRYPT-only "' + best.sw.name + '" for retry on ' + fileType);
+            await applyLoadoutChange(loadout, targetHw, targetSwIds);
             return true;
         }
 
@@ -1242,10 +1553,10 @@
             }
             function cleanup() {
                 window.removeEventListener('message', endpointHandler);
-                clearTimeout(timer);
+                safeClearTimeout(timer);
             }
             window.addEventListener('message', endpointHandler);
-            timer = setTimeout(function () {
+            timer = safeTimeout(function () {
                 window.removeEventListener('message', endpointHandler);
                 resolve({ ok: true, timeout: true }); // timeout is non-fatal
             }, 10000);
@@ -1255,6 +1566,13 @@
     // Step: Set endpoint to target server, with path-through hack on failure
     async function stepSetEndpoint(serverId) {
         var endpointLabel = getServerNameById(serverId) || serverId;
+
+        // Skip if endpoint is already set to this server
+        if (_lastEndpointServerId === serverId) {
+            log('Endpoint already set to ' + endpointLabel + ' — skipping duplicate set.endpoint');
+            return;
+        }
+
         log('Setting endpoint to ' + endpointLabel);
         var raceResult = await _sendSetEndpoint(serverId);
 
@@ -1311,6 +1629,7 @@
         if (raceResult.timeout) {
             log('Endpoint set timeout (may already be set)', 'warn');
         }
+        _lastEndpointServerId = serverId;
         await delay(humanDelay());
     }
 
@@ -1349,138 +1668,155 @@
             }
             log('Logged in via existing access to ' + serverLabel, 'success');
         } else {
-            // Need to hack — enable all solvers BEFORE starting hack so they're
-            // ready when the minigame appears (it can start instantly)
-            log('No active access to ' + serverLabel + ' — starting hack');
-            ensureDecryptSolverEnabled();
-            ensureIceWallSolverEnabled();
-            ensureSimpleDecryptSolverEnabled();
-            await delay(300); // brief pause for solver injection
-            sendCmd('hack.start', { serverId: serverId });
-            var hackResult;
-            try {
-                hackResult = await new Promise(function (resolve, reject) {
-                    var done = false;
-                    var timer = setTimeout(function () {
-                        if (!done) { done = true; window.removeEventListener('message', onMsg); reject(new Error('Timeout')); }
-                    }, 30000);
-                    function onMsg(evt) {
-                        if (!evt.data) return;
-                        if (evt.data.type === 'COR3_AUTOJOB_SAI_HACK_START') {
-                            if (!done) { done = true; clearTimeout(timer); window.removeEventListener('message', onMsg); resolve(evt.data); }
-                        } else if (evt.data.type === 'COR3_AUTOJOB_MINIGAME_START') {
-                            if (!done) { done = true; clearTimeout(timer); window.removeEventListener('message', onMsg); resolve({ data: { minigameStarted: true }, error: null }); }
-                        }
-                    }
-                    window.addEventListener('message', onMsg);
-                });
-            } catch (e) {
-                log('Hack start event timed out — checking if hack already completed...', 'warn');
-                sendCmd('get.login.status', { serverId: serverId });
-                try {
-                    var fallbackLogin = await waitForEvent('COR3_AUTOJOB_SAI_LOGIN_STATUS', 10000);
-                    if (fallbackLogin.data && fallbackLogin.data.activeAccesses && fallbackLogin.data.activeAccesses.length > 0) {
-                        var fbAccess = fallbackLogin.data.activeAccesses[0];
-                        var fbAccessId = fbAccess.id;
-                        var fbType = fbAccess.accessType || fbAccess.type || 'unknown';
-                        log('Hack already completed (found ' + fbType + ' access after timeout) — logging in', 'success');
-                        sendCmd('login.with-access', { serverId: serverId, accessGrantId: fbAccessId });
-                        try { await waitForEvent('COR3_AUTOJOB_SAI_LOGIN_RESULT', 10000); } catch (e2) { /* proceed */ }
-                        await delay(humanDelay());
-                        return;
-                    }
-                } catch (e2) { /* login status also failed */ }
-                throw new Error('Hack start timed out');
-            }
-            if (hackResult.error) {
-                log('Hack returned error: ' + friendlyError(hackResult.error.message || JSON.stringify(hackResult.error)) + ' — checking access...', 'warn');
-                sendCmd('get.login.status', { serverId: serverId });
-                try {
-                    var errLogin = await waitForEvent('COR3_AUTOJOB_SAI_LOGIN_STATUS', 10000);
-                    if (errLogin.data && errLogin.data.activeAccesses && errLogin.data.activeAccesses.length > 0) {
-                        var errAccess = errLogin.data.activeAccesses[0];
-                        var errAccessId = errAccess.id;
-                        var errType = errAccess.accessType || errAccess.type || 'unknown';
-                        log('Already have ' + errType + ' access despite hack error — logging in', 'success');
-                        sendCmd('login.with-access', { serverId: serverId, accessGrantId: errAccessId });
-                        try { await waitForEvent('COR3_AUTOJOB_SAI_LOGIN_RESULT', 10000); } catch (e2) { /* proceed */ }
-                        await delay(humanDelay());
-                        return;
-                    }
-                } catch (e2) { /* login status also failed */ }
-
-                // Loadout retry: if hack failed due to missing/insufficient software, try swapping loadout
-                var hackErrMsg = hackResult.error.message || JSON.stringify(hackResult.error);
-                if (hackErrMsg.indexOf('sai-no-hack-software') >= 0 || hackErrMsg.indexOf('sai-hack-impossible') >= 0) {
-                    log('Loadout: attempting software swap for hack retry...');
-                    var loadoutSwapped = await tryLoadoutSwapForError(hackErrMsg, { serverId: serverId, type: _currentJobRef ? _currentJobRef.type : '' });
-                    if (loadoutSwapped) {
-                        log('Loadout: swap successful — retrying hack');
-                        await delay(1000);
-                        sendCmd('hack.start', { serverId: serverId });
-                        var retryHack;
-                        try {
-                            retryHack = await new Promise(function (resolve, reject) {
-                                var done2 = false;
-                                var timer2 = setTimeout(function () { if (!done2) { done2 = true; window.removeEventListener('message', onMsg2); reject(new Error('Timeout')); } }, 30000);
-                                function onMsg2(evt) {
-                                    if (!evt.data) return;
-                                    if (evt.data.type === 'COR3_AUTOJOB_SAI_HACK_START') { if (!done2) { done2 = true; clearTimeout(timer2); window.removeEventListener('message', onMsg2); resolve(evt.data); } }
-                                    else if (evt.data.type === 'COR3_AUTOJOB_MINIGAME_START') { if (!done2) { done2 = true; clearTimeout(timer2); window.removeEventListener('message', onMsg2); resolve({ data: { minigameStarted: true }, error: null }); } }
-                                }
-                                window.addEventListener('message', onMsg2);
-                            });
-                        } catch (e3) { throw new Error('Hack retry timed out after loadout swap'); }
-                        if (!retryHack.error) {
-                            hackResult = retryHack; // Success — continue with normal hack flow
-                        } else {
-                            throw new Error('Hack failed after loadout swap: ' + friendlyError(retryHack.error.message || JSON.stringify(retryHack.error)));
-                        }
-                    } else {
-                        throw new Error('Hack failed: ' + friendlyError(hackErrMsg));
-                    }
-                } else {
-                    throw new Error('Hack failed: ' + friendlyError(hackErrMsg));
-                }
-            }
-            if (hackResult.data && hackResult.data.autoHacked) {
-                log('Server auto-hacked (no minigame) — skipping solver wait', 'success');
-            } else if (hackResult.data && hackResult.data.minigameStarted) {
-                log('Hack minigame detected via minigame event');
-                await waitForHackToBeDone();
-            } else {
-                await waitForHackToBeDone();
+            // Log hack power info from login status
+            var loginDefenceRate = (data && data.serverDefenceRate) ? data.serverDefenceRate : 0;
+            var loginHackPower = 0;
+            if (data && data.hackTools && data.hackTools.length > 0) {
+                loginHackPower = data.hackTools[0].hackPower || 0;
+                log('Hack info — serverDefenceRate: ' + loginDefenceRate + ', equipped hackPower: ' + loginHackPower + ' (' + (data.hackTools[0].name || 'unknown') + ')' + (loginDefenceRate > 0 ? (loginHackPower >= loginDefenceRate ? ' ✓' : ' ✗ INSUFFICIENT') : ''));
+            } else if (loginDefenceRate > 0) {
+                log('Hack info — serverDefenceRate: ' + loginDefenceRate + ', no hack tools equipped', 'warn');
             }
 
-            await delay(humanDelay());
-            var maxRetries = 5;
+            // Need to hack — retry up to MAX_HACK_ATTEMPTS times if hack fails
+            var MAX_HACK_ATTEMPTS = 3;
+            var hackAttempt = 0;
             var loggedIn = false;
-            for (var attempt = 0; attempt < maxRetries; attempt++) {
-                sendCmd('get.login.status', { serverId: serverId });
-                try {
-                    loginData = await waitForEvent('COR3_AUTOJOB_SAI_LOGIN_STATUS', 5000);
-                } catch (e) {
-                    log('Login status not received after hack (attempt ' + (attempt + 1) + '/' + maxRetries + '), retrying...', 'warn');
-                    continue;
-                }
-                if (loginData.data && loginData.data.activeAccesses && loginData.data.activeAccesses.length > 0) {
-                    var postHackAccess = loginData.data.activeAccesses[0];
-                    var aid = postHackAccess.id;
-                    var postHackType = postHackAccess.accessType || postHackAccess.type || 'unknown';
-                    sendCmd('login.with-access', { serverId: serverId, accessGrantId: aid });
-                    try {
-                        await waitForEvent('COR3_AUTOJOB_SAI_LOGIN_RESULT', 10000);
-                    } catch (e) { /* proceed anyway */ }
-                    loggedIn = true;
-                    log('Logged in to ' + serverLabel + ' (' + postHackType + ')', 'success');
-                    break;
+
+            while (hackAttempt < MAX_HACK_ATTEMPTS && !loggedIn) {
+                hackAttempt++;
+                if (hackAttempt > 1) {
+                    log('Hack attempt ' + hackAttempt + '/' + MAX_HACK_ATTEMPTS + ' on ' + serverLabel, 'warn');
                 } else {
-                    log('No active access after hack (attempt ' + (attempt + 1) + '/' + maxRetries + '), retrying...', 'warn');
-                    await delay(5000);
+                    log('No active access to ' + serverLabel + ' — starting hack');
                 }
-            }
-            if (!loggedIn) {
-                throw new Error('No active access after hack (' + maxRetries + ' attempts) — hack may have failed');
+                // Enable all solvers BEFORE starting hack so they're
+                // ready when the minigame appears (it can start instantly)
+                ensureDecryptSolverEnabled();
+                ensureIceWallSolverEnabled();
+                ensureSimpleDecryptSolverEnabled();
+                await delay(300); // brief pause for solver injection
+                sendCmd('hack.start', { serverId: serverId });
+                var hackResult;
+                try {
+                    hackResult = await new Promise(function (resolve, reject) {
+                        var done = false;
+                        var timer = safeTimeout(function () {
+                            if (!done) { done = true; window.removeEventListener('message', onMsg); reject(new Error('Timeout')); }
+                        }, 30000);
+                        function onMsg(evt) {
+                            if (!evt.data) return;
+                            if (evt.data.type === 'COR3_AUTOJOB_SAI_HACK_START') {
+                                if (!done) { done = true; safeClearTimeout(timer); window.removeEventListener('message', onMsg); resolve(evt.data); }
+                            } else if (evt.data.type === 'COR3_AUTOJOB_MINIGAME_START') {
+                                if (!done) { done = true; safeClearTimeout(timer); window.removeEventListener('message', onMsg); resolve({ data: { minigameStarted: true }, error: null }); }
+                            }
+                        }
+                        window.addEventListener('message', onMsg);
+                    });
+                } catch (e) {
+                    log('Hack start event timed out — checking if hack already completed...', 'warn');
+                    sendCmd('get.login.status', { serverId: serverId });
+                    try {
+                        var fallbackLogin = await waitForEvent('COR3_AUTOJOB_SAI_LOGIN_STATUS', 10000);
+                        if (fallbackLogin.data && fallbackLogin.data.activeAccesses && fallbackLogin.data.activeAccesses.length > 0) {
+                            var fbAccess = fallbackLogin.data.activeAccesses[0];
+                            var fbAccessId = fbAccess.id;
+                            var fbType = fbAccess.accessType || fbAccess.type || 'unknown';
+                            log('Hack already completed (found ' + fbType + ' access after timeout) — logging in', 'success');
+                            sendCmd('login.with-access', { serverId: serverId, accessGrantId: fbAccessId });
+                            try { await waitForEvent('COR3_AUTOJOB_SAI_LOGIN_RESULT', 10000); } catch (e2) { /* proceed */ }
+                            await delay(humanDelay());
+                            return;
+                        }
+                    } catch (e2) { /* login status also failed */ }
+                    if (hackAttempt < MAX_HACK_ATTEMPTS) {
+                        log('Hack timed out — will retry', 'warn');
+                        await delay(2000);
+                        continue;
+                    }
+                    throw new Error('Hack start timed out after ' + MAX_HACK_ATTEMPTS + ' attempts');
+                }
+                if (hackResult.error) {
+                    log('Hack returned error: ' + friendlyError(hackResult.error.message || JSON.stringify(hackResult.error)) + ' — checking access...', 'warn');
+                    sendCmd('get.login.status', { serverId: serverId });
+                    try {
+                        var errLogin = await waitForEvent('COR3_AUTOJOB_SAI_LOGIN_STATUS', 10000);
+                        if (errLogin.data && errLogin.data.activeAccesses && errLogin.data.activeAccesses.length > 0) {
+                            var errAccess = errLogin.data.activeAccesses[0];
+                            var errAccessId = errAccess.id;
+                            var errType = errAccess.accessType || errAccess.type || 'unknown';
+                            log('Already have ' + errType + ' access despite hack error — logging in', 'success');
+                            sendCmd('login.with-access', { serverId: serverId, accessGrantId: errAccessId });
+                            try { await waitForEvent('COR3_AUTOJOB_SAI_LOGIN_RESULT', 10000); } catch (e2) { /* proceed */ }
+                            await delay(humanDelay());
+                            return;
+                        }
+                    } catch (e2) { /* login status also failed */ }
+
+                    // Loadout retry: if hack failed due to missing/insufficient software, try swapping loadout
+                    var hackErrMsg = hackResult.error.message || JSON.stringify(hackResult.error);
+                    if (hackErrMsg.indexOf('sai-no-hack-software') >= 0 || hackErrMsg.indexOf('sai-hack-impossible') >= 0) {
+                        log('Loadout: attempting software swap for hack retry...');
+                        var loadoutSwapped = await tryLoadoutSwapForError(hackErrMsg, { serverId: serverId, type: _currentJobRef ? _currentJobRef.type : '' });
+                        if (loadoutSwapped) {
+                            log('Loadout: swap successful — will retry hack');
+                            await delay(1000);
+                            continue; // retry with new loadout
+                        }
+                    }
+                    if (hackAttempt < MAX_HACK_ATTEMPTS) {
+                        log('Hack failed — will retry', 'warn');
+                        await delay(2000);
+                        continue;
+                    }
+                    throw new Error('Hack failed after ' + MAX_HACK_ATTEMPTS + ' attempts: ' + friendlyError(hackErrMsg));
+                }
+                if (hackResult.data && hackResult.data.autoHacked) {
+                    log('Server auto-hacked (no minigame) — skipping solver wait', 'success');
+                } else if (hackResult.data && hackResult.data.minigameStarted) {
+                    log('Hack minigame detected via minigame event');
+                    await waitForHackToBeDone();
+                } else {
+                    await waitForHackToBeDone();
+                }
+
+                // Poll for active access after hack completes
+                await delay(humanDelay());
+                var maxPolls = 5;
+                for (var attempt = 0; attempt < maxPolls; attempt++) {
+                    sendCmd('get.login.status', { serverId: serverId });
+                    try {
+                        loginData = await waitForEvent('COR3_AUTOJOB_SAI_LOGIN_STATUS', 5000);
+                    } catch (e) {
+                        log('Login status not received after hack (poll ' + (attempt + 1) + '/' + maxPolls + '), retrying...', 'warn');
+                        continue;
+                    }
+                    if (loginData.data && loginData.data.activeAccesses && loginData.data.activeAccesses.length > 0) {
+                        var postHackAccess = loginData.data.activeAccesses[0];
+                        var aid = postHackAccess.id;
+                        var postHackType = postHackAccess.accessType || postHackAccess.type || 'unknown';
+                        sendCmd('login.with-access', { serverId: serverId, accessGrantId: aid });
+                        try {
+                            await waitForEvent('COR3_AUTOJOB_SAI_LOGIN_RESULT', 10000);
+                        } catch (e) { /* proceed anyway */ }
+                        loggedIn = true;
+                        log('Logged in to ' + serverLabel + ' (' + postHackType + ')', 'success');
+                        break;
+                    } else {
+                        log('No active access after hack (poll ' + (attempt + 1) + '/' + maxPolls + '), retrying...', 'warn');
+                        await delay(5000);
+                    }
+                }
+                if (!loggedIn) {
+                    // Hack minigame completed but no access granted — hack likely failed
+                    if (hackAttempt < MAX_HACK_ATTEMPTS) {
+                        log('Hack completed but no access granted — hack likely failed, retrying (' + hackAttempt + '/' + MAX_HACK_ATTEMPTS + ')', 'warn');
+                        await delay(2000);
+                        continue;
+                    }
+                    throw new Error('Hack failed after ' + MAX_HACK_ATTEMPTS + ' attempts — no access granted');
+                }
             }
         }
         await delay(humanDelay());
@@ -1567,10 +1903,10 @@
             }
             function cleanup() {
                 window.removeEventListener('message', handler);
-                clearTimeout(timer);
+                safeClearTimeout(timer);
             }
             window.addEventListener('message', handler);
-            timer = setTimeout(function () {
+            timer = safeTimeout(function () {
                 window.removeEventListener('message', handler);
                 resolve(null);
             }, 5000);
@@ -1707,10 +2043,10 @@
             }
             function cleanup() {
                 window.removeEventListener('message', handler);
-                clearTimeout(timer);
+                safeClearTimeout(timer);
             }
             window.addEventListener('message', handler);
-            timer = setTimeout(function () {
+            timer = safeTimeout(function () {
                 window.removeEventListener('message', handler);
                 log('desktop.get.options WS command timed out after 8s', 'warn');
                 resolve(null);
@@ -1868,22 +2204,36 @@
                 throw new Error('No encrypted file found in download folder');
             }
 
-            // 5. Open file to trigger decrypt minigame
-            ensureDecryptSolverEnabled();
-            ensureIceWallSolverEnabled();
-            ensureSimpleDecryptSolverEnabled();
-            log('Opening file: ' + targetFile.name);
-            // Store file type for loadout retry
+            // 5. Extract file type early for loadout logic
             if (targetFile.name) {
                 var dotIdx = targetFile.name.lastIndexOf('.');
                 if (dotIdx >= 0) job.fileType = targetFile.name.substring(dotIdx);
             }
-            sendCmd('open.file', { fileId: targetFile.id });
+
+            // 6. Equip decrypt-only loadout FIRST, then check decrypt power
+            await ensureDecryptOnlyLoadout(job);
+            await delay(humanDelay());
+
+            // 7. Check decrypt power via file analysis after equipping best loadout
+            var analysisOk = await checkDecryptPowerViaAnalysis(targetFile.id, job);
+            if (!analysisOk) {
+                log('Decrypt power still insufficient after loadout swap — attempting hardware upgrade');
+                var swapOk = await tryLoadoutSwapForError('insufficient_power', job, {});
+                if (!swapOk) {
+                    throw new Error('Insufficient decrypt power — no loadout can meet requirement');
+                }
+                await delay(humanDelay());
+            }
+            ensureDecryptSolverEnabled();
+            ensureIceWallSolverEnabled();
+            ensureSimpleDecryptSolverEnabled();
+            log('Opening file: ' + targetFile.name);
+            sendCmd('decrypt.file', { fileId: targetFile.id });
 
             // Wait for minigame start OR desktop file error (race)
             var openFileResult = await new Promise(function (resolve) {
                 var done = false;
-                var timer = setTimeout(function () { if (!done) { done = true; cleanup(); resolve({ timeout: true }); } }, 12000);
+                var timer = safeTimeout(function () { if (!done) { done = true; cleanup(); resolve({ timeout: true }); } }, 12000);
                 function onDesktopFile(evt) {
                     if (!evt.data || done) return;
                     if (evt.data.type === 'COR3_AUTOJOB_DESKTOP_FILE' && evt.data.error) {
@@ -1896,7 +2246,7 @@
                         done = true; cleanup(); resolve({ minigame: evt.data });
                     }
                 }
-                function cleanup() { clearTimeout(timer); window.removeEventListener('message', onDesktopFile); window.removeEventListener('message', onMinigame); }
+                function cleanup() { safeClearTimeout(timer); window.removeEventListener('message', onDesktopFile); window.removeEventListener('message', onMinigame); }
                 window.addEventListener('message', onDesktopFile);
                 window.addEventListener('message', onMinigame);
             });
@@ -1906,19 +2256,32 @@
                 var errMsg = openFileResult.error.message || openFileResult.error.kind || JSON.stringify(openFileResult.error);
                 var isLoadoutError = errMsg.indexOf('missing-software') >= 0 || errMsg.indexOf('insufficient_power') >= 0 ||
                     errMsg.indexOf('insufficient-power') >= 0 || errMsg.indexOf('File is encrypted') >= 0;
-                if (isLoadoutError) {
+                var isAlreadyDecrypted = errMsg.indexOf('cannot-read-sai-file') >= 0 || errMsg.indexOf('Cannot read SAI file') >= 0;
+                if (isAlreadyDecrypted) {
+                    log('File already decrypted (cannot-read-sai-file) — attempting job completion directly', 'success');
+                } else if (isLoadoutError) {
                     log('Loadout: file open failed (' + errMsg + ') — attempting software swap');
-                    var swapOk = await tryLoadoutSwapForError(errMsg, job);
+                    var swapOk = await tryLoadoutSwapForError(errMsg, job, openFileResult.error);
                     if (swapOk) {
                         log('Loadout: swap successful — retrying file open');
                         await delay(1000);
                         ensureDecryptSolverEnabled();
                         ensureIceWallSolverEnabled();
                         ensureSimpleDecryptSolverEnabled();
-                        sendCmd('open.file', { fileId: targetFile.id });
-                        try {
-                            await waitForEvent('COR3_AUTOJOB_MINIGAME_START', 10000);
-                        } catch (e2) {
+                        sendCmd('decrypt.file', { fileId: targetFile.id });
+                        var retryResult = await new Promise(function (resolve) {
+                            var rd = false;
+                            var rt = safeTimeout(function () { if (!rd) { rd = true; rc(); resolve({ timeout: true }); } }, 12000);
+                            function rdf(evt) { if (!evt.data || rd) return; if (evt.data.type === 'COR3_AUTOJOB_DESKTOP_FILE' && evt.data.error) { rd = true; rc(); resolve({ error: evt.data.error }); } }
+                            function rmg(evt) { if (!evt.data || rd) return; if (evt.data.type === 'COR3_AUTOJOB_MINIGAME_START') { rd = true; rc(); resolve({ minigame: evt.data }); } }
+                            function rc() { safeClearTimeout(rt); window.removeEventListener('message', rdf); window.removeEventListener('message', rmg); }
+                            window.addEventListener('message', rdf);
+                            window.addEventListener('message', rmg);
+                        });
+                        if (retryResult.error) {
+                            var retryErrMsg = retryResult.error.message || retryResult.error.kind || JSON.stringify(retryResult.error);
+                            throw new Error(friendlyError(retryErrMsg));
+                        } else if (retryResult.timeout) {
                             log('Minigame start not detected on retry', 'warn');
                         }
                     } else {
@@ -1931,12 +2294,14 @@
                 log('Minigame start not detected (solver may handle it directly)', 'warn');
             }
             // else: minigame started normally
-            await waitForHackToBeDone();
+            if (!isAlreadyDecrypted) {
+                await waitForHackToBeDone();
+            }
 
             // 6. Wait for server to register completion, then complete job
             await delay(1500);
             var decryptRetries = 0;
-            var MAX_DECRYPT_RETRIES = 2;
+            var MAX_DECRYPT_RETRIES = 3;
             while (true) {
                 try {
                     var reward = await stepCompleteJob(job);
@@ -1947,30 +2312,27 @@
                     }
                 } catch (e) {
                     if (e.message && e.message.indexOf('job-conditions-not-met') >= 0 && decryptRetries < MAX_DECRYPT_RETRIES) {
-                        decryptRetries++;
-                        log('Job conditions not met — retrying decryption (attempt ' + decryptRetries + '/' + MAX_DECRYPT_RETRIES + ')', 'warn');
-                        await delay(2000);
-                        // Re-open the file to trigger decrypt minigame again
-                        ensureDecryptSolverEnabled();
-                        ensureIceWallSolverEnabled();
-                        ensureSimpleDecryptSolverEnabled();
-                        sendCmd('open.file', { fileId: targetFile.id });
-                        try {
-                            await waitForEvent('COR3_AUTOJOB_MINIGAME_START', 10000);
-                        } catch (e2) {
-                            log('Minigame start not detected on retry', 'warn');
-                        }
-                        await waitForHackToBeDone();
-                        await delay(1500);
-                        continue;
+                        // Fall through to retry block below
+                    } else {
+                        throw e;
                     }
-                    throw e;
                 }
-                // No reward but no error — retry completion after delay
+                // No reward or job-conditions-not-met — re-trigger decrypt minigame
                 if (decryptRetries < MAX_DECRYPT_RETRIES) {
                     decryptRetries++;
-                    log('No reward after decrypt — retrying completion (attempt ' + decryptRetries + '/' + MAX_DECRYPT_RETRIES + ')', 'warn');
-                    await delay(3000);
+                    log('Decrypt incomplete — re-opening file to retry decryption (attempt ' + decryptRetries + '/' + MAX_DECRYPT_RETRIES + ')', 'warn');
+                    await delay(2000);
+                    ensureDecryptSolverEnabled();
+                    ensureIceWallSolverEnabled();
+                    ensureSimpleDecryptSolverEnabled();
+                    sendCmd('decrypt.file', { fileId: targetFile.id });
+                    try {
+                        await waitForEvent('COR3_AUTOJOB_MINIGAME_START', 10000);
+                    } catch (e2) {
+                        log('Minigame start not detected on retry', 'warn');
+                    }
+                    await waitForHackToBeDone();
+                    await delay(1500);
                     continue;
                 }
                 return null;
@@ -2184,11 +2546,17 @@
         if (folderData && folderData.data && folderData.data.files && folderData.data.files.length > 0) {
             var encFile = folderData.data.files.find(function (f) { return f.isNew; }) || folderData.data.files[folderData.data.files.length - 1];
             if (encFile) {
+                if (encFile.name) {
+                    var ddDotIdx = encFile.name.lastIndexOf('.');
+                    if (ddDotIdx >= 0) job.fileType = encFile.name.substring(ddDotIdx);
+                }
+                await ensureDecryptOnlyLoadout(job);
+                await delay(humanDelay());
                 ensureDecryptSolverEnabled();
                 ensureIceWallSolverEnabled();
                 ensureSimpleDecryptSolverEnabled();
                 log('Opening file for decryption: ' + encFile.name);
-                sendCmd('open.file', { fileId: encFile.id });
+                sendCmd('decrypt.file', { fileId: encFile.id });
                 try {
                     await waitForEvent('COR3_AUTOJOB_MINIGAME_START', 10000);
                 } catch (e) { /* solver may handle directly */ }
@@ -2484,22 +2852,36 @@
                 throw new Error('No file found in download folder for decryption');
             }
 
-            // 8. Open file to trigger decrypt minigame
-            ensureDecryptSolverEnabled();
-            ensureIceWallSolverEnabled();
-            ensureSimpleDecryptSolverEnabled();
-            log('Opening file for decryption: ' + encFile.name);
-            // Store file type for loadout retry
+            // 8. Extract file type early for loadout logic
             if (encFile.name) {
                 var dotIdx2 = encFile.name.lastIndexOf('.');
                 if (dotIdx2 >= 0) job.fileType = encFile.name.substring(dotIdx2);
             }
-            sendCmd('open.file', { fileId: encFile.id });
+
+            // 9. Equip decrypt-only loadout FIRST, then check decrypt power
+            await ensureDecryptOnlyLoadout(job);
+            await delay(humanDelay());
+
+            // 10. Check decrypt power via file analysis after equipping best loadout
+            var analysisOk2 = await checkDecryptPowerViaAnalysis(encFile.id, job);
+            if (!analysisOk2) {
+                log('Decrypt power still insufficient after loadout swap — attempting hardware upgrade');
+                var swapOk2 = await tryLoadoutSwapForError('insufficient_power', job, {});
+                if (!swapOk2) {
+                    throw new Error('Insufficient decrypt power — no loadout can meet requirement');
+                }
+                await delay(humanDelay());
+            }
+            ensureDecryptSolverEnabled();
+            ensureIceWallSolverEnabled();
+            ensureSimpleDecryptSolverEnabled();
+            log('Opening file for decryption: ' + encFile.name);
+            sendCmd('decrypt.file', { fileId: encFile.id });
 
             // Wait for minigame start OR desktop file error (race)
             var openFileResult2 = await new Promise(function (resolve) {
                 var done = false;
-                var timer = setTimeout(function () { if (!done) { done = true; cleanup(); resolve({ timeout: true }); } }, 12000);
+                var timer = safeTimeout(function () { if (!done) { done = true; cleanup(); resolve({ timeout: true }); } }, 12000);
                 function onDesktopFile(evt) {
                     if (!evt.data || done) return;
                     if (evt.data.type === 'COR3_AUTOJOB_DESKTOP_FILE' && evt.data.error) {
@@ -2512,7 +2894,7 @@
                         done = true; cleanup(); resolve({ minigame: evt.data });
                     }
                 }
-                function cleanup() { clearTimeout(timer); window.removeEventListener('message', onDesktopFile); window.removeEventListener('message', onMinigame); }
+                function cleanup() { safeClearTimeout(timer); window.removeEventListener('message', onDesktopFile); window.removeEventListener('message', onMinigame); }
                 window.addEventListener('message', onDesktopFile);
                 window.addEventListener('message', onMinigame);
             });
@@ -2524,17 +2906,27 @@
                     errMsg2.indexOf('insufficient-power') >= 0 || errMsg2.indexOf('File is encrypted') >= 0;
                 if (isLoadoutError2) {
                     log('Loadout: file open failed (' + errMsg2 + ') — attempting software swap');
-                    var swapOk2 = await tryLoadoutSwapForError(errMsg2, job);
+                    var swapOk2 = await tryLoadoutSwapForError(errMsg2, job, openFileResult2.error);
                     if (swapOk2) {
                         log('Loadout: swap successful — retrying file open');
                         await delay(1000);
                         ensureDecryptSolverEnabled();
                         ensureIceWallSolverEnabled();
                         ensureSimpleDecryptSolverEnabled();
-                        sendCmd('open.file', { fileId: encFile.id });
-                        try {
-                            await waitForEvent('COR3_AUTOJOB_MINIGAME_START', 10000);
-                        } catch (e2) {
+                        sendCmd('decrypt.file', { fileId: encFile.id });
+                        var retryResult2 = await new Promise(function (resolve) {
+                            var rd2 = false;
+                            var rt2 = safeTimeout(function () { if (!rd2) { rd2 = true; rc2(); resolve({ timeout: true }); } }, 12000);
+                            function rdf2(evt) { if (!evt.data || rd2) return; if (evt.data.type === 'COR3_AUTOJOB_DESKTOP_FILE' && evt.data.error) { rd2 = true; rc2(); resolve({ error: evt.data.error }); } }
+                            function rmg2(evt) { if (!evt.data || rd2) return; if (evt.data.type === 'COR3_AUTOJOB_MINIGAME_START') { rd2 = true; rc2(); resolve({ minigame: evt.data }); } }
+                            function rc2() { safeClearTimeout(rt2); window.removeEventListener('message', rdf2); window.removeEventListener('message', rmg2); }
+                            window.addEventListener('message', rdf2);
+                            window.addEventListener('message', rmg2);
+                        });
+                        if (retryResult2.error) {
+                            var retryErrMsg2 = retryResult2.error.message || retryResult2.error.kind || JSON.stringify(retryResult2.error);
+                            throw new Error(friendlyError(retryErrMsg2));
+                        } else if (retryResult2.timeout) {
                             log('Minigame start not detected on retry', 'warn');
                         }
                     } else {
@@ -2552,7 +2944,7 @@
             // 9. Wait for server to register completion, then complete job
             await delay(1500);
             var decryptRetries = 0;
-            var MAX_DECRYPT_RETRIES = 2;
+            var MAX_DECRYPT_RETRIES = 3;
             while (true) {
                 try {
                     var reward = await stepCompleteJob(job);
@@ -2563,30 +2955,27 @@
                     }
                 } catch (e) {
                     if (e.message && e.message.indexOf('job-conditions-not-met') >= 0 && decryptRetries < MAX_DECRYPT_RETRIES) {
-                        decryptRetries++;
-                        log('Job conditions not met — retrying decryption (attempt ' + decryptRetries + '/' + MAX_DECRYPT_RETRIES + ')', 'warn');
-                        await delay(2000);
-                        // Re-open the file to trigger decrypt minigame again
-                        ensureDecryptSolverEnabled();
-                        ensureIceWallSolverEnabled();
-                        ensureSimpleDecryptSolverEnabled();
-                        sendCmd('open.file', { fileId: encFile.id });
-                        try {
-                            await waitForEvent('COR3_AUTOJOB_MINIGAME_START', 10000);
-                        } catch (e2) {
-                            log('Minigame start not detected on retry', 'warn');
-                        }
-                        await waitForHackToBeDone();
-                        await delay(1500);
-                        continue;
+                        // Fall through to retry block below
+                    } else {
+                        throw e;
                     }
-                    throw e;
                 }
-                // No reward but no error — retry completion after delay
+                // No reward or job-conditions-not-met — re-trigger decrypt minigame
                 if (decryptRetries < MAX_DECRYPT_RETRIES) {
                     decryptRetries++;
-                    log('No reward after decrypt — retrying completion (attempt ' + decryptRetries + '/' + MAX_DECRYPT_RETRIES + ')', 'warn');
-                    await delay(3000);
+                    log('Decrypt incomplete — re-opening file to retry decryption (attempt ' + decryptRetries + '/' + MAX_DECRYPT_RETRIES + ')', 'warn');
+                    await delay(2000);
+                    ensureDecryptSolverEnabled();
+                    ensureIceWallSolverEnabled();
+                    ensureSimpleDecryptSolverEnabled();
+                    sendCmd('decrypt.file', { fileId: encFile.id });
+                    try {
+                        await waitForEvent('COR3_AUTOJOB_MINIGAME_START', 10000);
+                    } catch (e2) {
+                        log('Minigame start not detected on retry', 'warn');
+                    }
+                    await waitForHackToBeDone();
+                    await delay(1500);
                     continue;
                 }
                 return null;
@@ -2878,10 +3267,23 @@
     // ---- Main loop ----
     async function processQueue() {
         if (running) return;
+
+        // Wait if initial page load fetch is still in progress
+        var waitAttempts = 0;
+        while (window.__cor3InitialFetchInProgress && waitAttempts < 3) {
+            waitAttempts++;
+            log('Initial page load in progress — delaying auto-jobs start (attempt ' + waitAttempts + '/3, waiting 10s)...', 'warn');
+            await new Promise(function (r) { setTimeout(r, 10000); });
+        }
+        if (window.__cor3InitialFetchInProgress) {
+            log('⚠️ Initial page load still in progress after 30s — proceeding anyway', 'warn');
+        }
+
         running = true;
         abortFlag = false;
         tokenExpired = false;
         _lastLoadoutServerType = null;
+        _lastEndpointServerId = null;
         invalidateLoadoutCache();
 
         // Sort jobs by server priority (furthest first), then by server type (to group
@@ -2905,9 +3307,9 @@
 
         // Pre-start: check all servers for maintenance and skip unreachable jobs
         log('Checking server maintenance status...');
-        sendCmd('get.map', {});
+        _cachedMapData = null; // invalidate cache at start of each run
         try {
-            var preMapData = await waitForEvent('COR3_WS_NETWORK_MAP', 10000);
+            var preMapData = await fetchMapData();
             if (preMapData && preMapData.servers) {
                 var now = Date.now();
                 var skippedCount = 0;
@@ -3148,11 +3550,11 @@
         window.postMessage({ type: 'COR3_REFRESH_ALL_MARKETS_SEQ', skipLots: true }, '*');
         // Wait for completion signal (max 30s)
         await new Promise(function (resolve) {
-            var timer = setTimeout(resolve, 30000);
+            var timer = safeTimeout(resolve, 30000);
             function onDone(evt) {
                 if (evt.data && evt.data.type === 'COR3_ALL_MARKETS_REFRESHED') {
                     window.removeEventListener('message', onDone);
-                    clearTimeout(timer);
+                    safeClearTimeout(timer);
                     resolve();
                 }
             }

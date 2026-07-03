@@ -23,6 +23,28 @@ var webVersion = null;
     // On token-expired, the ID increments, causing all in-flight refreshes to abort.
     var __cor3MarketRefreshAbortId = 0;
 
+    // Shared unreachable-market cache: keyed by market type ('usol', 'soyuz', 'dark').
+    // Each entry: { blockerName, maintenanceEndsAt (ISO string or null), detectedAt (ms timestamp) }
+    // Other sections check this before starting a path-through to avoid redundant hacking.
+    window.__cor3UnreachableMarkets = {};
+
+    // Check if a market is still known-unreachable (maintenance not yet expired)
+    window.__cor3IsMarketUnreachable = function (marketType) {
+        var entry = window.__cor3UnreachableMarkets[marketType];
+        if (!entry) return null;
+        if (entry.maintenanceEndsAt) {
+            var endsAt = new Date(entry.maintenanceEndsAt).getTime();
+            if (Date.now() >= endsAt) {
+                delete window.__cor3UnreachableMarkets[marketType];
+                return null;
+            }
+        }
+        return entry;
+    };
+
+    // Flag: initial data fetch is currently in progress (markets + mercs + stash + loadout)
+    window.__cor3InitialFetchInProgress = false;
+
     function queueRetryOp(opName) {
         if (!pendingRetryOps.includes(opName)) {
             pendingRetryOps.push(opName);
@@ -170,8 +192,12 @@ var webVersion = null;
                             window.postMessage({ type: 'COR3_AUTOJOB_DESKTOP_OPTIONS', data: payload.data, error: payload.error || null }, '*');
                         }
                         // Also handle update.file from polling
-                        if (payload.event && (payload.event.action === 'update.file' || payload.event.action === 'open.file') && payload.data) {
-                            window.postMessage({ type: 'COR3_AUTOJOB_DESKTOP_FILE', data: payload.data, error: payload.error || null }, '*');
+                        if (payload.event && (payload.event.action === 'update.file' || payload.event.action === 'open.file' || payload.event.action === 'decrypt.file') && (payload.data || payload.error)) {
+                            var pollFileError = payload.error || null;
+                            if (!pollFileError && payload.data && payload.data.kind === 'insufficient_power') {
+                                pollFileError = { message: 'insufficient_power', kind: 'insufficient_power', ability: payload.data.ability, required: payload.data.required, available: payload.data.available };
+                            }
+                            window.postMessage({ type: 'COR3_AUTOJOB_DESKTOP_FILE', data: payload.data || null, error: pollFileError }, '*');
                         }
                     }
                 }
@@ -406,7 +432,7 @@ var webVersion = null;
             // Safety: if no new socket within 15s, log warning
             setTimeout(function () {
                 if (trackedSockets.length === 0) {
-                    console.warn('[COR3 Helper] No new WebSocket connected after token-expired close — game may need page refresh');
+                    console.log('[COR3 Helper] No new WebSocket connected after token-expired close — game may need page refresh');
                 } else {
                     console.log('[COR3 Helper] WebSocket reconnected after token-expired');
                 }
@@ -458,70 +484,57 @@ var webVersion = null;
             }
         }
 
-        // Intercept mercenary responses
+        // Intercept mercenary responses — detect market by faction key (core_main vs usol_employment)
         if (eventName === 'expeditions' && payload && payload.event && payload.event.action === 'get.mercenaries') {
-            // Cache mercenary IDs for configure calls
-            if (payload.data && payload.data.mercenaries) {
-                window.__cor3CachedMercIds = payload.data.mercenaries.map(function (m) { return m.id; });
+            var mercFactionKey = null;
+            if (payload.data && payload.data.mercenaries && payload.data.mercenaries.length > 0) {
+                var firstMerc = payload.data.mercenaries[0];
+                if (firstMerc.faction && firstMerc.faction.key) mercFactionKey = firstMerc.faction.key;
             }
-            window.postMessage({
-                type: 'COR3_WS_MERCENARIES',
-                data: payload.data
-            }, '*');
-            // Auto-request expedition config if not already cached
-            if (!window.__cor3ExpConfigIds) {
-                setTimeout(function () {
-                    window.__cor3RequestExpeditionConfig();
-                }, 500);
-            } else if (window.__cor3CachedMercIds) {
-                // Debounce: skip if we already configured mercs within the last 10 seconds
-                var now = Date.now();
-                if (window.__cor3LastMercConfigureTime && (now - window.__cor3LastMercConfigureTime) < 10000) {
-                    console.log('[COR3 Helper] Skipping duplicate merc configure (debounced)');
-                } else {
-                    window.__cor3LastMercConfigureTime = now;
-                    var ids = window.__cor3ExpConfigIds;
-                    var mercIds = window.__cor3CachedMercIds.slice();
-                    (function configureNext(i) {
-                        if (i >= mercIds.length) return;
-                        setTimeout(function () {
-                            window.__cor3RequestMercConfigure(mercIds[i], null, ids.locationConfigId, ids.zoneConfigId, ids.goalId);
-                            configureNext(i + 1);
-                        }, humanDelay() + 400);
-                    })(0);
+            // Fallback: check eliteSlots if no regular mercs
+            if (!mercFactionKey && payload.data && payload.data.eliteSlots && payload.data.eliteSlots.length > 0) {
+                var firstElite = payload.data.eliteSlots[0];
+                if (firstElite.mercenary && firstElite.mercenary.faction && firstElite.mercenary.faction.key) mercFactionKey = firstElite.mercenary.faction.key;
+                if (!mercFactionKey && firstElite.marketId === USOL_MARKET_ID) mercFactionKey = 'usol_employment';
+            }
+            if (mercFactionKey === 'usol_employment') {
+                window.postMessage({ type: 'COR3_WS_USOL_MERCENARIES', data: payload.data }, '*');
+            } else {
+                // core_main or unknown — treat as CORE
+                if (payload.data && payload.data.mercenaries) {
+                    window.__cor3CachedMercIds = payload.data.mercenaries.map(function (m) { return m.id; });
                 }
+                window.postMessage({ type: 'COR3_WS_MERCENARIES', data: payload.data }, '*');
             }
             return;
         }
 
-        // Intercept expedition config response (locations/zones/goals)
+        // Intercept expedition config response (locations/zones/goals) — detect USOL by pending flag
         if (eventName === 'expeditions' && payload && payload.event && payload.event.action === 'get.config') {
-            // Store config IDs for mercenary configure calls
+            // Detect if this is a USOL config response by checking if USOL merc fetch is in progress
+            var isUsolConfig = !!window.__cor3UsolMercFetchInProgress;
             if (payload.data && payload.data.locations && payload.data.locations.length > 0) {
                 var loc = payload.data.locations[0];
                 var zone0 = loc.zones && loc.zones[0] ? loc.zones[0] : null;
                 var goal0 = zone0 && zone0.goals && zone0.goals[0] ? zone0.goals[0] : null;
-                window.__cor3ExpConfigIds = {
-                    locationConfigId: loc.id,
-                    zoneConfigId: zone0 ? zone0.id : null,
-                    goalId: goal0 ? goal0.id : null
-                };
+                if (isUsolConfig) {
+                    window.__cor3UsolExpConfigIds = {
+                        locationConfigId: loc.id,
+                        zoneConfigId: zone0 ? zone0.id : null,
+                        goalId: goal0 ? goal0.id : null
+                    };
+                } else {
+                    window.__cor3ExpConfigIds = {
+                        locationConfigId: loc.id,
+                        zoneConfigId: zone0 ? zone0.id : null,
+                        goalId: goal0 ? goal0.id : null
+                    };
+                }
             }
-            window.postMessage({
-                type: 'COR3_WS_EXPEDITION_CONFIG',
-                data: payload.data
-            }, '*');
-            // If mercenaries are cached, auto-configure each sequentially with human delays
-            if (window.__cor3CachedMercIds && window.__cor3ExpConfigIds) {
-                var ids = window.__cor3ExpConfigIds;
-                var mercIds = window.__cor3CachedMercIds.slice();
-                (function configureNext(i) {
-                    if (i >= mercIds.length) return;
-                    setTimeout(function () {
-                        window.__cor3RequestMercConfigure(mercIds[i], null, ids.locationConfigId, ids.zoneConfigId, ids.goalId);
-                        configureNext(i + 1);
-                    }, humanDelay() + 400);
-                })(0);
+            if (isUsolConfig) {
+                window.postMessage({ type: 'COR3_WS_USOL_EXPEDITION_CONFIG', data: payload.data }, '*');
+            } else {
+                window.postMessage({ type: 'COR3_WS_EXPEDITION_CONFIG', data: payload.data }, '*');
             }
             return;
         }
@@ -562,7 +575,23 @@ var webVersion = null;
                     type: 'COR3_WS_COLLECTED_ALL',
                     data: payload.data
                 }, '*');
+                // Update expedition data in UI so status reflects collection
+                if (payload.data && payload.data.id) {
+                    window.postMessage({
+                        type: 'COR3_WS_EXPEDITIONS',
+                        expeditions: [payload.data]
+                    }, '*');
+                }
             }
+            return;
+        }
+
+        // Intercept insert.archive response (expedition fully archived after collect.all)
+        if (eventName === 'expeditions' && payload && payload.event && payload.event.action === 'insert.archive') {
+            window.postMessage({
+                type: 'COR3_WS_EXPEDITION_ARCHIVED',
+                data: payload.data
+            }, '*');
             return;
         }
 
@@ -607,10 +636,11 @@ var webVersion = null;
                 type: 'COR3_WS_DECISIONS',
                 decisions: [] // Clear decisions by sending empty array
             }, '*');
-            // Immediately request fresh expedition data to update UI after launch
-            setTimeout(function() {
-                window.__cor3RequestExpeditions();
-            }, 1000 + Math.floor(Math.random() * 500));
+            // Post launch data as expedition data directly — no need for leave-room/join-room/get.active
+            window.postMessage({
+                type: 'COR3_WS_EXPEDITIONS',
+                expeditions: [payload.data]
+            }, '*');
             return;
         }
 
@@ -855,6 +885,16 @@ var webVersion = null;
                 window.postMessage({ type: 'COR3_AUTOJOB_SAI_FILE_UPLOAD', data: payload.data, error: payload.error || null }, '*');
                 return;
             }
+            // File search-valuable (valuable seller)
+            if (action === 'file.search-valuable') {
+                window.postMessage({ type: 'COR3_VALUABLE_FILE_SEARCH', data: payload.data, error: payload.error || null }, '*');
+                return;
+            }
+            // Log search-valuable (valuable seller)
+            if (action === 'log.search-valuable') {
+                window.postMessage({ type: 'COR3_VALUABLE_LOG_SEARCH', data: payload.data, error: payload.error || null }, '*');
+                return;
+            }
         }
 
         // --- Auto Job Solver: Intercept desktop responses ---
@@ -864,8 +904,12 @@ var webVersion = null;
             if (dAction === 'open.folder') {
                 window.postMessage({ type: 'COR3_AUTOJOB_DESKTOP_FOLDER', data: payload.data, error: payload.error || null }, '*');
             }
-            if (dAction === 'update.file' || dAction === 'open.file') {
-                window.postMessage({ type: 'COR3_AUTOJOB_DESKTOP_FILE', data: payload.data, error: payload.error || null }, '*');
+            if (dAction === 'update.file' || dAction === 'open.file' || dAction === 'decrypt.file') {
+                var fileError = payload.error || null;
+                if (!fileError && payload.data && payload.data.kind === 'insufficient_power') {
+                    fileError = { message: 'insufficient_power', kind: 'insufficient_power', ability: payload.data.ability, required: payload.data.required, available: payload.data.available };
+                }
+                window.postMessage({ type: 'COR3_AUTOJOB_DESKTOP_FILE', data: payload.data, error: fileError }, '*');
             }
             if (dAction === 'get.file.analysis') {
                 window.postMessage({ type: 'COR3_AUTOJOB_FILE_ANALYSIS', data: payload.data, error: payload.error || null }, '*');
@@ -915,6 +959,14 @@ var webVersion = null;
             if (payload.event.action === 'job.can-complete') {
                 window.postMessage({ type: 'COR3_AUTOJOB_JOB_CAN_COMPLETE', data: payload.data, error: payload.error || null }, '*');
             }
+            // Valuable seller: get sellable items
+            if (payload.event.action === 'get.sellable-items') {
+                window.postMessage({ type: 'COR3_VALUABLE_SELLABLE_ITEMS', data: payload.data, error: payload.error || null }, '*');
+            }
+            // Valuable seller: sell items
+            if (payload.event.action === 'sell.items') {
+                window.postMessage({ type: 'COR3_VALUABLE_SELL_RESULT', data: payload.data, error: payload.error || null }, '*');
+            }
         }
 
         // Handle expedition update events for listening-based updates
@@ -931,6 +983,13 @@ var webVersion = null;
                     type: 'COR3_WS_ARCHIVED_EXPEDITIONS',
                     data: payload.data
                 }, '*');
+                return;
+            }
+
+            // Skip merc-related actions — they have their own handlers and
+            // must NOT be relayed as expedition data (would trigger auto-send prematurely)
+            var expAction = payload.event && payload.event.action;
+            if (expAction === 'get.mercenaries' || expAction === 'get.config' || expAction === 'configure') {
                 return;
             }
 
@@ -1038,12 +1097,114 @@ var webVersion = null;
         return true;
     };
 
-    // Request mercenary data (requires marketId)
-    window.__cor3RequestMercenaries = function (marketId) {
+    // CORE merc abort handle for cancelling in-flight requests
+    var coreMercAbort = null;
+
+    // Request mercenary data: get.mercenaries → (get.config if needed) → configure each merc sequentially
+    window.__cor3RequestMercenaries = function (marketId, callback) {
+        if (window.__cor3CoreMercFetchInProgress) {
+            console.log('[COR3 Helper] CORE merc fetch already in progress — aborting previous');
+            if (coreMercAbort) coreMercAbort();
+        }
         var mid = marketId || window.__cor3LastMarketId || '019d3ea4-85bd-7389-904d-8f7c85841134';
-        console.log('[COR3 Helper] Requesting mercenary data for market:', mid);
-        var msg = '42["event",{"event":{"name":"expeditions","action":"get.mercenaries"},"data":{"marketId":"' + mid + '"}}]';
-        wsSend(msg);
+        console.log('[COR3 Helper] Starting CORE mercenary data fetch for market:', mid);
+        window.__cor3CoreMercFetchInProgress = true;
+
+        var aborted = false;
+        coreMercAbort = function () {
+            aborted = true;
+            window.__cor3CoreMercFetchInProgress = false;
+            window.removeEventListener('message', onCoreData);
+            clearTimeout(coreTimer);
+            coreMercAbort = null;
+        };
+
+        var getMercs = '42["event",{"event":{"name":"expeditions","action":"get.mercenaries"},"data":{"marketId":"' + mid + '"}}]';
+        wsSend(getMercs);
+        setTimeout(function () {
+            if (aborted) return;
+            var getConfig = '42["event",{"event":{"name":"expeditions","action":"get.config"},"data":{"marketId":"' + mid + '"}}]';
+            wsSend(getConfig);
+        }, humanDelay());
+
+        var coreMercData = null;
+        var coreConfigData = null;
+        var coreDone = false;
+        function onCoreData(evt) {
+            if (aborted || coreDone) return;
+            if (!evt.data) return;
+            if (evt.data.type === 'COR3_WS_MERCENARIES') {
+                coreMercData = evt.data.data;
+                checkAndConfigureCore();
+            }
+            if (evt.data.type === 'COR3_WS_EXPEDITION_CONFIG') {
+                var loc = evt.data.data && evt.data.data.locations && evt.data.data.locations[0];
+                var zone0 = loc && loc.zones && loc.zones[0] ? loc.zones[0] : null;
+                var goal0 = zone0 && zone0.goals && zone0.goals[0] ? zone0.goals[0] : null;
+                coreConfigData = {
+                    locationConfigId: loc ? loc.id : null,
+                    zoneConfigId: zone0 ? zone0.id : null,
+                    goalId: goal0 ? goal0.id : null
+                };
+                window.__cor3ExpConfigIds = coreConfigData;
+                checkAndConfigureCore();
+            }
+        }
+        function checkAndConfigureCore() {
+            if (!coreMercData || !coreConfigData) return;
+            coreDone = true;
+            window.removeEventListener('message', onCoreData);
+            clearTimeout(coreTimer);
+            var configIds = coreConfigData;
+            var allMercIds = [];
+            if (coreMercData.mercenaries) {
+                allMercIds = coreMercData.mercenaries.map(function (m) { return m.id; });
+            }
+            if (coreMercData.eliteSlots) {
+                coreMercData.eliteSlots.forEach(function (es) {
+                    if (es.mercenary && allMercIds.indexOf(es.mercenary.id) === -1) {
+                        allMercIds.push(es.mercenary.id);
+                    }
+                });
+            }
+            console.log('[COR3 Helper] Configuring ' + allMercIds.length + ' CORE mercs');
+            (function configureNext(i) {
+                if (aborted || i >= allMercIds.length) {
+                    window.__cor3CoreMercFetchInProgress = false;
+                    coreMercAbort = null;
+                    if (!aborted) {
+                        console.log('[COR3 Helper] CORE merc configure complete');
+                        if (callback) callback();
+                    }
+                    return;
+                }
+                window.__cor3RequestMercConfigure(allMercIds[i], mid, configIds.locationConfigId, configIds.zoneConfigId, configIds.goalId);
+                function onConfigResponse(evt3) {
+                    if (aborted) { window.removeEventListener('message', onConfigResponse); return; }
+                    if (evt3.data && evt3.data.type === 'COR3_WS_MERC_CONFIGURE') {
+                        window.removeEventListener('message', onConfigResponse);
+                        clearTimeout(configTimeout);
+                        setTimeout(function () { configureNext(i + 1); }, 200);
+                    }
+                }
+                window.addEventListener('message', onConfigResponse);
+                var configTimeout = setTimeout(function () {
+                    window.removeEventListener('message', onConfigResponse);
+                    configureNext(i + 1);
+                }, 5000);
+            })(0);
+        }
+        window.addEventListener('message', onCoreData);
+        var coreTimer = setTimeout(function () {
+            if (!coreDone && !aborted) {
+                coreDone = true;
+                window.removeEventListener('message', onCoreData);
+                window.__cor3CoreMercFetchInProgress = false;
+                coreMercAbort = null;
+                console.log('[COR3 Helper] CORE merc data fetch timeout');
+                if (callback) callback();
+            }
+        }, 30000);
         return true;
     };
 
@@ -1077,17 +1238,220 @@ var webVersion = null;
         return true;
     };
 
+    // USOL merc abort handle for cancelling in-flight requests
+    var usolMercAbort = null;
+
+    // Request USOL mercenary data: set endpoint → get.mercenaries → (get.config if needed) → configure each merc
+    window.__cor3RequestUsolMercenaries = function (callback) {
+        var cachedUnreachable = window.__cor3IsMarketUnreachable('usol');
+        if (cachedUnreachable) {
+            console.log('[COR3 Helper] USOL market known unreachable (' + cachedUnreachable.blockerName + ' maintenance) — skipping merc fetch');
+            window.postMessage({
+                type: 'COR3_WS_USOL_MARKET_UNREACHABLE',
+                error: 'no-path-to-server',
+                blockerServerName: cachedUnreachable.blockerName,
+                maintenanceEndsAt: cachedUnreachable.maintenanceEndsAt,
+                cached: true
+            }, '*');
+            if (callback) callback();
+            return true;
+        }
+        if (window.__cor3UsolMercFetchInProgress) {
+            console.log('[COR3 Helper] USOL merc fetch already in progress — aborting previous');
+            if (usolMercAbort) usolMercAbort();
+        }
+        console.log('[COR3 Helper] Starting USOL mercenary data fetch');
+        window.__cor3UsolMercFetchInProgress = true;
+
+        var aborted = false;
+        usolMercAbort = function () {
+            aborted = true;
+            window.__cor3UsolMercFetchInProgress = false;
+            usolMercAbort = null;
+        };
+
+        var setEndpoint = '42["event",{"event":{"name":"network-map","action":"set.endpoint"},"data":{"serverId":"' + USOL_SERVER_ID + '"}}]';
+        wsSend(setEndpoint);
+
+        var handled = false;
+        function onEndpointResult(evt) {
+            if (handled || aborted) return;
+            if (evt.data && evt.data.type === 'COR3_WS_ENDPOINT_RESULT') {
+                handled = true;
+                window.removeEventListener('message', onEndpointResult);
+                clearTimeout(epTimer);
+                if (evt.data.success === false) {
+                    window.__cor3UsolMercFetchInProgress = false;
+                    usolMercAbort = null;
+                    console.log('[COR3 Helper] USOL merc endpoint unreachable — skipping');
+                    if (callback) callback();
+                    return;
+                }
+                setTimeout(function () {
+                    if (aborted) return;
+                    console.log('[COR3 Helper] Requesting USOL mercenaries');
+                    var getMercs = '42["event",{"event":{"name":"expeditions","action":"get.mercenaries"},"data":{"marketId":"' + USOL_MARKET_ID + '"}}]';
+                    wsSend(getMercs);
+                    setTimeout(function () {
+                        if (aborted) return;
+                        var getConfig = '42["event",{"event":{"name":"expeditions","action":"get.config"},"data":{"marketId":"' + USOL_MARKET_ID + '"}}]';
+                        wsSend(getConfig);
+                    }, humanDelay());
+                }, humanDelay());
+
+                var usolMercData = null;
+                var usolConfigData = null;
+                var usolDone = false;
+                function onUsolData(evt2) {
+                    if (usolDone || aborted) return;
+                    if (!evt2.data) return;
+                    if (evt2.data.type === 'COR3_WS_USOL_MERCENARIES') {
+                        usolMercData = evt2.data.data;
+                        checkAndConfigure();
+                    }
+                    if (evt2.data.type === 'COR3_WS_USOL_EXPEDITION_CONFIG') {
+                        var loc = evt2.data.data && evt2.data.data.locations && evt2.data.data.locations[0];
+                        var zone0 = loc && loc.zones && loc.zones[0] ? loc.zones[0] : null;
+                        var goal0 = zone0 && zone0.goals && zone0.goals[0] ? zone0.goals[0] : null;
+                        usolConfigData = {
+                            locationConfigId: loc ? loc.id : null,
+                            zoneConfigId: zone0 ? zone0.id : null,
+                            goalId: goal0 ? goal0.id : null
+                        };
+                        window.__cor3UsolExpConfigIds = usolConfigData;
+                        checkAndConfigure();
+                    }
+                }
+                function checkAndConfigure() {
+                    if (!usolMercData || !usolConfigData) return;
+                    usolDone = true;
+                    window.removeEventListener('message', onUsolData);
+                    clearTimeout(usolTimer);
+                    var configIds = usolConfigData;
+                    var allMercIds = [];
+                    if (usolMercData.mercenaries) {
+                        allMercIds = usolMercData.mercenaries.map(function (m) { return m.id; });
+                    }
+                    if (usolMercData.eliteSlots) {
+                        usolMercData.eliteSlots.forEach(function (es) {
+                            if (es.mercenary && allMercIds.indexOf(es.mercenary.id) === -1) {
+                                allMercIds.push(es.mercenary.id);
+                            }
+                        });
+                    }
+                    console.log('[COR3 Helper] Configuring ' + allMercIds.length + ' USOL mercs');
+                    (function configureNext(i) {
+                        if (aborted || i >= allMercIds.length) {
+                            window.__cor3UsolMercFetchInProgress = false;
+                            usolMercAbort = null;
+                            if (!aborted) {
+                                console.log('[COR3 Helper] USOL merc configure complete');
+                                if (callback) callback();
+                            }
+                            return;
+                        }
+                        window.__cor3RequestMercConfigure(allMercIds[i], USOL_MARKET_ID, configIds.locationConfigId, configIds.zoneConfigId, configIds.goalId);
+                        function onConfigResponse(evt3) {
+                            if (aborted) { window.removeEventListener('message', onConfigResponse); return; }
+                            if (evt3.data && evt3.data.type === 'COR3_WS_MERC_CONFIGURE') {
+                                window.removeEventListener('message', onConfigResponse);
+                                clearTimeout(configTimeout);
+                                setTimeout(function () { configureNext(i + 1); }, 200);
+                            }
+                        }
+                        window.addEventListener('message', onConfigResponse);
+                        var configTimeout = setTimeout(function () {
+                            window.removeEventListener('message', onConfigResponse);
+                            configureNext(i + 1);
+                        }, 5000);
+                    })(0);
+                }
+                window.addEventListener('message', onUsolData);
+                var usolTimer = setTimeout(function () {
+                    if (!usolDone && !aborted) {
+                        usolDone = true;
+                        window.removeEventListener('message', onUsolData);
+                        window.__cor3UsolMercFetchInProgress = false;
+                        usolMercAbort = null;
+                        console.log('[COR3 Helper] USOL merc data fetch timeout');
+                        if (callback) callback();
+                    }
+                }, 30000);
+            }
+            if (evt.data && evt.data.type === 'COR3_WS_USOL_MARKET_UNREACHABLE') {
+                handled = true;
+                window.removeEventListener('message', onEndpointResult);
+                clearTimeout(epTimer);
+                window.__cor3UsolMercFetchInProgress = false;
+                usolMercAbort = null;
+                console.log('[COR3 Helper] USOL merc endpoint unreachable');
+                if (callback) callback();
+            }
+        }
+        window.addEventListener('message', onEndpointResult);
+        var epTimer = setTimeout(function () {
+            if (!handled && !aborted) {
+                handled = true;
+                window.removeEventListener('message', onEndpointResult);
+                window.__cor3UsolMercFetchInProgress = false;
+                usolMercAbort = null;
+                console.log('[COR3 Helper] USOL merc endpoint timeout');
+                if (callback) callback();
+            }
+        }, 10000);
+        return true;
+    };
+
     // Configure and launch expedition with mercenary
+    // For non-HOME markets, set.endpoint to the market server first
     window.__cor3LaunchExpedition = function (configData) {
         console.log('[COR3 Helper] Launching expedition with config:', configData);
-        var configureMsg = '42["event",{"event":{"name":"expeditions","action":"configure"},"data":' + JSON.stringify(configData) + '}]';
-        wsSend(configureMsg);
-        // After configure, launch after a delay (launch needs same data as configure)
-        setTimeout(function () {
-            var launchMsg = '42["event",{"event":{"name":"expeditions","action":"launch"},"data":' + JSON.stringify(configData) + '}]';
-            wsSend(launchMsg);
-            console.log('[COR3 Helper] Expedition launch sent');
-        }, humanDelay() + 500);
+        var marketId = configData.marketId;
+        var needsEndpoint = marketId && marketId !== '019d3ea4-85bd-7389-904d-8f7c85841134'; // not HOME
+        var serverId = null;
+        if (marketId === USOL_MARKET_ID) serverId = USOL_SERVER_ID;
+
+        function doConfigureAndLaunch() {
+            var configureMsg = '42["event",{"event":{"name":"expeditions","action":"configure"},"data":' + JSON.stringify(configData) + '}]';
+            wsSend(configureMsg);
+            // After configure, launch after a delay (launch needs same data as configure)
+            setTimeout(function () {
+                var launchMsg = '42["event",{"event":{"name":"expeditions","action":"launch"},"data":' + JSON.stringify(configData) + '}]';
+                wsSend(launchMsg);
+                console.log('[COR3 Helper] Expedition launch sent');
+            }, humanDelay() + 500);
+        }
+
+        if (needsEndpoint && serverId) {
+            console.log('[COR3 Helper] Setting endpoint to market server before launch:', serverId);
+            var setEp = '42["event",{"event":{"name":"network-map","action":"set.endpoint"},"data":{"serverId":"' + serverId + '"}}]';
+            wsSend(setEp);
+            var epHandled = false;
+            function onEpResult(evt) {
+                if (epHandled) return;
+                if (evt.data && evt.data.type === 'COR3_WS_ENDPOINT_RESULT') {
+                    epHandled = true;
+                    window.removeEventListener('message', onEpResult);
+                    clearTimeout(epTimeout);
+                    if (evt.data.success === false) {
+                        console.log('[COR3 Helper] Endpoint unreachable for launch, aborting');
+                        return;
+                    }
+                    setTimeout(doConfigureAndLaunch, humanDelay());
+                }
+            }
+            window.addEventListener('message', onEpResult);
+            var epTimeout = setTimeout(function () {
+                if (!epHandled) {
+                    epHandled = true;
+                    window.removeEventListener('message', onEpResult);
+                    console.log('[COR3 Helper] Endpoint timeout for launch, proceeding anyway');
+                    doConfigureAndLaunch();
+                }
+            }, 8000);
+        } else {
+            doConfigureAndLaunch();
+        }
         return true;
     };
 
@@ -1113,13 +1477,40 @@ var webVersion = null;
     }
 
     // Send a WS message on the active socket (most recently received messages)
-    // Throttled: minimum 400ms between sends to avoid "Too many requests" errors.
-    // Uses timestamp-based approach: if last send was <400ms ago, delay this send.
-    var WS_THROTTLE_MS = 150;
+    // Throttled: minimum 250ms between sends to avoid "Too many requests" errors.
+    // Uses timestamp-based approach: if last send was <250ms ago, delay this send.
+    var WS_THROTTLE_MS = 250;
     var wsSendLastTime = 0;
     var wsSendQueue = [];
     var wsSendFlushTimer = null;
     var WS_QUEUE_MAX = 50;
+
+    var _ceChannel = typeof MessageChannel !== 'undefined' ? new MessageChannel() : null;
+    var _ceCbs = [];
+    if (_ceChannel) {
+        _ceChannel.port1.onmessage = function () {
+            var cbs = _ceCbs.slice();
+            _ceCbs.length = 0;
+            for (var i = 0; i < cbs.length; i++) cbs[i]();
+        };
+    }
+    function ceNextTick(fn) {
+        if (_ceChannel) { _ceCbs.push(fn); _ceChannel.port2.postMessage(0); }
+        else { setTimeout(fn, 0); }
+    }
+    function scheduleFlush(delayMs) {
+        if (wsSendFlushTimer) return;
+        if (delayMs <= 0) { ceNextTick(wsSendFlush); wsSendFlushTimer = true; return; }
+        var target = Date.now() + delayMs;
+        function tick() {
+            if (Date.now() >= target) { wsSendFlush(); return; }
+            var rem = target - Date.now();
+            if (rem > 200) { setTimeout(function () { ceNextTick(tick); }, Math.min(rem - 50, 500)); }
+            else { ceNextTick(tick); }
+        }
+        wsSendFlushTimer = true;
+        ceNextTick(tick);
+    }
 
     function wsSendRaw(msg) {
         var toSend = msg;
@@ -1154,7 +1545,14 @@ var webVersion = null;
             return true;
         }
 
-        console.warn('[COR3 Helper] No active WebSocket found — message not sent');
+        console.log('[COR3 Helper] No active WebSocket found — re-queuing message for retry');
+        // Re-queue message and retry after a short delay
+        if (wsSendQueue.length < WS_QUEUE_MAX) {
+            wsSendQueue.unshift(msg);
+            scheduleFlush(2000);
+        } else {
+            console.log('[COR3 Helper] No active WebSocket and queue full — message dropped');
+        }
         return false;
     }
 
@@ -1167,10 +1565,10 @@ var webVersion = null;
             var next = wsSendQueue.shift();
             wsSendRaw(next);
             if (wsSendQueue.length > 0) {
-                wsSendFlushTimer = setTimeout(wsSendFlush, WS_THROTTLE_MS);
+                scheduleFlush(WS_THROTTLE_MS);
             }
         } else {
-            wsSendFlushTimer = setTimeout(wsSendFlush, WS_THROTTLE_MS - elapsed);
+            scheduleFlush(WS_THROTTLE_MS - elapsed);
         }
     }
 
@@ -1187,11 +1585,10 @@ var webVersion = null;
             if (wsSendQueue.length > WS_QUEUE_MAX) {
                 var dropped = wsSendQueue.length - WS_QUEUE_MAX;
                 wsSendQueue = wsSendQueue.slice(dropped);
-                console.warn('[COR3 Helper] WS send queue overflow — dropped ' + dropped + ' oldest message(s)');
+                console.log('[COR3 Helper] WS send queue overflow — dropped ' + dropped + ' oldest message(s)');
             }
             if (!wsSendFlushTimer) {
-                var wait = Math.max(0, WS_THROTTLE_MS - elapsed);
-                wsSendFlushTimer = setTimeout(wsSendFlush, wait);
+                scheduleFlush(Math.max(0, WS_THROTTLE_MS - elapsed));
             }
         }
         return true;
@@ -1201,7 +1598,19 @@ var webVersion = null;
     const joinedRooms = new Set();
 
     function delay(ms) {
-        return new Promise(function (r) { setTimeout(r, ms); });
+        return new Promise(function (resolve) {
+            var target = Date.now() + ms;
+            function check() {
+                if (Date.now() >= target) { resolve(); return; }
+                var remaining = target - Date.now();
+                if (remaining > 200) {
+                    setTimeout(function () { ceNextTick(check); }, Math.min(remaining - 50, 500));
+                } else {
+                    ceNextTick(check);
+                }
+            }
+            ceNextTick(check);
+        });
     }
 
     // Send a leave-room message. Only sends if tracked as joined.
@@ -1274,15 +1683,16 @@ var webVersion = null;
     };
 
     // Sell an item from stash
-    window.__cor3SellItem = function (itemId, quantity) {
+    window.__cor3SellItem = function (itemId, quantity, skipStashRefresh) {
         quantity = quantity || 1;
         console.log('[COR3 Helper] Selling item:', itemId, 'qty:', quantity);
         var msg = '42["event",{"event":{"name":"stash","action":"sell.item"},"data":{"itemId":"' + itemId + '","quantity":' + quantity + '}}]';
         wsSend(msg);
-        // Refresh stash after a short delay to get updated inventory
-        setTimeout(function () {
-            window.__cor3RequestStash();
-        }, 1500);
+        if (!skipStashRefresh) {
+            setTimeout(function () {
+                window.__cor3RequestStash();
+            }, 1500);
+        }
         return true;
     };
 
@@ -1381,8 +1791,8 @@ var webVersion = null;
         var msg = '42["event",{"event":{"name":"desktop","action":"get.options"},"data":{}}]';
         wsSend(msg);
     };
-    window.__cor3AutoJobOpenFile = function (fileId) {
-        var msg = '42["event",{"event":{"name":"desktop","action":"open.file"},"data":{"fileId":"' + fileId + '","source":"desktop"}}]';
+    window.__cor3AutoJobDecryptFile = function (fileId) {
+        var msg = '42["event",{"event":{"name":"desktop","action":"decrypt.file"},"data":{"fileId":"' + fileId + '"}}]';
         wsSend(msg);
     };
     window.__cor3AutoJobGetNetworkMap = function () {
@@ -1403,7 +1813,7 @@ var webVersion = null;
     };
     // --- Auto Job Solver: file analysis + loadout commands ---
     window.__cor3AutoJobGetFileAnalysis = function (fileId) {
-        var msg = '42["event",{"event":{"name":"desktop","action":"get.file.analysis"},"data":{"fileId":"' + fileId + '"}}]';
+        var msg = '42["event",{"event":{"name":"desktop","action":"get.file.analysis"},"data":{"fileId":"' + fileId + '","source":"desktop"}}]';
         wsSend(msg);
     };
     window.__cor3AutoJobRequestLoadout = function () {
@@ -1422,6 +1832,24 @@ var webVersion = null;
         var msg = '42["event",{"event":{"name":"loadout","action":"unequip.software"},"data":{"moduleConfigId":"' + moduleConfigId + '"}}]';
         wsSend(msg);
     };
+    // --- Auto Valuable Seller WS send functions ---
+    window.__cor3ValuableFileSearch = function (serverId) {
+        var msg = '42["event",{"event":{"name":"sai","action":"file.search-valuable"},"data":{"serverId":"' + serverId + '"}}]';
+        wsSend(msg);
+    };
+    window.__cor3ValuableLogSearch = function (serverId) {
+        var msg = '42["event",{"event":{"name":"sai","action":"log.search-valuable"},"data":{"serverId":"' + serverId + '"}}]';
+        wsSend(msg);
+    };
+    window.__cor3ValuableGetSellableItems = function (marketId) {
+        var msg = '42["event",{"event":{"name":"market","action":"get.sellable-items"},"data":{"marketId":"' + marketId + '"}}]';
+        wsSend(msg);
+    };
+    window.__cor3ValuableSellItems = function (marketId, items) {
+        var msg = '42["event",{"event":{"name":"market","action":"sell.items"},"data":{"marketId":"' + marketId + '","items":' + JSON.stringify(items) + '}}]';
+        wsSend(msg);
+    };
+
     window.__cor3RequestUpdater = function () {
         console.log('[COR3 Helper] Requesting updater data');
         var msg = '42["event",{"event":{"name":"updater","action":"get.patches"},"data":{}}]';
@@ -1619,6 +2047,14 @@ var webVersion = null;
         var msgType = marketType === 'usol' ? 'COR3_WS_USOL_MARKET_UNREACHABLE'
             : marketType === 'soyuz' ? 'COR3_WS_SOYUZ_MARKET_UNREACHABLE' : 'COR3_WS_DARK_MARKET_UNREACHABLE';
         __cor3FetchMaintenanceBlocker(pathServers).then(function (blocker) {
+            if (blocker) {
+                window.__cor3UnreachableMarkets[marketType] = {
+                    blockerName: blocker.blockerName,
+                    maintenanceEndsAt: blocker.maintenanceEndsAt,
+                    detectedAt: Date.now()
+                };
+                console.log('[COR3 Helper] Cached unreachable ' + marketType + ': ' + blocker.blockerName + ' maintenance until ' + (blocker.maintenanceEndsAt || 'unknown'));
+            }
             window.postMessage({
                 type: msgType,
                 error: 'no-path-to-server',
@@ -1724,6 +2160,19 @@ var webVersion = null;
     }
 
     window.__cor3RequestDarkMarket = function (callback) {
+        var cachedUnreachable = window.__cor3IsMarketUnreachable('dark');
+        if (cachedUnreachable) {
+            console.log('[COR3 Helper] D4RK market known unreachable (' + cachedUnreachable.blockerName + ' maintenance) — skipping set.endpoint');
+            window.postMessage({
+                type: 'COR3_WS_DARK_MARKET_UNREACHABLE',
+                error: 'no-path-to-server',
+                blockerServerName: cachedUnreachable.blockerName,
+                maintenanceEndsAt: cachedUnreachable.maintenanceEndsAt,
+                cached: true
+            }, '*');
+            if (callback) callback();
+            return true;
+        }
         var myAbortId = __cor3MarketRefreshAbortId;
         console.log('[COR3 Helper] Setting D4RK endpoint');
         var setEndpoint = '42["event",{"event":{"name":"network-map","action":"set.endpoint"},"data":{"serverId":"' + DARK_SERVER_ID + '"}}]';
@@ -1921,6 +2370,19 @@ var webVersion = null;
     }
 
     window.__cor3RequestSoyuzMarket = function (callback) {
+        var cachedUnreachable = window.__cor3IsMarketUnreachable('soyuz');
+        if (cachedUnreachable) {
+            console.log('[COR3 Helper] SOYUZ market known unreachable (' + cachedUnreachable.blockerName + ' maintenance) — skipping set.endpoint');
+            window.postMessage({
+                type: 'COR3_WS_SOYUZ_MARKET_UNREACHABLE',
+                error: 'no-path-to-server',
+                blockerServerName: cachedUnreachable.blockerName,
+                maintenanceEndsAt: cachedUnreachable.maintenanceEndsAt,
+                cached: true
+            }, '*');
+            if (callback) callback();
+            return true;
+        }
         var myAbortId = __cor3MarketRefreshAbortId;
         console.log('[COR3 Helper] Setting SOYUZ endpoint');
         var setEndpoint = '42["event",{"event":{"name":"network-map","action":"set.endpoint"},"data":{"serverId":"' + SOYUZ_SERVER_ID + '"}}]';
@@ -2112,6 +2574,19 @@ var webVersion = null;
     }
 
     window.__cor3RequestUsolMarket = function (callback) {
+        var cachedUnreachable = window.__cor3IsMarketUnreachable('usol');
+        if (cachedUnreachable) {
+            console.log('[COR3 Helper] USOL market known unreachable (' + cachedUnreachable.blockerName + ' maintenance) — skipping set.endpoint');
+            window.postMessage({
+                type: 'COR3_WS_USOL_MARKET_UNREACHABLE',
+                error: 'no-path-to-server',
+                blockerServerName: cachedUnreachable.blockerName,
+                maintenanceEndsAt: cachedUnreachable.maintenanceEndsAt,
+                cached: true
+            }, '*');
+            if (callback) callback();
+            return true;
+        }
         var myAbortId = __cor3MarketRefreshAbortId;
         console.log('[COR3 Helper] Setting USOL endpoint');
         var setEndpoint = '42["event",{"event":{"name":"network-map","action":"set.endpoint"},"data":{"serverId":"' + USOL_SERVER_ID + '"}}]';
@@ -2289,6 +2764,19 @@ var webVersion = null;
     };
 
     window.__cor3RequestDarkMarketJobsOnly = function (callback) {
+        var cachedUnreachable = window.__cor3IsMarketUnreachable('dark');
+        if (cachedUnreachable) {
+            console.log('[COR3 Helper] D4RK market known unreachable (' + cachedUnreachable.blockerName + ' maintenance) — skipping jobs-only');
+            window.postMessage({
+                type: 'COR3_WS_DARK_MARKET_UNREACHABLE',
+                error: 'no-path-to-server',
+                blockerServerName: cachedUnreachable.blockerName,
+                maintenanceEndsAt: cachedUnreachable.maintenanceEndsAt,
+                cached: true
+            }, '*');
+            if (callback) callback();
+            return true;
+        }
         var myAbortId = __cor3MarketRefreshAbortId;
         console.log('[COR3 Helper] Setting D4RK endpoint (jobs-only)');
         var setEndpoint = '42["event",{"event":{"name":"network-map","action":"set.endpoint"},"data":{"serverId":"' + DARK_SERVER_ID + '"}}]';
@@ -2362,6 +2850,19 @@ var webVersion = null;
     };
 
     window.__cor3RequestSoyuzMarketJobsOnly = function (callback) {
+        var cachedUnreachable = window.__cor3IsMarketUnreachable('soyuz');
+        if (cachedUnreachable) {
+            console.log('[COR3 Helper] SOYUZ market known unreachable (' + cachedUnreachable.blockerName + ' maintenance) — skipping jobs-only');
+            window.postMessage({
+                type: 'COR3_WS_SOYUZ_MARKET_UNREACHABLE',
+                error: 'no-path-to-server',
+                blockerServerName: cachedUnreachable.blockerName,
+                maintenanceEndsAt: cachedUnreachable.maintenanceEndsAt,
+                cached: true
+            }, '*');
+            if (callback) callback();
+            return true;
+        }
         var myAbortId = __cor3MarketRefreshAbortId;
         console.log('[COR3 Helper] Setting SOYUZ endpoint (jobs-only)');
         var setEndpoint = '42["event",{"event":{"name":"network-map","action":"set.endpoint"},"data":{"serverId":"' + SOYUZ_SERVER_ID + '"}}]';
@@ -2440,6 +2941,19 @@ var webVersion = null;
     };
 
     window.__cor3RequestUsolMarketJobsOnly = function (callback) {
+        var cachedUnreachable = window.__cor3IsMarketUnreachable('usol');
+        if (cachedUnreachable) {
+            console.log('[COR3 Helper] USOL market known unreachable (' + cachedUnreachable.blockerName + ' maintenance) — skipping jobs-only');
+            window.postMessage({
+                type: 'COR3_WS_USOL_MARKET_UNREACHABLE',
+                error: 'no-path-to-server',
+                blockerServerName: cachedUnreachable.blockerName,
+                maintenanceEndsAt: cachedUnreachable.maintenanceEndsAt,
+                cached: true
+            }, '*');
+            if (callback) callback();
+            return true;
+        }
         var myAbortId = __cor3MarketRefreshAbortId;
         console.log('[COR3 Helper] Setting USOL endpoint (jobs-only)');
         var setEndpoint = '42["event",{"event":{"name":"network-map","action":"set.endpoint"},"data":{"serverId":"' + USOL_SERVER_ID + '"}}]';
@@ -2523,55 +3037,76 @@ var webVersion = null;
         initialFetchDone = false;
         console.log('[COR3 Helper] Reset initial fetch flag for reconnect');
     };
+    // Flag: initial merc fetch complete (markets + mercs all done)
+    window.__cor3InitialMercsFetchDone = false;
+
     window.__cor3InitialFetch = function () {
         if (initialFetchDone) return;
         initialFetchDone = true;
+        window.__cor3InitialMercsFetchDone = false;
+        window.__cor3InitialFetchInProgress = true;
         console.log('[COR3 Helper] Running initial data fetch (page load)');
 
         // Trigger daily ops fetch via content script
         window.postMessage({ type: 'COR3_FETCH_DAILY_OPS' }, '*');
 
-        // Fetch all markets SEQUENTIALLY to avoid get.lots/get.jobs confusion
-        // HOME → D4RK → SOYUZ → USOL, then other data
+        // Follow Refresh All order:
+        // 1. Markets sequentially: HOME → D4RK → SOYUZ → USOL
+        // 2. Expedition data (server auto-provides via room join — no explicit request needed)
+        // 3. Stash (inventory)
+        // 4. CORE mercs → USOL mercs
+        // 5. Archived expeditions
+        // 6. Loadout
+        // 7. Updater
         window.__cor3RequestMarket(function () {
-            console.log('[COR3 Helper] HOME done, starting D4RK');
+            console.log('[COR3 Helper] Initial: HOME done, starting D4RK');
             window.__cor3RequestDarkMarket(function () {
-                console.log('[COR3 Helper] D4RK done, starting SOYUZ');
+                console.log('[COR3 Helper] Initial: D4RK done, starting SOYUZ');
                 window.__cor3RequestSoyuzMarket(function () {
-                    console.log('[COR3 Helper] SOYUZ done, starting USOL');
+                    console.log('[COR3 Helper] Initial: SOYUZ done, starting USOL');
                     window.__cor3RequestUsolMarket(function () {
-                        console.log('[COR3 Helper] All markets fetched');
+                        console.log('[COR3 Helper] Initial: All markets fetched');
+                        // Expedition data already received from server room join — no request needed
+                        // Notify content script that expedition data can be rendered
+                        window.postMessage({ type: 'COR3_WS_EXPEDITIONS_READY' }, '*');
+                        // Fetch stash (inventory)
+                        setTimeout(function () {
+                            window.__cor3RequestStash();
+                        }, humanDelay());
+                        // CORE mercs after stash
+                        setTimeout(function () {
+                            console.log('[COR3 Helper] Initial: Starting CORE mercs');
+                            window.__cor3RequestMercenaries(null, function () {
+                                window.postMessage({ type: 'COR3_CORE_MERCS_DONE' }, '*');
+                                console.log('[COR3 Helper] Initial: CORE mercs done, starting USOL mercs');
+                                // USOL mercs after CORE done
+                                setTimeout(function () {
+                                    window.__cor3RequestUsolMercenaries(function () {
+                                        window.postMessage({ type: 'COR3_USOL_MERCS_DONE' }, '*');
+                                        window.__cor3InitialMercsFetchDone = true;
+                                        console.log('[COR3 Helper] Initial: All mercs done');
+                                        // Archived expeditions after mercs
+                                        setTimeout(function () {
+                                            window.__cor3RequestArchivedExpeditions();
+                                        }, humanDelay());
+                                        // Loadout after archived
+                                        setTimeout(function () {
+                                            window.__cor3RequestLoadout();
+                                        }, 2000);
+                                        // Updater
+                                        setTimeout(function () {
+                                            window.__cor3RequestUpdater();
+                                            window.__cor3InitialFetchInProgress = false;
+                                            console.log('[COR3 Helper] Initial data fetch complete');
+                                        }, 3500);
+                                    });
+                                }, humanDelay());
+                            });
+                        }, 2500);
                     });
                 });
             });
         });
-
-        // Fetch expeditions after a short delay (independent of markets)
-        setTimeout(function () {
-            window.__cor3RequestExpeditions();
-        }, 4000);
-
-        // Fetch stash (inventory) at end of queue with human delay
-        setTimeout(function () {
-            window.__cor3RequestStash();
-        }, 6000);
-
-        // Fetch archived expeditions after stash
-        setTimeout(function () {
-            window.__cor3RequestArchivedExpeditions();
-        }, 8000);
-
-        // Fetch loadout data
-        setTimeout(function () {
-            window.__cor3RequestLoadout();
-        }, 9000);
-
-        // Fetch updater data for patch version
-        setTimeout(function () {
-            window.__cor3RequestUpdater();
-        }, 11000);
-
-        // Mercenaries are fetched via Refresh All in popup or on explicit request
     };
 
     window.__cor3KeepAlive = function () {
@@ -2595,7 +3130,7 @@ var webVersion = null;
         if (activeSocket) {
             var lastActivity = socketLastActivity.get(activeSocket) || 0;
             if (now - lastActivity > 90000) {
-                console.warn('[COR3 Helper] Active socket stale (no messages for 90s) — may need reconnect');
+                console.log('[COR3 Helper] Active socket stale (no messages for 90s) — may need reconnect');
             }
         }
     }, 60000);
@@ -2655,7 +3190,7 @@ var webVersion = null;
             leaveRoom('stash');
         }
         if (event.data && event.data.type === 'COR3_SELL_ITEM') {
-            window.__cor3SellItem(event.data.itemId, event.data.quantity || 1);
+            window.__cor3SellItem(event.data.itemId, event.data.quantity || 1, event.data.skipStashRefresh);
         }
         // Decision response from popup
         if (event.data && event.data.type === 'COR3_RESPOND_DECISION') {
@@ -2667,7 +3202,14 @@ var webVersion = null;
         }
         // Mercenary requests
         if (event.data && event.data.type === 'COR3_REQUEST_MERCENARIES') {
-            window.__cor3RequestMercenaries();
+            window.__cor3RequestMercenaries(null, function () {
+                window.postMessage({ type: 'COR3_CORE_MERCS_DONE' }, '*');
+            });
+        }
+        if (event.data && event.data.type === 'COR3_REQUEST_USOL_MERCENARIES') {
+            window.__cor3RequestUsolMercenaries(function () {
+                window.postMessage({ type: 'COR3_USOL_MERCS_DONE' }, '*');
+            });
         }
         if (event.data && event.data.type === 'COR3_REQUEST_EXPEDITION_CONFIG') {
             window.__cor3RequestExpeditionConfig();
@@ -2732,7 +3274,7 @@ var webVersion = null;
             else if (cmd === 'get.transit') window.__cor3AutoJobGetTransit(d.serverId);
             else if (cmd === 'transit.add') window.__cor3AutoJobTransitAdd(d.serverId, d.ip, d.description);
             else if (cmd === 'open.folder') window.__cor3AutoJobOpenFolder(d.folderId);
-            else if (cmd === 'open.file') window.__cor3AutoJobOpenFile(d.fileId);
+            else if (cmd === 'decrypt.file') window.__cor3AutoJobDecryptFile(d.fileId);
             else if (cmd === 'get.map') window.__cor3AutoJobGetNetworkMap();
             else if (cmd === 'desktop.get.options') window.__cor3AutoJobGetDesktopOptions();
             else if (cmd === 'file.delete') window.__cor3AutoJobFileDelete(d.serverId, d.fileId);
@@ -2743,6 +3285,11 @@ var webVersion = null;
             else if (cmd === 'loadout.equip.hardware') window.__cor3AutoJobEquipHardware(d.moduleConfigId);
             else if (cmd === 'loadout.equip.software') window.__cor3AutoJobEquipSoftware(d.moduleConfigId);
             else if (cmd === 'loadout.unequip.software') window.__cor3AutoJobUnequipSoftware(d.moduleConfigId);
+            // Auto Valuable Seller commands
+            else if (cmd === 'file.search-valuable') window.__cor3ValuableFileSearch(d.serverId);
+            else if (cmd === 'log.search-valuable') window.__cor3ValuableLogSearch(d.serverId);
+            else if (cmd === 'get.sellable-items') window.__cor3ValuableGetSellableItems(d.marketId);
+            else if (cmd === 'sell.items') window.__cor3ValuableSellItems(d.marketId, d.items);
         }
         // --- DevTools panel: send raw WS message ---
         if (event.data && event.data.type === 'COR3_DEVTOOLS_WS_SEND') {

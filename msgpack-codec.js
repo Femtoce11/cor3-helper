@@ -1,38 +1,26 @@
 // msgpack-codec.js — COR3 Helper msgpack + Socket.IO v5 binary packet codec
-// Uses notepack.io loaded from CDN for encode/decode.
+// Uses notepack.io loaded locally via manifest content_scripts (notepack.min.js).
 // Provides helpers to convert between legacy 42[...] string format and binary packets.
 
 (function (root) {
     'use strict';
 
-    var notepackReady = false;
-    var notepackLib = null;
-    var pendingCallbacks = [];
+    // notepack.min.js is loaded before this script via manifest content_scripts,
+    // so root.notepack (window.notepack) is already available.
+    var notepackLib = root.notepack || null;
+    var notepackReady = !!notepackLib;
 
     function ensureNotepack(cb) {
         if (notepackLib) { cb(notepackLib); return; }
-        pendingCallbacks.push(cb);
-        if (pendingCallbacks.length > 1) return;
-        var script = document.createElement('script');
-        script.src = 'https://cdn.jsdelivr.net/npm/notepack.io@3.0.1/dist/notepack.min.js';
-        script.onload = function () {
-            notepackLib = root.notepack;
-            notepackReady = true;
-            var cbs = pendingCallbacks.slice();
-            pendingCallbacks = [];
-            cbs.forEach(function (fn) { fn(notepackLib); });
-        };
-        script.onerror = function () {
-            console.error('[COR3 Codec] Failed to load notepack.io from CDN');
-        };
-        (document.head || document.documentElement).appendChild(script);
+        // Fallback: check again in case of timing
+        notepackLib = root.notepack || null;
+        notepackReady = !!notepackLib;
+        if (notepackLib) { cb(notepackLib); return; }
+        console.log('[COR3 Codec] notepack.io not available — check that notepack.min.js is loaded before msgpack-codec.js in manifest');
     }
 
-    // Eagerly start loading
-    if (typeof document !== 'undefined') {
-        ensureNotepack(function () {
-            console.log('[COR3 Codec] notepack.io loaded');
-        });
+    if (notepackReady) {
+        console.log('[COR3 Codec] notepack.io loaded');
     }
 
     function decodeRaw(buf) {

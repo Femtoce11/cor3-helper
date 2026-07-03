@@ -89,7 +89,7 @@ function autoSellCheapestItems(items, count, callback) {
     function sellNext() {
         if (idx >= toSell.length) { if (callback) callback(); return; }
         const item = toSell[idx++];
-        window.postMessage({ type: 'COR3_SELL_ITEM', itemId: item.id, quantity: 1 }, '*');
+        window.postMessage({ type: 'COR3_SELL_ITEM', itemId: item.id, quantity: 1, skipStashRefresh: true }, '*');
         setTimeout(sellNext, 1200 + Math.floor(Math.random() * 300));
     }
     sellNext();
@@ -129,6 +129,17 @@ window.addEventListener('message', (event) => {
 
     if (event.data && event.data.type === 'COR3_WS_EXPEDITIONS') {
         chrome.storage.local.set({ expeditionsData: event.data.expeditions, expeditionsDataUpdatedAt: now });
+        // Clear expedition launch error if no active (IN_PROGRESS) expeditions remain
+        var exps = event.data.expeditions || [];
+        var hasActive = exps.some(function (e) { return e.status === 'IN_PROGRESS'; });
+        if (!hasActive) {
+            chrome.storage.local.get('expeditionLaunchError', function (result) {
+                if (result.expeditionLaunchError && !result.expeditionLaunchError.noRetry) {
+                    console.log('[COR3 Helper] No active expeditions — clearing expedition launch error');
+                    chrome.storage.local.remove('expeditionLaunchError');
+                }
+            });
+        }
         // Check for completed expeditions to trigger auto-send flow
         checkAutoSendOnExpeditionData(event.data.expeditions);
     }
@@ -238,9 +249,24 @@ window.addEventListener('message', (event) => {
     if (event.data && event.data.type === 'COR3_WS_MERCENARIES') {
         chrome.storage.local.set({ mercenariesData: event.data.data, mercenariesUpdatedAt: now });
     }
+    if (event.data && event.data.type === 'COR3_CORE_MERCS_DONE') {
+        chrome.storage.local.set({ coreMercsDone: Date.now() });
+    }
+    if (event.data && event.data.type === 'COR3_USOL_MERCS_DONE') {
+        chrome.storage.local.set({ usolMercsDone: Date.now() });
+        initialMercsReady = true;
+    }
+    // Store USOL mercenary data
+    if (event.data && event.data.type === 'COR3_WS_USOL_MERCENARIES') {
+        chrome.storage.local.set({ usolMercenariesData: event.data.data, usolMercenariesUpdatedAt: now });
+    }
     // Store expedition config data
     if (event.data && event.data.type === 'COR3_WS_EXPEDITION_CONFIG') {
         chrome.storage.local.set({ expeditionConfigData: event.data.data, expeditionConfigUpdatedAt: now });
+    }
+    // Store USOL expedition config data
+    if (event.data && event.data.type === 'COR3_WS_USOL_EXPEDITION_CONFIG') {
+        chrome.storage.local.set({ usolExpeditionConfigData: event.data.data, usolExpeditionConfigUpdatedAt: now });
     }
     // Store mercenary configure data (cost/risk per mercenary)
     if (event.data && event.data.type === 'COR3_WS_MERC_CONFIGURE' && event.data.mercenaryId) {
@@ -405,25 +431,62 @@ window.addEventListener('message', (event) => {
         autoSendInProgress = false;
         autoSendExpeditionId = null;
     }
+    // Expedition archived — clear active expedition data since it's now in the archive
+    if (event.data && event.data.type === 'COR3_WS_EXPEDITION_ARCHIVED') {
+        chrome.storage.local.get('expeditionsData', (result) => {
+            var exps = result.expeditionsData;
+            if (Array.isArray(exps) && event.data.data && event.data.data.expeditionId) {
+                var filtered = exps.filter(function (e) { return e.id !== event.data.data.expeditionId; });
+                chrome.storage.local.set({ expeditionsData: filtered, expeditionsDataUpdatedAt: Date.now() });
+            }
+        });
+    }
     // Auto-send: collected all — proceed to get mercenaries and launch
     if (event.data && event.data.type === 'COR3_WS_COLLECTED_ALL') {
         if (autoSendInProgress && autoSendExpeditionId) {
-            console.log('[COR3 Helper] Auto-send: All collected, refreshing mercenaries...');
+            console.log('[COR3 Helper] Auto-send: All collected, refreshing mercenaries (CORE + USOL)...');
             autoSendExpeditionId = null; // done with old expedition
             // Refresh stash in background
             setTimeout(() => {
                 window.postMessage({ type: 'COR3_REQUEST_STASH' }, '*');
             }, 500);
-            // Now get mercenaries and launch selected one
+            // Refresh CORE mercs first, then USOL mercs, then select+launch
+            var mercDelay = 2500 + Math.floor(Math.random() * 1000);
             setTimeout(() => {
                 window.postMessage({ type: 'COR3_REQUEST_MERCENARIES' }, '*');
-            }, 2500 + Math.floor(Math.random() * 1000));
-            // Wait for mercenaries data, then launch
-            autoSendAwaitingMercenaries = true;
+            }, mercDelay);
+            // USOL mercs after CORE mercs complete — listen for COR3_CORE_MERCS_DONE
+            autoSendAwaitingMercenaries = false; // don't select on CORE done yet
+            autoSendAwaitingUsolMercs = true; // flag: need USOL mercs before selecting
         }
     }
-    // Auto-send: mercenaries data arrived — configure and launch selected mercenary
-    if (event.data && event.data.type === 'COR3_WS_MERCENARIES' && autoSendAwaitingMercenaries) {
+    // Auto-send: CORE mercs done, now chain to USOL mercs before selecting
+    if (event.data && event.data.type === 'COR3_CORE_MERCS_DONE' && autoSendAwaitingUsolMercs) {
+        autoSendAwaitingUsolMercs = false;
+        console.log('[COR3 Helper] Auto-send: CORE mercs refreshed, now fetching USOL mercs...');
+        setTimeout(() => {
+            window.postMessage({ type: 'COR3_REQUEST_USOL_MERCENARIES' }, '*');
+        }, 500);
+        // Listen for USOL mercs done, then trigger selection
+        function onUsolMercsDoneForAutoSend(evt) {
+            if (evt.data && evt.data.type === 'COR3_USOL_MERCS_DONE') {
+                window.removeEventListener('message', onUsolMercsDoneForAutoSend);
+                clearTimeout(usolMercsTimeout);
+                console.log('[COR3 Helper] Auto-send: USOL mercs refreshed, proceeding to select merc');
+                autoSendAwaitingMercenaries = true;
+                window.postMessage({ type: 'COR3_CORE_MERCS_DONE' }, '*');
+            }
+        }
+        window.addEventListener('message', onUsolMercsDoneForAutoSend);
+        var usolMercsTimeout = setTimeout(() => {
+            window.removeEventListener('message', onUsolMercsDoneForAutoSend);
+            console.log('[COR3 Helper] Auto-send: USOL mercs timeout — proceeding with CORE mercs only');
+            autoSendAwaitingMercenaries = true;
+            window.postMessage({ type: 'COR3_CORE_MERCS_DONE' }, '*');
+        }, 30000);
+    }
+    // Auto-send: all merc configures done — now select merc and launch
+    if (event.data && event.data.type === 'COR3_CORE_MERCS_DONE' && autoSendAwaitingMercenaries) {
         autoSendAwaitingMercenaries = false;
         chrome.storage.sync.get('autoSendMerc', (settings) => {
             if (!settings.autoSendMerc || !settings.autoSendMerc.enabled) {
@@ -431,88 +494,126 @@ window.addEventListener('message', (event) => {
                 autoSendInProgress = false;
                 return;
             }
-            let mercs = event.data.data;
-            if (mercs && !Array.isArray(mercs) && mercs.mercenaries) mercs = mercs.mercenaries;
-            if (!Array.isArray(mercs)) {
-                console.log('[COR3 Helper] Auto-send: cannot parse mercenary list, aborting');
-                autoSendInProgress = false;
-                return;
-            }
-            let mercId = settings.autoSendMerc.mercenaryId;
-            // If auto-choose mercenary is enabled, pick cheapest AVAILABLE (least risk on tie)
-            if (settings.autoSendMerc.autoChooseMerc) {
-                chrome.storage.local.get('mercConfigData', (cfgResult) => {
-                    const configs = cfgResult.mercConfigData || {};
-                    const available = mercs.filter(m => m.status === 'AVAILABLE' && configs[m.id]);
+            // Gather CORE and USOL mercs from storage (configures are done, data is fresh)
+            chrome.storage.local.get(['mercenariesData', 'usolMercenariesData', 'mercConfigData', 'expeditionConfigData', 'usolExpeditionConfigData'], (localData) => {
+                let coreMercs = [];
+                const coreRaw = localData.mercenariesData;
+                if (coreRaw) {
+                    if (coreRaw.mercenaries) coreMercs = coreRaw.mercenaries;
+                    else if (Array.isArray(coreRaw)) coreMercs = coreRaw;
+                }
+                // Tag CORE mercs
+                coreMercs.forEach(m => { m._market = 'core'; });
+                // Also include elite mercs from CORE data
+                const coreElite = (coreRaw && coreRaw.eliteSlots) || [];
+                coreElite.forEach(es => {
+                    if (es.mercenary && !coreMercs.find(m => m.id === es.mercenary.id)) {
+                        es.mercenary._market = 'core'; es.mercenary._isElite = true;
+                        coreMercs.push(es.mercenary);
+                    }
+                });
+                let usolMercs = [];
+                const usolData = localData.usolMercenariesData;
+                if (usolData) {
+                    let raw = usolData;
+                    if (raw && !Array.isArray(raw) && raw.mercenaries) usolMercs = raw.mercenaries;
+                    else if (Array.isArray(raw)) usolMercs = raw;
+                    usolMercs.forEach(m => { m._market = 'usol'; });
+                    // Include elite USOL mercs
+                    const usolElite = (usolData && usolData.eliteSlots) || [];
+                    usolElite.forEach(es => {
+                        if (es.mercenary && !usolMercs.find(m => m.id === es.mercenary.id)) {
+                            es.mercenary._market = 'usol'; es.mercenary._isElite = true;
+                            usolMercs.push(es.mercenary);
+                        }
+                    });
+                }
+
+                const allMercs = [...coreMercs, ...usolMercs];
+                let mercId = settings.autoSendMerc.mercenaryId;
+
+                // If auto-choose mercenary is enabled, pick from all markets
+                if (settings.autoSendMerc.autoChooseMerc) {
+                    const configs = localData.mercConfigData || {};
+                    const ignoreElite = !!settings.autoSendMerc.ignoreEliteMerc;
+                    const usolFirst = !!settings.autoSendMerc.autoChooseUsolFirst;
+                    // Build elite ID set
+                    const eliteIds = new Set();
+                    coreElite.forEach(es => { if (es.mercenary) eliteIds.add(es.mercenary.id); });
+                    const usolElite2 = (usolData && usolData.eliteSlots) || [];
+                    usolElite2.forEach(es => { if (es.mercenary) eliteIds.add(es.mercenary.id); });
+                    allMercs.forEach(m => { if (!m._isElite) m._isElite = eliteIds.has(m.id); });
+
+                    let available = allMercs.filter(m => m.status === 'AVAILABLE' && configs[m.id]);
+                    if (ignoreElite) available = available.filter(m => !m._isElite);
                     if (available.length > 0) {
                         available.sort((a, b) => {
+                            if (usolFirst) {
+                                if (a._market === 'usol' && b._market !== 'usol') return -1;
+                                if (a._market !== 'usol' && b._market === 'usol') return 1;
+                            }
                             const costA = (configs[a.id] && configs[a.id].totalCost) || Infinity;
                             const costB = (configs[b.id] && configs[b.id].totalCost) || Infinity;
                             if (costA !== costB) return costA - costB;
                             const riskA = (configs[a.id] && configs[a.id].riskScore) || 0;
                             const riskB = (configs[b.id] && configs[b.id].riskScore) || 0;
-                            return riskA - riskB;
+                            if (riskA !== riskB) return riskA - riskB;
+                            if (a._market === 'usol' && b._market !== 'usol') return -1;
+                            if (a._market !== 'usol' && b._market === 'usol') return 1;
+                            return 0;
                         });
                         mercId = available[0].id;
-                        console.log('[COR3 Helper] Auto-choose merc: selected', available[0].callsign, 'cost:', configs[available[0].id].totalCost);
+                        console.log('[COR3 Helper] Auto-choose merc: selected', available[0].callsign, '(' + available[0]._market + ') cost:', configs[available[0].id].totalCost);
                     }
-                    proceedWithMerc(mercId, mercs, settings);
-                });
-                return; // async path — proceedWithMerc handles the rest
-            }
-            proceedWithMerc(mercId, mercs, settings);
+                }
+                proceedWithMerc(mercId, allMercs, settings, localData);
+            });
         });
 
-        function proceedWithMerc(mercId, mercs, settings) {
+        function proceedWithMerc(mercId, allMercs, settings, localData) {
             if (!mercId) {
                 console.log('[COR3 Helper] Auto-send: no mercenary selected, aborting');
                 autoSendInProgress = false;
                 return;
             }
-            const selectedMerc = mercs.find(m => m.id === mercId);
+            const selectedMerc = allMercs.find(m => m.id === mercId);
             if (!selectedMerc || selectedMerc.status !== 'AVAILABLE') {
                 console.log('[COR3 Helper] Auto-send: selected mercenary not AVAILABLE (status: ' + (selectedMerc ? selectedMerc.status : 'not found') + '), aborting');
                 autoSendInProgress = false;
                 return;
             }
-            // Get expedition config IDs from storage and launch
-            chrome.storage.local.get('expeditionConfigData', (result) => {
-                const config = result.expeditionConfigData;
-                if (!config || !config.locations || config.locations.length === 0) {
-                    console.log('[COR3 Helper] Auto-send: no expedition config available, aborting');
-                    autoSendInProgress = false;
-                    return;
-                }
-                const loc = config.locations[0];
-                const zone = loc.zones && loc.zones[0] ? loc.zones[0] : null;
-                const goal = zone && zone.goals && zone.goals[0] ? zone.goals[0] : null;
-                if (!zone || !goal) {
-                    console.log('[COR3 Helper] Auto-send: missing zone/goal config, aborting');
-                    autoSendInProgress = false;
-                    return;
-                }
-                const launchConfig = {
-                    mercenaryId: mercId,
-                    marketId: '019d3ea4-85bd-7389-904d-8f7c85841134',
-                    locationConfigId: loc.id,
-                    zoneConfigId: zone.id,
-                    goalId: goal.id,
-                    hasInsurance: false
-                };
-                console.log('[COR3 Helper] Auto-send: launching expedition with mercenary:', selectedMerc.callsign);
-                setTimeout(() => {
-                    chrome.storage.local.set({ lastExpeditionLaunchData: launchConfig });
-                    window.postMessage({ type: 'COR3_LAUNCH_EXPEDITION', config: launchConfig }, '*');
-                    // Refresh mercenaries after launch to update UI
-                    setTimeout(() => {
-                        window.postMessage({ type: 'COR3_REQUEST_EXPEDITIONS' }, '*');
-                    }, 1000);
-                    setTimeout(() => {
-                        window.postMessage({ type: 'COR3_REQUEST_MERCENARIES' }, '*');
-                        autoSendInProgress = false;
-                    }, 2000);
-                }, 1500 + Math.floor(Math.random() * 500));
-            });
+            // Determine market and config based on merc's market tag
+            const isUsol = selectedMerc._market === 'usol' || (selectedMerc.faction && selectedMerc.faction.key === 'usol_employment');
+            const configKey = isUsol ? 'usolExpeditionConfigData' : 'expeditionConfigData';
+            const marketId = isUsol ? '019e4065-6ae8-760d-8724-58ab4f2cf7d7' : '019d3ea4-85bd-7389-904d-8f7c85841134';
+            const config = localData[configKey];
+            if (!config || !config.locations || config.locations.length === 0) {
+                console.log('[COR3 Helper] Auto-send: no expedition config available for ' + (isUsol ? 'USOL' : 'CORE') + ', aborting');
+                autoSendInProgress = false;
+                return;
+            }
+            const loc = config.locations[0];
+            const zone = loc.zones && loc.zones[0] ? loc.zones[0] : null;
+            const goal = zone && zone.goals && zone.goals[0] ? zone.goals[0] : null;
+            if (!zone || !goal) {
+                console.log('[COR3 Helper] Auto-send: missing zone/goal config, aborting');
+                autoSendInProgress = false;
+                return;
+            }
+            const launchConfig = {
+                mercenaryId: mercId,
+                marketId: marketId,
+                locationConfigId: loc.id,
+                zoneConfigId: zone.id,
+                goalId: goal.id,
+                hasInsurance: false
+            };
+            console.log('[COR3 Helper] Auto-send: launching expedition with mercenary:', selectedMerc.callsign, '(' + (isUsol ? 'USOL' : 'CORE') + ')');
+            setTimeout(() => {
+                chrome.storage.local.set({ lastExpeditionLaunchData: launchConfig });
+                window.postMessage({ type: 'COR3_LAUNCH_EXPEDITION', config: launchConfig }, '*');
+                autoSendInProgress = false;
+            }, 1500 + Math.floor(Math.random() * 500));
         }
     }
     // Auto-send: expedition launched confirmation
@@ -522,16 +623,25 @@ window.addEventListener('message', (event) => {
     // Handle expedition launch error
     if (event.data && event.data.type === 'COR3_WS_EXPEDITION_LAUNCH_ERROR') {
         console.log('[COR3 Helper] Expedition launch error:', event.data.error);
-        // Store error for UI display
-        chrome.storage.local.set({
-            expeditionLaunchError: {
-                error: event.data.error,
-                retryAfter: event.data.retryAfter,
-                timestamp: Date.now()
-            }
-        });
-        // Clear any previous successful launch message
-        chrome.storage.local.remove('expeditionLaunched');
+        if (event.data.error === 'Maximum 1 active expedition allowed') {
+            // Silently abort — an expedition is already active.
+            // Reset auto-send state so the normal flow re-triggers when the
+            // active expedition completes and fresh expedition data arrives.
+            console.log('[COR3 Helper] Active expedition detected — silently waiting for it to finish');
+            autoSendInProgress = false;
+            autoSendExpeditionId = null;
+        } else {
+            // Store other errors for UI display
+            chrome.storage.local.set({
+                expeditionLaunchError: {
+                    error: event.data.error,
+                    retryAfter: event.data.retryAfter,
+                    timestamp: Date.now()
+                }
+            });
+            // Clear any previous successful launch message
+            chrome.storage.local.remove('expeditionLaunched');
+        }
     }
     // Handle expedition launch retry
     if (event.data && event.data.type === 'COR3_WS_EXPEDITION_RETRY_LAUNCH') {
@@ -641,6 +751,11 @@ function checkAutoChooseFromContent(decisions) {
 let autoSendInProgress = false;
 let autoSendExpeditionId = null;
 let autoSendAwaitingMercenaries = false;
+let autoSendAwaitingUsolMercs = false;
+// Flag: initial page load merc fetch complete (set when COR3_USOL_MERCS_DONE received from initial fetch)
+let initialMercsReady = false;
+// Flag: deferral listener already registered (prevent duplicate listeners from multiple callers)
+let autoSendDeferredWaiting = false;
 
 function checkAutoSendOnExpeditionData(expeditions) {
     if (!expeditions || !Array.isArray(expeditions) || autoSendInProgress) return;
@@ -651,16 +766,55 @@ function checkAutoSendOnExpeditionData(expeditions) {
         // Check for no active expeditions case
         const hasActiveExpeditions = expeditions.length > 0;
         if (!hasActiveExpeditions) {
-            console.log('[COR3 Helper] Auto-send: No active expeditions, proceeding directly to mercenary launch');
-            // Directly proceed to mercenary launch flow
+            // During initial page load, defer merc requests until initial fetch has loaded all mercs
+            if (!initialMercsReady) {
+                // Only register deferral listener once — multiple callers (message listener + 5s timeout) would otherwise duplicate
+                if (autoSendDeferredWaiting) {
+                    console.log('[COR3 Helper] Auto-send: Already waiting for initial mercs — skipping duplicate deferral');
+                    return;
+                }
+                autoSendDeferredWaiting = true;
+                console.log('[COR3 Helper] Auto-send: No active expeditions but initial mercs not ready — deferring');
+                // Listen for initial merc fetch completion, then re-check
+                function onInitialMercsDone(evt) {
+                    if (evt.data && evt.data.type === 'COR3_USOL_MERCS_DONE') {
+                        window.removeEventListener('message', onInitialMercsDone);
+                        clearTimeout(deferTimeout);
+                        autoSendDeferredWaiting = false;
+                        console.log('[COR3 Helper] Auto-send: Initial mercs now ready — re-checking expeditions');
+                        initialMercsReady = true;
+                        // Re-check with fresh expedition data from storage
+                        chrome.storage.local.get('expeditionsData', (result) => {
+                            if (result.expeditionsData) {
+                                checkAutoSendOnExpeditionData(result.expeditionsData);
+                            }
+                        });
+                    }
+                }
+                window.addEventListener('message', onInitialMercsDone);
+                // Safety timeout: if initial mercs take too long, proceed anyway
+                var deferTimeout = setTimeout(() => {
+                    window.removeEventListener('message', onInitialMercsDone);
+                    autoSendDeferredWaiting = false;
+                    initialMercsReady = true;
+                    console.log('[COR3 Helper] Auto-send: Deferred merc wait timed out — proceeding');
+                    chrome.storage.local.get('expeditionsData', (result) => {
+                        if (result.expeditionsData) {
+                            checkAutoSendOnExpeditionData(result.expeditionsData);
+                        }
+                    });
+                }, 60000);
+                return;
+            }
+            console.log('[COR3 Helper] Auto-send: No active expeditions, refreshing mercs (CORE + USOL) before launch');
             autoSendInProgress = true;
             autoSendExpeditionId = null;
-            // Get mercenaries and launch selected one
+            autoSendAwaitingMercenaries = false;
+            autoSendAwaitingUsolMercs = true;
+            var mercDelay = 2500 + Math.floor(Math.random() * 1000);
             setTimeout(() => {
                 window.postMessage({ type: 'COR3_REQUEST_MERCENARIES' }, '*');
-            }, 1000 + Math.floor(Math.random() * 500));
-            // Wait for mercenaries data, then launch
-            autoSendAwaitingMercenaries = true;
+            }, mercDelay);
             return;
         }
 
@@ -1204,6 +1358,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     } else if (request.action === "requestMercenaries") {
         window.postMessage({ type: 'COR3_REQUEST_MERCENARIES' }, '*');
         sendResponse({ success: true });
+    } else if (request.action === "requestUsolMercenaries") {
+        window.postMessage({ type: 'COR3_REQUEST_USOL_MERCENARIES' }, '*');
+        sendResponse({ success: true });
     } else if (request.action === "requestExpeditionConfig") {
         window.postMessage({ type: 'COR3_REQUEST_EXPEDITION_CONFIG', mercenaryId: request.mercenaryId }, '*');
         sendResponse({ success: true });
@@ -1344,6 +1501,25 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     } else if (request.action === "devtoolsSendWs") {
         // DevTools panel: send a raw WS message via the intercepted socket
         window.postMessage({ type: 'COR3_DEVTOOLS_WS_SEND', message: request.message }, '*');
+        sendResponse({ success: true });
+    } else if (request.action === "startValuableSearch") {
+        injectAutoValuableSeller();
+        setTimeout(() => {
+            window.postMessage({ type: 'COR3_VALUABLE_START_SEARCH' }, '*');
+        }, 500);
+        sendResponse({ success: true });
+    } else if (request.action === "startValuableSeller") {
+        injectAutoValuableSeller();
+        setTimeout(() => {
+            window.postMessage({
+                type: 'COR3_VALUABLE_START_SELLER',
+                selectedServers: request.selectedServers || [],
+                selectedDownloads: request.selectedDownloads || []
+            }, '*');
+        }, 500);
+        sendResponse({ success: true });
+    } else if (request.action === "stopValuable") {
+        window.postMessage({ type: 'COR3_VALUABLE_STOP' }, '*');
         sendResponse({ success: true });
     }
 });
@@ -1542,6 +1718,19 @@ function injectAutoJobSolver() {
     console.log('[COR3 Helper] Auto Job Solver engine injected');
 }
 
+// --- Auto Valuable Seller Engine Injection ---
+let autoValuableSellerInjected = false;
+
+function injectAutoValuableSeller() {
+    if (autoValuableSellerInjected) return;
+    autoValuableSellerInjected = true;
+    const script = document.createElement('script');
+    script.src = chrome.runtime.getURL('auto-valuable-seller.js');
+    script.onload = () => script.remove();
+    (document.head || document.documentElement).appendChild(script);
+    console.log('[COR3 Helper] Auto Valuable Seller engine injected');
+}
+
 // Serialized batched log writer — prevents read-modify-write races
 let _autoJobLogQueue = [];
 let _autoJobLogFlushTimer = null;
@@ -1565,12 +1754,41 @@ function _flushAutoJobLogs() {
     });
 }
 function queueAutoJobLog(msg, level) {
-    const now = new Date();
-    const timeStr = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    _autoJobLogQueue.push({ time: timeStr, msg: msg, level: level || 'info' });
+    _autoJobLogQueue.push({ timestamp: new Date().toISOString(), msg: msg, level: level || 'info' });
     if (!_autoJobLogFlushTimer && !_autoJobLogFlushing) {
         _autoJobLogFlushTimer = setTimeout(_flushAutoJobLogs, 100);
     }
+    if (typeof cor3LogEntry === 'function') cor3LogEntry('auto-jobs', msg, level || 'info');
+}
+
+// Serialized batched log writer for Valuable Seller
+let _valuableLogQueue = [];
+let _valuableLogFlushTimer = null;
+let _valuableLogFlushing = false;
+function _flushValuableLogs() {
+    _valuableLogFlushTimer = null;
+    if (_valuableLogFlushing || _valuableLogQueue.length === 0 || !isContextValid()) return;
+    _valuableLogFlushing = true;
+    const pending = _valuableLogQueue.splice(0);
+    chrome.storage.local.get('valuableDebugLogs', (result) => {
+        if (!isContextValid()) { _valuableLogFlushing = false; return; }
+        const logs = Array.isArray(result.valuableDebugLogs) ? result.valuableDebugLogs : [];
+        for (const entry of pending) logs.push(entry);
+        if (logs.length > 200) logs.splice(0, logs.length - 200);
+        chrome.storage.local.set({ valuableDebugLogs: logs }, () => {
+            _valuableLogFlushing = false;
+            if (_valuableLogQueue.length > 0) {
+                _flushValuableLogs();
+            }
+        });
+    });
+}
+function queueValuableLog(msg, level) {
+    _valuableLogQueue.push({ timestamp: new Date().toISOString(), msg: msg, level: level || 'info' });
+    if (!_valuableLogFlushTimer && !_valuableLogFlushing) {
+        _valuableLogFlushTimer = setTimeout(_flushValuableLogs, 100);
+    }
+    if (typeof cor3LogEntry === 'function') cor3LogEntry('auto-valuable', msg, level || 'info');
 }
 
 // Listen for auto-job log/tracker updates from the engine (MAIN world -> content script -> storage)
@@ -1664,6 +1882,19 @@ window.addEventListener('message', (event) => {
             chrome.storage.local.set({ autoJobsCompletedResults: merged });
         });
     }
+    // --- Auto Valuable Seller: relay log/data/done messages to storage ---
+    if (event.data && event.data.type === 'COR3_VALUABLE_LOG') {
+        queueValuableLog(event.data.msg, event.data.level);
+    }
+    if (event.data && event.data.type === 'COR3_VALUABLE_SERVERS_UPDATE') {
+        chrome.storage.local.set({ valuableServersData: event.data.data });
+    }
+    if (event.data && event.data.type === 'COR3_VALUABLE_DOWNLOADS_UPDATE') {
+        chrome.storage.local.set({ valuableDownloadsData: event.data.data });
+    }
+    if (event.data && event.data.type === 'COR3_VALUABLE_DONE') {
+        chrome.storage.local.set({ valuableSearchRunning: false, valuableSellerRunning: false });
+    }
     // --- Auto Clear IPs: relay WS responses to storage for background.js ---
     if (event.data && event.data.type === 'COR3_AUTOJOB_SAI_TRANSIT') {
         chrome.storage.local.set({ _clearIpsTransit: { data: event.data.data, error: event.data.error, ts: Date.now() } });
@@ -1688,6 +1919,43 @@ window.addEventListener('message', (event) => {
     }
     if (event.data && event.data.type === 'COR3_AUTOJOB_SAI_UPDATE') {
         chrome.storage.local.set({ _clearIpsSaiUpdate: { data: event.data.data, ts: Date.now() } });
+    }
+});
+
+// On page load: check cached expedition data for auto-send trigger
+setTimeout(() => {
+    chrome.storage.local.get('expeditionsData', (result) => {
+        if (result.expeditionsData) {
+            console.log('[COR3 Helper] Page load: checking cached expedition data for auto-send');
+            checkAutoSendOnExpeditionData(result.expeditionsData);
+        }
+    });
+}, 5000); // delay to let WS connect and settings load
+
+// Listen for autoSendMerc toggle changes to trigger auto-send check
+chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'sync' || !changes.autoSendMerc) return;
+    const newVal = changes.autoSendMerc.newValue;
+    if (newVal && newVal.enabled) {
+        console.log('[COR3 Helper] Auto-send mercenary enabled — checking expedition data');
+        chrome.storage.local.get('expeditionsData', (result) => {
+            if (result.expeditionsData) {
+                checkAutoSendOnExpeditionData(result.expeditionsData);
+            }
+        });
+    }
+});
+
+// Capture extension errors to IndexedDB for DevTools panel
+window.addEventListener('error', (e) => {
+    if (typeof cor3LogEntry === 'function') {
+        cor3LogEntry('error-logs', (e.filename || '') + ':' + (e.lineno || 0) + ' ' + (e.message || ''), 'error');
+    }
+});
+window.addEventListener('unhandledrejection', (e) => {
+    if (typeof cor3LogEntry === 'function') {
+        var msg = e.reason ? (e.reason.stack || e.reason.message || String(e.reason)) : 'Unhandled rejection';
+        cor3LogEntry('error-logs', msg, 'error');
     }
 });
 

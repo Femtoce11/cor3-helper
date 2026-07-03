@@ -13,7 +13,7 @@
 
 (function () {
 	if (window.__iceWallSolverActive) {
-		console.warn('\u26a0\ufe0f ICE Wall solver is already active. Aborting duplicate initialization.');
+		console.log('\u26a0\ufe0f ICE Wall solver is already active. Aborting duplicate initialization.');
 		return;
 	}
 	window.__iceWallSolverActive = true;
@@ -109,35 +109,65 @@
 
 	// --- Target Pattern Extraction --------------------------------------------
 
+	var BOTTOM_LEFT_TARGET_LAYOUT = [
+		'1,1,up', '2,0,up', '2,2,down', '3,1,down',
+		'3,1,up', '4,0,up', '4,2,down', '5,1,down'
+	].join('|');
+
+	function getTargetLayout(cells) {
+		return cells
+			.map(function (c) { return c.pos.col + ',' + c.pos.row + ',' + c.pos.orientation; })
+			.sort()
+			.join('|');
+	}
+
 	// Extract the target pattern from the TargetPreview SVG.
 	// Picks the bottommost "up" cell as anchor (highest row), breaking ties
-	// by proximity to the horizontal center. This matches the working script.
+	// by proximity to the horizontal center. For the known 9-triangle
+	// bottom-left layout, the anchor is forced to (1,1,up).
 	function extractTargetPattern() {
-		const children = document.querySelectorAll(
-			'[data-component-name="TargetPreview"] > g'
-		);
+		var preview = document.querySelector('[data-component-name="TargetPreview"]');
+		if (!preview) return null;
+		var children = Array.from(preview.querySelectorAll(':scope > g'));
 		if (children.length === 0) return null;
 
-		const cells = [];
-		for (const child of children) {
-			const pos = parseCellTransform(child);
+		var cells = [];
+		for (var ci = 0; ci < children.length; ci++) {
+			var pos = parseCellTransform(children[ci]);
 			if (!pos) continue;
-			cells.push({ pos: pos, fingerprint: getCellFingerprint(child) });
+			cells.push({ pos: pos, fingerprint: getCellFingerprint(children[ci]) });
 		}
 		if (cells.length === 0) return null;
 
-		const avgCol = cells.reduce(function (s, c) { return s + c.pos.col; }, 0) / cells.length;
-		const upCells = cells.filter(function (c) { return c.pos.orientation === 'up'; });
+		var upCells = cells.filter(function (c) { return c.pos.orientation === 'up'; });
 		if (upCells.length === 0) return null;
 
-		// Pick the bottommost up-cell (highest row), break ties by center proximity
-		var anchor = upCells[0];
-		for (var i = 1; i < upCells.length; i++) {
-			var cell = upCells[i];
-			var isLower = cell.pos.row > anchor.pos.row;
-			var isSameRowCloser = cell.pos.row === anchor.pos.row &&
-				Math.abs(cell.pos.col - avgCol) < Math.abs(anchor.pos.col - avgCol);
-			if (isLower || isSameRowCloser) anchor = cell;
+		var viewBoxAttr = (preview.getAttribute('viewBox') || '').trim();
+		var viewBox = viewBoxAttr.split(/[\s,]+/).map(Number);
+		var hasValidViewBox = viewBox.length === 4 &&
+			viewBox.every(function (v) { return isFinite(v); }) && viewBox[2] > 0;
+		var centerCol;
+		if (hasValidViewBox) {
+			centerCol = (viewBox[0] + viewBox[2] / 2 - COL_STEP) / COL_STEP;
+		} else {
+			var cols = cells.map(function (c) { return c.pos.col; });
+			centerCol = (Math.min.apply(null, cols) + Math.max.apply(null, cols)) / 2;
+		}
+
+		var targetLayout = getTargetLayout(cells);
+		var anchor;
+		if (targetLayout === BOTTOM_LEFT_TARGET_LAYOUT) {
+			anchor = upCells.find(function (c) { return c.pos.col === 1 && c.pos.row === 1; });
+		}
+		if (!anchor) {
+			anchor = upCells[0];
+			for (var i = 1; i < upCells.length; i++) {
+				var cell = upCells[i];
+				var isLower = cell.pos.row > anchor.pos.row;
+				var isSameRowCloser = cell.pos.row === anchor.pos.row &&
+					Math.abs(cell.pos.col - centerCol) < Math.abs(anchor.pos.col - centerCol);
+				if (isLower || isSameRowCloser) anchor = cell;
+			}
 		}
 
 		var anchorCol = anchor.pos.col;
@@ -418,7 +448,7 @@
 			} else {
 				var possible = findPossiblePositions(cellMap, targetPattern, invalidPositions);
 				if (possible.length === 0) {
-					console.warn('\uD83D\uDD13 [COR3 Helper] \u26a0\ufe0f No candidates or possible positions remain');
+					console.log('\uD83D\uDD13 [COR3 Helper] \u26a0\ufe0f No candidates or possible positions remain');
 					return;
 				}
 				best = possible[0];
@@ -436,14 +466,14 @@
 			if (anchorCell) {
 				clickAnchor(anchorCell);
 			} else {
-				console.warn('\uD83D\uDD13 [COR3 Helper] \u26a0\ufe0f Anchor cell not found after lock-in.');
+				console.log('\uD83D\uDD13 [COR3 Helper] \u26a0\ufe0f Anchor cell not found after lock-in.');
 			}
 
 			var advanced = await waitForAdvance(prevSig);
 			if (advanced) return; // success — round advanced
 
 			// False positive — mark this position as invalid and retry
-			console.warn(
+			console.log(
 				'\uD83D\uDD13 [COR3 Helper] \u26a0\ufe0f False positive at col=' + best.col +
 				' row=' + best.row + ' \u2014 marking invalid and retrying...'
 			);
@@ -512,7 +542,7 @@
 			postStatus('Round ' + roundsCompleted + totalLabel() + ': complete', 'success');
 
 			if (!(await waitForNextRound(completedBefore, 10000))) {
-				console.warn('\uD83D\uDD13 [COR3 Helper] \u26a0\ufe0f Timed out waiting for next round \u2014 stopping');
+				console.log('\uD83D\uDD13 [COR3 Helper] \u26a0\ufe0f Timed out waiting for next round \u2014 stopping');
 				break;
 			}
 		}
@@ -580,7 +610,7 @@
 				// Notify any external code waiting for solver completion
 				while (solverListeners.length) {
 					var fn = solverListeners.shift();
-					try { fn(); } catch (e) { console.error('[COR3 Helper] Error in solver listener:', e); }
+					try { fn(); } catch (e) { console.log('[COR3 Helper] Error in solver listener:', e); }
 				}
 
 				if (!window.__iceWallSolverAbort) {

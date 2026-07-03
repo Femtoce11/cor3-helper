@@ -68,7 +68,7 @@
     async function runInTab(fn, args) {
         const tabId = getInspectedTabId();
         if (!tabId) {
-            console.warn('[COR3 Panel] No inspected tab ID');
+            console.log('[COR3 Panel] No inspected tab ID');
             return null;
         }
         try {
@@ -80,7 +80,7 @@
             if (results && results[0]) return results[0].result;
             return null;
         } catch (e) {
-            console.error('[COR3 Panel] executeScript failed:', e);
+            console.log('[COR3 Panel] executeScript failed:', e);
             return null;
         }
     }
@@ -88,7 +88,20 @@
     async function dbCount() {
         const result = await runInTab(() => {
             return new Promise((resolve) => {
-                const req = indexedDB.open('cor3_ws_db', 1);
+                const req = indexedDB.open('cor3_ws_db', 2);
+                req.onupgradeneeded = (e) => {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains('messages')) {
+                        const s = db.createObjectStore('messages', { keyPath: 'id', autoIncrement: true });
+                        s.createIndex('timestamp', 'timestamp', { unique: false });
+                    }
+                    if (!db.objectStoreNames.contains('logs')) {
+                        const ls = db.createObjectStore('logs', { keyPath: 'id', autoIncrement: true });
+                        ls.createIndex('timestamp', 'timestamp', { unique: false });
+                        ls.createIndex('category', 'category', { unique: false });
+                        ls.createIndex('cat_ts', ['category', 'timestamp'], { unique: false });
+                    }
+                };
                 req.onsuccess = (e) => {
                     const db = e.target.result;
                     if (!db.objectStoreNames.contains('messages')) { db.close(); resolve(0); return; }
@@ -107,7 +120,20 @@
     async function dbGetPage(start, limit) {
         const result = await runInTab((s, l) => {
             return new Promise((resolve) => {
-                const req = indexedDB.open('cor3_ws_db', 1);
+                const req = indexedDB.open('cor3_ws_db', 2);
+                req.onupgradeneeded = (e) => {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains('messages')) {
+                        const ms = db.createObjectStore('messages', { keyPath: 'id', autoIncrement: true });
+                        ms.createIndex('timestamp', 'timestamp', { unique: false });
+                    }
+                    if (!db.objectStoreNames.contains('logs')) {
+                        const ls = db.createObjectStore('logs', { keyPath: 'id', autoIncrement: true });
+                        ls.createIndex('timestamp', 'timestamp', { unique: false });
+                        ls.createIndex('category', 'category', { unique: false });
+                        ls.createIndex('cat_ts', ['category', 'timestamp'], { unique: false });
+                    }
+                };
                 req.onsuccess = (e) => {
                     const db = e.target.result;
                     if (!db.objectStoreNames.contains('messages')) { db.close(); resolve([]); return; }
@@ -135,7 +161,20 @@
     async function dbGetAfter(isoTs) {
         const result = await runInTab((ts) => {
             return new Promise((resolve) => {
-                const req = indexedDB.open('cor3_ws_db', 1);
+                const req = indexedDB.open('cor3_ws_db', 2);
+                req.onupgradeneeded = (e) => {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains('messages')) {
+                        const ms = db.createObjectStore('messages', { keyPath: 'id', autoIncrement: true });
+                        ms.createIndex('timestamp', 'timestamp', { unique: false });
+                    }
+                    if (!db.objectStoreNames.contains('logs')) {
+                        const ls = db.createObjectStore('logs', { keyPath: 'id', autoIncrement: true });
+                        ls.createIndex('timestamp', 'timestamp', { unique: false });
+                        ls.createIndex('category', 'category', { unique: false });
+                        ls.createIndex('cat_ts', ['category', 'timestamp'], { unique: false });
+                    }
+                };
                 req.onsuccess = (e) => {
                     const db = e.target.result;
                     if (!db.objectStoreNames.contains('messages')) { db.close(); resolve([]); return; }
@@ -161,7 +200,20 @@
     async function dbClear() {
         await runInTab(() => {
             return new Promise((resolve) => {
-                const req = indexedDB.open('cor3_ws_db', 1);
+                const req = indexedDB.open('cor3_ws_db', 2);
+                req.onupgradeneeded = (e) => {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains('messages')) {
+                        const ms = db.createObjectStore('messages', { keyPath: 'id', autoIncrement: true });
+                        ms.createIndex('timestamp', 'timestamp', { unique: false });
+                    }
+                    if (!db.objectStoreNames.contains('logs')) {
+                        const ls = db.createObjectStore('logs', { keyPath: 'id', autoIncrement: true });
+                        ls.createIndex('timestamp', 'timestamp', { unique: false });
+                        ls.createIndex('category', 'category', { unique: false });
+                        ls.createIndex('cat_ts', ['category', 'timestamp'], { unique: false });
+                    }
+                };
                 req.onsuccess = (e) => {
                     const db = e.target.result;
                     if (!db.objectStoreNames.contains('messages')) { db.close(); resolve(); return; }
@@ -176,6 +228,156 @@
         console.log('[COR3 Panel] dbClear completed');
     }
 
+    // --- Logs DB access (logs store, categorized) ---
+    async function logDbCount(category) {
+        const result = await runInTab((cat) => {
+            return new Promise((resolve) => {
+                const req = indexedDB.open('cor3_ws_db', 2);
+                req.onupgradeneeded = (e) => {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains('messages')) {
+                        const s = db.createObjectStore('messages', { keyPath: 'id', autoIncrement: true });
+                        s.createIndex('timestamp', 'timestamp', { unique: false });
+                    }
+                    if (!db.objectStoreNames.contains('logs')) {
+                        const ls = db.createObjectStore('logs', { keyPath: 'id', autoIncrement: true });
+                        ls.createIndex('timestamp', 'timestamp', { unique: false });
+                        ls.createIndex('category', 'category', { unique: false });
+                        ls.createIndex('cat_ts', ['category', 'timestamp'], { unique: false });
+                    }
+                };
+                req.onsuccess = (e) => {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains('logs')) { db.close(); resolve(0); return; }
+                    const tx = db.transaction('logs', 'readonly');
+                    const idx = tx.objectStore('logs').index('category');
+                    const range = IDBKeyRange.only(cat);
+                    const cr = idx.count(range);
+                    cr.onsuccess = () => { resolve(cr.result); db.close(); };
+                    cr.onerror = () => { resolve(0); db.close(); };
+                };
+                req.onerror = () => resolve(0);
+            });
+        }, [category]);
+        return result || 0;
+    }
+
+    async function logDbGetPage(category, start, limit) {
+        const result = await runInTab((cat, s, l) => {
+            return new Promise((resolve) => {
+                const req = indexedDB.open('cor3_ws_db', 2);
+                req.onupgradeneeded = (e) => {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains('messages')) {
+                        const ms = db.createObjectStore('messages', { keyPath: 'id', autoIncrement: true });
+                        ms.createIndex('timestamp', 'timestamp', { unique: false });
+                    }
+                    if (!db.objectStoreNames.contains('logs')) {
+                        const ls = db.createObjectStore('logs', { keyPath: 'id', autoIncrement: true });
+                        ls.createIndex('timestamp', 'timestamp', { unique: false });
+                        ls.createIndex('category', 'category', { unique: false });
+                        ls.createIndex('cat_ts', ['category', 'timestamp'], { unique: false });
+                    }
+                };
+                req.onsuccess = (e) => {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains('logs')) { db.close(); resolve([]); return; }
+                    const tx = db.transaction('logs', 'readonly');
+                    const idx = tx.objectStore('logs').index('cat_ts');
+                    const range = IDBKeyRange.bound([cat, ''], [cat, '\uffff']);
+                    const results = [];
+                    let skipped = 0;
+                    const cur = idx.openCursor(range);
+                    cur.onsuccess = (ev) => {
+                        const cursor = ev.target.result;
+                        if (!cursor || results.length >= l) { resolve(results); db.close(); return; }
+                        if (skipped < s) { skipped++; cursor.continue(); return; }
+                        results.push(cursor.value);
+                        cursor.continue();
+                    };
+                    cur.onerror = () => { resolve(results); db.close(); };
+                };
+                req.onerror = () => resolve([]);
+            });
+        }, [category, start, limit]);
+        return result || [];
+    }
+
+    async function logDbGetAfter(category, isoTs) {
+        const result = await runInTab((cat, ts) => {
+            return new Promise((resolve) => {
+                const req = indexedDB.open('cor3_ws_db', 2);
+                req.onupgradeneeded = (e) => {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains('messages')) {
+                        const ms = db.createObjectStore('messages', { keyPath: 'id', autoIncrement: true });
+                        ms.createIndex('timestamp', 'timestamp', { unique: false });
+                    }
+                    if (!db.objectStoreNames.contains('logs')) {
+                        const ls = db.createObjectStore('logs', { keyPath: 'id', autoIncrement: true });
+                        ls.createIndex('timestamp', 'timestamp', { unique: false });
+                        ls.createIndex('category', 'category', { unique: false });
+                        ls.createIndex('cat_ts', ['category', 'timestamp'], { unique: false });
+                    }
+                };
+                req.onsuccess = (e) => {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains('logs')) { db.close(); resolve([]); return; }
+                    const tx = db.transaction('logs', 'readonly');
+                    const idx = tx.objectStore('logs').index('cat_ts');
+                    const range = IDBKeyRange.bound([cat, ts], [cat, '\uffff'], true);
+                    const results = [];
+                    const cur = idx.openCursor(range);
+                    cur.onsuccess = (ev) => {
+                        const cursor = ev.target.result;
+                        if (!cursor) { resolve(results); db.close(); return; }
+                        results.push(cursor.value);
+                        cursor.continue();
+                    };
+                    cur.onerror = () => { resolve(results); db.close(); };
+                };
+                req.onerror = () => resolve([]);
+            });
+        }, [category, isoTs]);
+        return result || [];
+    }
+
+    async function logDbClear(category) {
+        await runInTab((cat) => {
+            return new Promise((resolve) => {
+                const req = indexedDB.open('cor3_ws_db', 2);
+                req.onupgradeneeded = (e) => {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains('messages')) {
+                        const ms = db.createObjectStore('messages', { keyPath: 'id', autoIncrement: true });
+                        ms.createIndex('timestamp', 'timestamp', { unique: false });
+                    }
+                    if (!db.objectStoreNames.contains('logs')) {
+                        const ls = db.createObjectStore('logs', { keyPath: 'id', autoIncrement: true });
+                        ls.createIndex('timestamp', 'timestamp', { unique: false });
+                        ls.createIndex('category', 'category', { unique: false });
+                        ls.createIndex('cat_ts', ['category', 'timestamp'], { unique: false });
+                    }
+                };
+                req.onsuccess = (e) => {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains('logs')) { db.close(); resolve(); return; }
+                    const tx = db.transaction('logs', 'readwrite');
+                    const idx = tx.objectStore('logs').index('category');
+                    const range = IDBKeyRange.only(cat);
+                    const cr = idx.openCursor(range);
+                    cr.onsuccess = (ev) => {
+                        const cursor = ev.target.result;
+                        if (cursor) { cursor.delete(); cursor.continue(); }
+                    };
+                    tx.oncomplete = () => { db.close(); resolve(); };
+                    tx.onerror = () => { db.close(); resolve(); };
+                };
+                req.onerror = () => resolve();
+            });
+        }, [category]);
+    }
+
     // --- State ---
     let allMessages = [];
     let filteredMessages = [];
@@ -187,6 +389,7 @@
     let selectedRawMessage = '';
     let currentPage = -1; // -1 = latest page (XXX-now)
     let totalCount = 0;
+    let currentCategory = 'ws-messages';
 
     // Detail search state
     let detailSearchMatches = [];
@@ -218,6 +421,7 @@
     const sendInput = document.getElementById('sendInput');
     const btnSend = document.getElementById('btnSend');
     const listHeader = document.getElementById('listHeader');
+    const categorySelect = document.getElementById('categorySelect');
     const btnExport = document.getElementById('btnExport');
     const exportMenu = document.getElementById('exportMenu');
     const btnExportJson = document.getElementById('btnExportJson');
@@ -227,8 +431,8 @@
     function formatTime(isoStr) {
         try {
             const d = new Date(isoStr);
-            return d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
-                + '.' + String(d.getMilliseconds()).padStart(3, '0');
+            return d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'UTC' })
+                + '.' + String(d.getUTCMilliseconds()).padStart(3, '0');
         } catch (e) { return '??:??:??'; }
     }
 
@@ -566,9 +770,11 @@
         }
     }
 
+    function isLogCategory() { return currentCategory !== 'ws-messages'; }
+
     // --- Page selector ---
     async function refreshPageSelector() {
-        totalCount = await dbCount();
+        totalCount = isLogCategory() ? await logDbCount(currentCategory) : await dbCount();
         const pages = Math.ceil(totalCount / PAGE_SIZE);
         const prevVal = pageSelector.value;
         pageSelector.innerHTML = '';
@@ -597,16 +803,15 @@
 
     async function loadCurrentPage() {
         const start = currentPage * PAGE_SIZE;
-        allMessages = await dbGetPage(start, PAGE_SIZE);
+        allMessages = isLogCategory() ? await logDbGetPage(currentCategory, start, PAGE_SIZE) : await dbGetPage(start, PAGE_SIZE);
         applyFilters();
     }
 
     async function pullLiveMessages() {
         try {
             if (!lastLiveTimestamp) return;
-            const newMsgs = await dbGetAfter(lastLiveTimestamp);
+            const newMsgs = isLogCategory() ? await logDbGetAfter(currentCategory, lastLiveTimestamp) : await dbGetAfter(lastLiveTimestamp);
             if (newMsgs.length === 0) return;
-            console.log('[COR3 Panel] Live pull:', newMsgs.length, 'new messages');
             for (const m of newMsgs) allMessages.push(m);
             if (allMessages.length > PAGE_SIZE) {
                 allMessages = allMessages.slice(allMessages.length - PAGE_SIZE);
@@ -615,7 +820,7 @@
             applyFilters();
             await refreshPageSelector();
         } catch (e) {
-            console.error('[COR3 Panel] Failed to pull live WS messages:', e);
+            console.log('[COR3 Panel] Failed to pull live messages:', e);
         }
     }
 
@@ -625,19 +830,26 @@
         const showSent = filterSent.checked;
         const showReceived = filterReceived.checked;
 
-        filteredMessages = allMessages.filter(m => {
-            if (m.direction === 'sent' && !showSent) return false;
-            if (m.direction === 'received' && !showReceived) return false;
-            if (search) {
-                const parsed = parseEvent(m.message);
-                const msgData = parseMsgData(m.message);
-                const action = msgData ? extractAction(msgData) : '';
-                const server = msgData ? resolveServer(msgData) : '';
-                const haystack = (parsed.event + ' ' + action + ' ' + server + ' ' + (m.message || '')).toLowerCase();
-                if (!haystack.includes(search)) return false;
-            }
-            return true;
-        });
+        if (isLogCategory()) {
+            filteredMessages = allMessages.filter(m => {
+                if (search && !(m.message || '').toLowerCase().includes(search)) return false;
+                return true;
+            });
+        } else {
+            filteredMessages = allMessages.filter(m => {
+                if (m.direction === 'sent' && !showSent) return false;
+                if (m.direction === 'received' && !showReceived) return false;
+                if (search) {
+                    const parsed = parseEvent(m.message);
+                    const msgData = parseMsgData(m.message);
+                    const action = msgData ? extractAction(msgData) : '';
+                    const server = msgData ? resolveServer(msgData) : '';
+                    const haystack = (parsed.event + ' ' + action + ' ' + server + ' ' + (m.message || '')).toLowerCase();
+                    if (!haystack.includes(search)) return false;
+                }
+                return true;
+            });
+        }
 
         renderList();
         updateStats();
@@ -654,66 +866,95 @@
         emptyState.style.display = 'none';
 
         const fragment = document.createDocumentFragment();
-        for (let i = 0; i < filteredMessages.length; i++) {
-            const m = filteredMessages[i];
-            const parsed = parseEvent(m.message);
-            const msgData = parseMsgData(m.message);
-            const action = msgData ? extractAction(msgData) : '—';
-            const server = msgData ? resolveServer(msgData) : '—';
 
-            const row = document.createElement('div');
-            row.className = 'msg-row' + (i === selectedIndex ? ' selected' : '');
-            row.dataset.index = i;
+        if (isLogCategory()) {
+            for (let i = 0; i < filteredMessages.length; i++) {
+                const m = filteredMessages[i];
+                const row = document.createElement('div');
+                row.className = 'log-row' + (i === selectedIndex ? ' selected' : '');
+                row.dataset.index = i;
 
-            const dir = document.createElement('span');
-            dir.className = 'msg-dir ' + m.direction;
-            dir.textContent = m.direction === 'sent' ? '▲' : '▼';
-            dir.title = m.direction;
-            row.appendChild(dir);
+                const time = document.createElement('span');
+                time.className = 'msg-time';
+                time.textContent = formatTime(m.timestamp);
+                row.appendChild(time);
 
-            const time = document.createElement('span');
-            time.className = 'msg-time';
-            time.textContent = formatTime(m.timestamp);
-            row.appendChild(time);
+                const lvl = document.createElement('span');
+                lvl.className = 'log-level ' + (m.level || 'info');
+                lvl.textContent = (m.level || 'info').toUpperCase();
+                row.appendChild(lvl);
 
-            const evt = document.createElement('span');
-            evt.className = 'msg-event';
-            evt.textContent = parsed.event;
-            evt.title = parsed.event;
-            row.appendChild(evt);
+                const msg = document.createElement('span');
+                msg.className = 'log-message';
+                msg.textContent = m.message || '';
+                msg.title = m.message || '';
+                row.appendChild(msg);
 
-            const act = document.createElement('span');
-            act.className = 'msg-action';
-            act.textContent = action;
-            act.title = action;
-            row.appendChild(act);
-
-            const srv = document.createElement('span');
-            srv.className = 'msg-server';
-            srv.textContent = server;
-            srv.title = server;
-            row.appendChild(srv);
-
-            const preview = document.createElement('span');
-            preview.className = 'msg-preview';
-            let previewText = '';
-            if (msgData) {
-                try { previewText = JSON.stringify(msgData); } catch (e) { previewText = m.message || ''; }
-            } else {
-                previewText = m.message || '';
+                row.addEventListener('click', () => selectMessage(i));
+                fragment.appendChild(row);
             }
-            if (previewText.length > 200) previewText = previewText.substring(0, 200) + '…';
-            preview.textContent = previewText;
-            preview.title = previewText;
-            row.appendChild(preview);
+        } else {
+            for (let i = 0; i < filteredMessages.length; i++) {
+                const m = filteredMessages[i];
+                const parsed = parseEvent(m.message);
+                const msgData = parseMsgData(m.message);
+                const action = msgData ? extractAction(msgData) : '—';
+                const server = msgData ? resolveServer(msgData) : '—';
 
-            const size = document.createElement('span');
-            size.className = 'msg-size';
-            size.textContent = formatSize(m.message);
-            row.appendChild(size);
+                const row = document.createElement('div');
+                row.className = 'msg-row' + (i === selectedIndex ? ' selected' : '');
+                row.dataset.index = i;
 
-            row.addEventListener('click', () => selectMessage(i));
-            fragment.appendChild(row);
+                const dir = document.createElement('span');
+                dir.className = 'msg-dir ' + m.direction;
+                dir.textContent = m.direction === 'sent' ? '▲' : '▼';
+                dir.title = m.direction;
+                row.appendChild(dir);
+
+                const time = document.createElement('span');
+                time.className = 'msg-time';
+                time.textContent = formatTime(m.timestamp);
+                row.appendChild(time);
+
+                const evt = document.createElement('span');
+                evt.className = 'msg-event';
+                evt.textContent = parsed.event;
+                evt.title = parsed.event;
+                row.appendChild(evt);
+
+                const act = document.createElement('span');
+                act.className = 'msg-action';
+                act.textContent = action;
+                act.title = action;
+                row.appendChild(act);
+
+                const srv = document.createElement('span');
+                srv.className = 'msg-server';
+                srv.textContent = server;
+                srv.title = server;
+                row.appendChild(srv);
+
+                const preview = document.createElement('span');
+                preview.className = 'msg-preview';
+                let previewText = '';
+                if (msgData) {
+                    try { previewText = JSON.stringify(msgData); } catch (e) { previewText = m.message || ''; }
+                } else {
+                    previewText = m.message || '';
+                }
+                if (previewText.length > 200) previewText = previewText.substring(0, 200) + '…';
+                preview.textContent = previewText;
+                preview.title = previewText;
+                row.appendChild(preview);
+
+                const size = document.createElement('span');
+                size.className = 'msg-size';
+                size.textContent = formatSize(m.message);
+                row.appendChild(size);
+
+                row.addEventListener('click', () => selectMessage(i));
+                fragment.appendChild(row);
+            }
         }
 
         messageList.replaceChildren(fragment);
@@ -729,25 +970,31 @@
         const m = filteredMessages[index];
         if (!m) return;
 
-        const rows = messageList.querySelectorAll('.msg-row');
+        const rows = messageList.querySelectorAll('.msg-row, .log-row');
         rows.forEach((r, i) => r.classList.toggle('selected', i === index));
 
         detailPanel.classList.add('open');
 
-        const parsed = parseEvent(m.message);
-        const msgData = parseMsgData(m.message);
-        const action = msgData ? extractAction(msgData) : '—';
-        const server = msgData ? resolveServer(msgData) : '—';
-        const dirClass = m.direction === 'sent' ? 'dir-sent' : 'dir-received';
-        const dirLabel = m.direction === 'sent' ? '▲ SENT' : '▼ RECEIVED';
-        detailMeta.innerHTML = `<span class="${dirClass}">${dirLabel}</span>`
-            + `<span>Time: ${formatTime(m.timestamp)}</span>`
-            + `<span>Event: <strong>${escapeHtml(parsed.event)}</strong></span>`
-            + `<span>Action: <strong>${escapeHtml(action)}</strong></span>`
-            + `<span>Server: <strong>${escapeHtml(server)}</strong></span>`
-            + `<span>Size: ${formatSize(m.message)}</span>`;
-
-        selectedRawMessage = m.message;
+        if (isLogCategory()) {
+            detailMeta.innerHTML = `<span>Time: ${formatTime(m.timestamp)}</span>`
+                + `<span>Level: <strong class="log-level ${m.level || 'info'}">${(m.level || 'info').toUpperCase()}</strong></span>`
+                + `<span>Category: <strong>${escapeHtml(m.category || currentCategory)}</strong></span>`;
+            selectedRawMessage = m.message || '';
+        } else {
+            const parsed = parseEvent(m.message);
+            const msgData = parseMsgData(m.message);
+            const action = msgData ? extractAction(msgData) : '—';
+            const server = msgData ? resolveServer(msgData) : '—';
+            const dirClass = m.direction === 'sent' ? 'dir-sent' : 'dir-received';
+            const dirLabel = m.direction === 'sent' ? '▲ SENT' : '▼ RECEIVED';
+            detailMeta.innerHTML = `<span class="${dirClass}">${dirLabel}</span>`
+                + `<span>Time: ${formatTime(m.timestamp)}</span>`
+                + `<span>Event: <strong>${escapeHtml(parsed.event)}</strong></span>`
+                + `<span>Action: <strong>${escapeHtml(action)}</strong></span>`
+                + `<span>Server: <strong>${escapeHtml(server)}</strong></span>`
+                + `<span>Size: ${formatSize(m.message)}</span>`;
+            selectedRawMessage = m.message;
+        }
         renderDetailBody();
 
         detailSearchInput.value = '';
@@ -782,15 +1029,19 @@
     function closeDetail() {
         detailPanel.classList.remove('open');
         selectedIndex = -1;
-        const rows = messageList.querySelectorAll('.msg-row');
+        const rows = messageList.querySelectorAll('.msg-row, .log-row');
         rows.forEach(r => r.classList.remove('selected'));
     }
 
     // --- Stats ---
     function updateStats() {
-        const sent = filteredMessages.filter(m => m.direction === 'sent').length;
-        const recv = filteredMessages.filter(m => m.direction === 'received').length;
-        statsLabel.textContent = `(▲${sent} ▼${recv})`;
+        if (isLogCategory()) {
+            statsLabel.textContent = `(${filteredMessages.length} entries)`;
+        } else {
+            const sent = filteredMessages.filter(m => m.direction === 'sent').length;
+            const recv = filteredMessages.filter(m => m.direction === 'received').length;
+            statsLabel.textContent = `(▲${sent} ▼${recv})`;
+        }
     }
 
     function toggleLive() {
@@ -825,37 +1076,57 @@
     }
 
     function exportAsJson() {
-        const data = filteredMessages.map(m => {
-            const parsed = parseEvent(m.message);
-            const msgData = parseMsgData(m.message);
-            return {
-                direction: m.direction,
+        if (isLogCategory()) {
+            const data = filteredMessages.map(m => ({
                 timestamp: m.timestamp,
-                event: parsed.event,
-                action: msgData ? extractAction(msgData) : '—',
-                server: msgData ? resolveServer(msgData) : '—',
-                preview: getPreviewText(msgData, m.message),
-                raw: m.message,
-                data: msgData
-            };
-        });
-        downloadFile('cor3-ws-export.json', JSON.stringify(data, null, 2), 'application/json');
+                level: m.level || 'info',
+                category: m.category || currentCategory,
+                message: m.message
+            }));
+            downloadFile('cor3-' + currentCategory + '-export.json', JSON.stringify(data, null, 2), 'application/json');
+        } else {
+            const data = filteredMessages.map(m => {
+                const parsed = parseEvent(m.message);
+                const msgData = parseMsgData(m.message);
+                return {
+                    direction: m.direction,
+                    timestamp: m.timestamp,
+                    event: parsed.event,
+                    action: msgData ? extractAction(msgData) : '—',
+                    server: msgData ? resolveServer(msgData) : '—',
+                    preview: getPreviewText(msgData, m.message),
+                    raw: m.message,
+                    data: msgData
+                };
+            });
+            downloadFile('cor3-ws-export.json', JSON.stringify(data, null, 2), 'application/json');
+        }
     }
 
     function exportAsMd() {
-        let md = '| Dir | Time | Event | Action | Server | Preview | Size |\n';
-        md += '|-----|------|-------|--------|--------|---------|------|\n';
-        for (const m of filteredMessages) {
-            const parsed = parseEvent(m.message);
-            const msgData = parseMsgData(m.message);
-            const action = msgData ? extractAction(msgData) : '—';
-            const server = msgData ? resolveServer(msgData) : '—';
-            const dir = m.direction === 'sent' ? '▲' : '▼';
-            let preview = getPreviewText(msgData, m.message);
-            preview = preview.replace(/\|/g, '\\|');
-            md += `| ${dir} | ${formatTime(m.timestamp)} | ${parsed.event} | ${action} | ${server} | ${preview} | ${formatSize(m.message)} |\n`;
+        if (isLogCategory()) {
+            let md = '| Time | Level | Message |\n';
+            md += '|------|-------|---------|\n';
+            for (const m of filteredMessages) {
+                const msg = (m.message || '').replace(/\|/g, '\\|').replace(/\n/g, ' ');
+                md += `| ${formatTime(m.timestamp)} | ${(m.level || 'info').toUpperCase()} | ${msg} |\n`;
+            }
+            downloadFile('cor3-' + currentCategory + '-export.md', md, 'text/markdown');
+        } else {
+            let md = '| Dir | Time | Event | Action | Server | Preview | Size |\n';
+            md += '|-----|------|-------|--------|--------|---------|------|\n';
+            for (const m of filteredMessages) {
+                const parsed = parseEvent(m.message);
+                const msgData = parseMsgData(m.message);
+                const action = msgData ? extractAction(msgData) : '—';
+                const server = msgData ? resolveServer(msgData) : '—';
+                const dir = m.direction === 'sent' ? '▲' : '▼';
+                let preview = getPreviewText(msgData, m.message);
+                preview = preview.replace(/\|/g, '\\|');
+                md += `| ${dir} | ${formatTime(m.timestamp)} | ${parsed.event} | ${action} | ${server} | ${preview} | ${formatSize(m.message)} |\n`;
+            }
+            downloadFile('cor3-ws-export.md', md, 'text/markdown');
         }
-        downloadFile('cor3-ws-export.md', md, 'text/markdown');
     }
 
     function downloadFile(filename, content, mimeType) {
@@ -881,19 +1152,23 @@
             sendInput.value = '';
             console.log('[COR3 Panel] Sent WS message to tab', tabId);
         } catch (e) {
-            console.error('[COR3 Panel] Failed to send WS message:', e);
+            console.log('[COR3 Panel] Failed to send WS message:', e);
             alert('Failed to send: ' + e.message);
         }
     }
 
-    // --- Clear messages (deletes from IndexedDB) ---
+    // --- Clear messages (deletes from IndexedDB, per category) ---
     async function clearMessages() {
         allMessages = [];
         filteredMessages = [];
         selectedIndex = -1;
         lastLiveTimestamp = new Date().toISOString();
         closeDetail();
-        await dbClear();
+        if (isLogCategory()) {
+            await logDbClear(currentCategory);
+        } else {
+            await dbClear();
+        }
         await refreshPageSelector();
         applyFilters();
     }
@@ -937,12 +1212,39 @@
         handle.addEventListener('mousedown', onResizeStart);
     });
 
+    // --- Category switch ---
+    categorySelect.addEventListener('change', async () => {
+        currentCategory = categorySelect.value;
+        const logMode = isLogCategory();
+        document.body.classList.toggle('log-mode', logMode);
+        filterSent.parentElement.style.display = logMode ? 'none' : '';
+        filterReceived.parentElement.style.display = logMode ? 'none' : '';
+        btnSendToggle.style.display = logMode ? 'none' : '';
+        if (logMode && sendPanel.classList.contains('open')) {
+            sendPanel.classList.remove('open');
+            btnSendToggle.classList.remove('active');
+        }
+        if (liveMode) {
+            liveMode = false;
+            btnLive.classList.remove('active');
+            btnLive.textContent = '● Live';
+            if (liveTimer) clearInterval(liveTimer);
+            liveTimer = null;
+        }
+        allMessages = [];
+        filteredMessages = [];
+        selectedIndex = -1;
+        currentPage = -1;
+        closeDetail();
+        await refreshPageSelector();
+        await loadCurrentPage();
+    });
+
     // --- Event Listeners ---
     btnLive.addEventListener('click', toggleLive);
     btnRefresh.addEventListener('click', async () => {
         await refreshPageSelector();
         await loadCurrentPage();
-        console.log('[COR3 Panel] Manual refresh completed');
     });
     btnClear.addEventListener('click', clearMessages);
     detailClose.addEventListener('click', closeDetail);
@@ -1036,14 +1338,14 @@
             e.preventDefault();
             const next = Math.min(selectedIndex + 1, filteredMessages.length - 1);
             selectMessage(next);
-            const rows = messageList.querySelectorAll('.msg-row');
+            const rows = messageList.querySelectorAll('.msg-row, .log-row');
             if (rows[next]) rows[next].scrollIntoView({ block: 'nearest' });
         }
         if (e.key === 'ArrowUp') {
             e.preventDefault();
             const prev = Math.max(selectedIndex - 1, 0);
             selectMessage(prev);
-            const rows = messageList.querySelectorAll('.msg-row');
+            const rows = messageList.querySelectorAll('.msg-row, .log-row');
             if (rows[prev]) rows[prev].scrollIntoView({ block: 'nearest' });
         }
     });

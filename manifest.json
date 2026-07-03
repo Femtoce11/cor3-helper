@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "COR3 Helper",
-  "version": "1.5.0",
+  "version": "1.5.5",
   "description": "Monitor markets, expeditions, daily ops, and get timer alerts for cor3.gg.",
   "permissions": [
     "storage",
@@ -31,6 +31,8 @@
         "https://os.cor3.gg/*"
       ],
       "js": [
+        "console-logger.js",
+        "notepack.min.js",
         "msgpack-codec.js",
         "content-early.js"
       ],
@@ -43,6 +45,7 @@
         "https://os.cor3.gg/*"
       ],
       "js": [
+        "console-logger.js",
         "errors.js",
         "ws-messages.js",
         "content.js"
@@ -68,6 +71,7 @@
         "decrypt-solver.js",
         "daily-hack-solver.js",
         "auto-job-solver.js",
+        "auto-valuable-seller.js",
         "ice-wall-solver.js",
         "simple-decrypt-solver.js"
       ],

@@ -451,6 +451,45 @@
             padding: 20px;
         }
 
+        .log-header {
+            display: grid;
+            grid-template-columns: 90px 60px 1fr;
+            padding: 3px 8px;
+            background: #181825;
+            border-bottom: 1px solid #313244;
+            font-size: 10px;
+            font-weight: bold;
+            color: #a6adc8;
+            flex-shrink: 0;
+        }
+        .log-row {
+            display: grid;
+            grid-template-columns: 90px 60px 1fr;
+            padding: 2px 8px;
+            border-bottom: 1px solid #1e1e2e;
+            cursor: pointer;
+            align-items: center;
+            min-height: 22px;
+        }
+        .log-row:hover { background: #313244; }
+        .log-row.selected { background: #45475a; }
+        .log-level { font-size: 10px; font-weight: 500; }
+        .log-level.info { color: #89b4fa; }
+        .log-level.success { color: #a6e3a1; }
+        .log-level.warn { color: #f9e2af; }
+        .log-level.error { color: #f38ba8; }
+        .log-message {
+            font-size: 11px;
+            color: #cdd6f4;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-family: Consolas, monospace;
+        }
+        .log-header, .log-row { display: none; }
+        body.log-mode .log-header, body.log-mode .log-row { display: grid; }
+        body.log-mode .message-list-header, body.log-mode .msg-row { display: none; }
+
         #pageSelector {
             background: #1e1e2e; color: #cdd6f4; border: 1px solid #45475a; border-radius: 4px;
             padding: 2px 4px; font-size: 11px; cursor: pointer; max-width: 140px;
@@ -472,7 +511,13 @@
     <label><input type="checkbox" id="filterSent" checked> Sent</label>
     <label><input type="checkbox" id="filterReceived" checked> Received</label>
     <div class="separator"></div>
-    <input type="text" id="searchInput" placeholder="Filter by event or content...">
+    <select id="categorySelect" title="Log category">
+        <option value="ws-messages">WS Messages</option>
+        <option value="auto-jobs">Auto Job Solver</option>
+        <option value="auto-valuable">Auto Valuable Seller</option>
+        <option value="error-logs">Error Logs</option>
+    </select>
+    <input type="text" id="searchInput" placeholder="Filter by event or content..." style="min-width:120px;">
     <div class="separator"></div>
     <button id="btnSendToggle" title="Toggle send panel">✉ Send</button>
     <button id="btnClear" class="danger" title="Clear all messages">✕ Clear</button>
@@ -499,6 +544,11 @@
             <span class="col-header" data-col="server">Server<span class="col-resize" data-col="server"></span></span>
             <span class="col-header">Preview</span>
             <span class="col-header" style="text-align:right">Size</span>
+        </div>
+        <div class="log-header" id="logHeader">
+            <span>Time</span>
+            <span>Level</span>
+            <span>Message</span>
         </div>
         <div class="message-list" id="messageList">
             <div class="empty-state" id="emptyState">

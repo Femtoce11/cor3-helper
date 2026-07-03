@@ -6,7 +6,7 @@ const themeDropdown = document.getElementById('themeDropdown');
 const themeOptions = themeDropdown.querySelectorAll('.theme-option');
 
 function applyTheme(themeName) {
-    document.body.className = '';
+    document.body.classList.forEach(cls => { if (cls.startsWith('theme-')) document.body.classList.remove(cls); });
     if (themeName) {
         document.body.classList.add('theme-' + themeName);
     }
@@ -78,7 +78,7 @@ async function applyHelperMode(isHelper, mode) {
                 value = isHelper ? disabledValue : (oldValues[key] ?? disabledValue);
                 chrome.storage.sync.set({ [key]: value });
             } else if (key === 'autoSendMerc') {
-                disabledValue = {"autoChooseMerc":false,"disabledReason":null,"enabled":false,"mercenaryId":"","mercenaryName":""};
+                disabledValue = {"autoChooseMerc":false,"autoChooseUsolFirst":false,"ignoreEliteMerc":false,"disabledReason":null,"enabled":false,"mercenaryId":"","mercenaryName":""};
                 value = isHelper ? disabledValue : (oldValues[key] ?? disabledValue);
                 chrome.storage.sync.set({ [key]: value });
             } else if (key === 'decisionModifiers') {
@@ -143,6 +143,8 @@ async function applyHelperMode(isHelper, mode) {
 
         (document.getElementById('autoSendMercenaryToggle')).checked = !!toggles.autoSendMerc.enabled ?? false;
         (document.getElementById('autoChooseMercToggle')).checked = !!toggles.autoSendMerc.autoChooseMerc ?? false;
+        (document.getElementById('autoChooseUsolFirstToggle')).checked = !!toggles.autoSendMerc.autoChooseUsolFirst ?? false;
+        (document.getElementById('ignoreEliteMercToggle')).checked = !!toggles.autoSendMerc.ignoreEliteMerc ?? false;
         (document.getElementById('autoSellCheapestToggle')).checked = !!toggles.autoSellCheapest ?? false;
 
     }
@@ -157,13 +159,13 @@ async function applyHelperMode(isHelper, mode) {
 
     // Auto Jobs and Auto Update Markets
 
-    ['autoJobSolverToggle', 'autoUpdateMarketsToggle'].forEach(key => {
+    ['autoJobSolverToggle', 'autoValuableSellerToggle', 'autoUpdateMarketsToggle'].forEach(key => {
         ((document.getElementById(key)).closest('.auto-decrypt-row')).style.display = isHelper ? 'none' : 'flex';
     });
 
     // Auto Decisions and Auto Mercs
 
-    ['noWaitAutoChooseCheckbox', 'autoChooseCheckbox', 'autoSellCheapestToggle', 'autoChooseMercToggle', 'autoSendMercenaryToggle'].forEach(key => {
+    ['noWaitAutoChooseCheckbox', 'autoChooseCheckbox', 'autoSellCheapestToggle', 'autoChooseMercToggle', 'autoChooseUsolFirstToggle', 'ignoreEliteMercToggle', 'autoSendMercenaryToggle'].forEach(key => {
         ((document.getElementById(key)).closest('.auto-choose-row')).style.display = isHelper ? 'none' : 'flex';
     });
 
@@ -189,9 +191,181 @@ const sidePanelBtn = document.getElementById('sidePanelBtn');
 // Detect if we're running inside a popout window (via ?mode=popout query param)
 (function detectMode() {
     const params = new URLSearchParams(window.location.search);
-    if (params.get('mode') === 'popout') {
-        document.body.classList.add('mode-popout');
+    const isPopout = params.get('mode') === 'popout';
+    const isSidePanel = params.get('mode') === 'sidepanel';
+    if (!isPopout && !isSidePanel) return;
+    document.body.classList.add(isPopout ? 'mode-popout' : 'mode-sidepanel');
+
+    // --- Build popout multi-column grid dynamically ---
+    const mainView = document.getElementById('mainView');
+    if (!mainView) return;
+
+    function makeCard(elements) {
+        const card = document.createElement('div');
+        card.className = 'popout-card';
+        for (const el of elements) card.appendChild(el);
+        return card;
     }
+
+    const grid = document.createElement('div');
+    grid.id = 'popoutGrid';
+
+    const headerRow = mainView.querySelector('.header-row');
+    const insertRef = headerRow ? headerRow.nextSibling : mainView.firstChild;
+    const wrappedEls = new Set();
+
+    function addCard(elements) {
+        if (!elements || elements.length === 0) return;
+        const filtered = elements.filter(Boolean);
+        if (filtered.length === 0) return;
+        const card = makeCard(filtered);
+        grid.appendChild(card);
+        for (const el of filtered) wrappedEls.add(el);
+    }
+
+    const helperDiv = mainView.querySelector('#helperModeToggle')?.closest('div[style*="justify-content"]');
+    const pinned = document.getElementById('pinnedTimersSection');
+    addCard([helperDiv, pinned].filter(Boolean));
+
+    addCard([mainView.querySelector('.toggles-section')].filter(Boolean));
+
+    addCard([document.getElementById('autoJobSolverSection')].filter(Boolean));
+
+    addCard([document.getElementById('autoValuableSellerSection')].filter(Boolean));
+
+    const allSections = mainView.querySelectorAll(':scope > .section');
+
+    for (const s of allSections) {
+        if (s.textContent.includes('Daily Ops') && !s.querySelector('#marketContainer')) {
+            addCard([s]);
+            break;
+        }
+    }
+
+    let marketsSection = null;
+    for (const s of allSections) {
+        if (s.querySelector('#marketContainer')) { marketsSection = s; break; }
+    }
+    if (marketsSection) {
+        wrappedEls.add(marketsSection);
+        const mTitle = marketsSection.querySelector(':scope > .section-title');
+        const subSections = marketsSection.querySelectorAll(':scope > .sub-section');
+        const overlays = [
+            marketsSection.querySelector('#marketInfoOverlay'),
+            marketsSection.querySelector('#marketInfoPopup')
+        ].filter(Boolean);
+
+        if (subSections.length > 0) {
+            const firstGroup = [mTitle, subSections[0]].filter(Boolean);
+            if (subSections.length === 1) firstGroup.push(...overlays);
+            addCard(firstGroup);
+            for (let mi = 1; mi < subSections.length; mi++) {
+                const group = [subSections[mi]];
+                if (mi === subSections.length - 1) group.push(...overlays);
+                addCard(group);
+            }
+        } else {
+            addCard([marketsSection]);
+        }
+    }
+
+    let expeditionsSection = null;
+    for (const s of allSections) {
+        if (s.querySelector('#expeditionInfoContainer') || s.querySelector('#activeExpeditionSection')) {
+            expeditionsSection = s;
+            break;
+        }
+    }
+    if (expeditionsSection) {
+        wrappedEls.add(expeditionsSection);
+        const expChildren = Array.from(expeditionsSection.children);
+        const splitPoints = [
+            { id: 'personalDroneSectionToggle', label: 'Personal Drone' },
+            { id: 'decisionsSectionToggle', label: 'Decisions' },
+            { id: 'inventorySectionToggle', label: 'Inventory' },
+            { id: 'mercenariesSectionToggle', label: 'Mercenaries' },
+            { id: 'archivedExpSectionToggle', label: 'Archived' }
+        ];
+        const splitIndices = [];
+        for (const sp of splitPoints) {
+            const idx = expChildren.findIndex(el =>
+                el.nodeType === 1 && (el.id === sp.id || el.querySelector('#' + sp.id))
+            );
+            if (idx >= 0) splitIndices.push(idx);
+        }
+        splitIndices.sort((a, b) => a - b);
+
+        if (splitIndices.length > 0) {
+            addCard(expChildren.slice(0, splitIndices[0]));
+            for (let si = 0; si < splitIndices.length; si++) {
+                const start = splitIndices[si];
+                const end = si + 1 < splitIndices.length ? splitIndices[si + 1] : expChildren.length;
+                addCard(expChildren.slice(start, end));
+            }
+        } else {
+            addCard([expeditionsSection]);
+        }
+    }
+
+    let loadoutSection = null;
+    for (const s of allSections) {
+        if (s.querySelector('#refreshLoadoutBtn') || s.querySelector('#loadoutHwContainer')) {
+            loadoutSection = s;
+            break;
+        }
+    }
+    if (loadoutSection) {
+        wrappedEls.add(loadoutSection);
+        const ldChildren = Array.from(loadoutSection.children);
+        const swToggleIdx = ldChildren.findIndex(el => el.querySelector('#loadoutSwToggle') || el.id === 'loadoutSwToggle');
+        const ovToggleIdx = ldChildren.findIndex(el => el.querySelector('#loadoutOverviewToggle') || el.id === 'loadoutOverviewToggle');
+        const ldSplits = [swToggleIdx, ovToggleIdx].filter(i => i >= 0).sort((a, b) => a - b);
+
+        if (ldSplits.length > 0) {
+            addCard(ldChildren.slice(0, ldSplits[0]));
+            for (let li = 0; li < ldSplits.length; li++) {
+                const start = ldSplits[li];
+                const end = li + 1 < ldSplits.length ? ldSplits[li + 1] : ldChildren.length;
+                addCard(ldChildren.slice(start, end));
+            }
+        } else {
+            addCard([loadoutSection]);
+        }
+    }
+
+    for (const s of allSections) {
+        if (wrappedEls.has(s)) continue;
+        if (s.querySelector('.alarm-section-title') || s.querySelector('#alarmList')) {
+            addCard([s]);
+        }
+    }
+
+    const versionEls = [];
+    const vi = document.getElementById('versionInfoSection');
+    if (vi) { const p = vi.closest('div[style*="border-top"]'); if (p) versionEls.push(p); }
+    const cb = document.getElementById('checkUpdateBtn');
+    if (cb) { const p = cb.closest('div[style*="text-align:center"]'); if (p) versionEls.push(p); }
+    const st = document.getElementById('status');
+    if (st) versionEls.push(st);
+    addCard(versionEls);
+
+    if (marketsSection) marketsSection.remove();
+    if (expeditionsSection) expeditionsSection.remove();
+    if (loadoutSection) loadoutSection.remove();
+
+    const remaining = Array.from(mainView.children).filter(
+        el => !wrappedEls.has(el) && el !== headerRow && !el.classList.contains('theme-dropdown') && el !== grid
+    );
+    for (const el of remaining) {
+        if (el.nodeType !== 1) continue;
+        if (el.id === 'popoutGrid') continue;
+        const card = document.createElement('div');
+        card.className = 'popout-card';
+        card.appendChild(el);
+        grid.appendChild(card);
+    }
+
+    mainView.insertBefore(grid, insertRef);
 })();
 
 // Helper: find the cor3.gg tab across all windows (needed for pop-out window mode)
@@ -614,8 +788,12 @@ function renderExpeditionInfo(expeditions) {
             `;
         } else {
             // State 1: Normal running/event state
-            bodyHtml = `
-                <div class="detail-row"><span class="label">Mercenary:</span> 🧑 ${mercName}</div>
+            bodyHtml = `<div class="detail-row"><span class="label">Mercenary:</span> 🧑 ${mercName}`;
+            if (exp.specialization === "PROSPECTOR") {
+                bodyHtml += `<span class="merc-elite-badge">ELITE</span>`;
+            }
+            bodyHtml += `</div>`;
+            bodyHtml += `
                 <div class="detail-row"><span class="label">Total Cost:</span> 💰 ${exp.totalCost ? exp.totalCost.toLocaleString() : '--'}</div>
                 <div class="detail-row"><span class="label">Insurance:</span> ${insurance}</div>
                 <div class="detail-row"><span class="label">Risk Score:</span> ${exp.riskScore ?? '--'}</div>
@@ -1202,7 +1380,8 @@ function renderInventory(data) {
                     });
                 }
             } catch (err) {
-                console.error('[COR3 Helper] Sell item error:', err);
+                console.log('[COR3 Helper] Sell item error:', err);
+                cor3LogError('popup.js', err, { action: 'sellItem' });
             }
         });
     });
@@ -1354,7 +1533,7 @@ async function fetchDailyOps() {
             if (dailyOpsData) await displayDailyOpsData(dailyOpsData);
         }
     } catch (e) {
-        console.error('[COR3 Helper] Daily ops fetch error:', e);
+        console.log('[COR3 Helper] Daily ops fetch error:', e);
         cor3LogError('popup.js', e, { action: 'fetchDailyOps' });
         try {
             const { dailyOpsData } = await chrome.storage.local.get('dailyOpsData');
@@ -2294,9 +2473,14 @@ async function refreshMercenariesOnly() {
     mercenariesContainer.innerHTML = '<div class="no-decisions">Loading mercenaries...</div>';
     try {
         const tab = await getCor3Tab();
-        if (tab) await chrome.tabs.sendMessage(tab.id, { action: "requestMercenaries" });
+        if (tab) {
+            await chrome.storage.local.remove(['coreMercsDone', 'usolMercsDone']);
+            await chrome.tabs.sendMessage(tab.id, { action: "requestMercenaries" });
+            await waitForStorageKey('coreMercsDone', 30000);
+            try { await chrome.tabs.sendMessage(tab.id, { action: "requestUsolMercenaries" }); } catch (e) {}
+            await waitForStorageKey('usolMercsDone', 30000).catch(() => {});
+        }
     } catch (e) {}
-    await waitForStorageKey('mercenariesData', 5000);
     await loadMercenaries();
     refreshAllTimestamps();
 }
@@ -2357,19 +2541,19 @@ refreshAllBtn.addEventListener('click', async () => {
         await executeRefreshStep('inventory', refreshInventoryOnly);
         await humanDelay();
 
-        // 8. Archived Expeditions
-        await executeRefreshStep('archived', refreshArchivedOnly);
+        // 8. Mercenary data
+        await executeRefreshStep('mercenaries', refreshMercenariesOnly);
         await humanDelay();
 
-        // 9. Mercenary data
-        await executeRefreshStep('mercenaries', refreshMercenariesOnly);
+        // 9. Archived Expeditions
+        await executeRefreshStep('archived', refreshArchivedOnly);
         await humanDelay();
 
         // 10. Loadout
         await executeRefreshStep('loadout', refreshLoadoutOnly);
 
     } catch (e) {
-        console.error('[COR3 Helper] Refresh All error:', e);
+        console.log('[COR3 Helper] Refresh All error:', e);
         cor3LogError('popup.js', e, { action: 'refreshAll' });
     }
 
@@ -2384,7 +2568,8 @@ async function executeRefreshStep(name, operation) {
         await operation();
         console.log(`[COR3 Helper] Refresh All: Completed ${name}`);
     } catch (error) {
-        console.error(`[COR3 Helper] Refresh All: Failed ${name}:`, error);
+        console.log(`[COR3 Helper] Refresh All: Failed ${name}:`, error);
+        cor3LogError('popup.js', error, { action: 'refreshStep-' + name });
     }
 }
 
@@ -2779,7 +2964,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
     if (changes.archivedExpeditionsData) {
         loadArchivedExpeditions();
     }
-    if (changes.mercenariesData || changes.mercConfigData) {
+    if (changes.mercenariesData || changes.usolMercenariesData || changes.mercConfigData) {
         loadMercenaries();
     }
     // Live-update market data (handles initial load, background refreshes, error states)
@@ -3923,6 +4108,8 @@ const mercenariesContainer = document.getElementById('mercenariesContainer');
 const refreshMercenariesBtn = document.getElementById('refreshMercenariesBtn');
 const autoSendMercenaryToggle = document.getElementById('autoSendMercenaryToggle');
 const autoChooseMercToggle = document.getElementById('autoChooseMercToggle');
+const autoChooseUsolFirstToggle = document.getElementById('autoChooseUsolFirstToggle');
+const ignoreEliteMercToggle = document.getElementById('ignoreEliteMercToggle');
 const mercenaryConfigRow = document.getElementById('mercenaryConfigRow');
 const selectedMercenaryName = document.getElementById('selectedMercenaryName');
 const mercStashWarning = document.getElementById('mercStashWarning');
@@ -3958,9 +4145,16 @@ async function requestMercenaries() {
     mercenariesContainer.innerHTML = '<div class="no-decisions">Loading mercenaries...</div>';
     try {
         const tab = await getCor3Tab();
-        if (tab) await chrome.tabs.sendMessage(tab.id, { action: "requestMercenaries" });
+        if (tab) {
+            await chrome.storage.local.remove(['coreMercsDone', 'usolMercsDone']);
+            await chrome.tabs.sendMessage(tab.id, { action: "requestMercenaries" });
+            await waitForStorageKey('coreMercsDone', 30000);
+            try { await chrome.tabs.sendMessage(tab.id, { action: "requestUsolMercenaries" }); } catch (e) {}
+            await waitForStorageKey('usolMercsDone', 30000).catch(() => {});
+        }
     } catch (e) { /* not reachable */ }
-    setTimeout(() => loadMercenaries(), 3000);
+    await loadMercenaries();
+    refreshAllTimestamps();
 }
 
 if (refreshMercenariesBtn) {
@@ -3972,6 +4166,8 @@ chrome.storage.sync.get('autoSendMerc', (data) => {
     if (data.autoSendMerc) {
         autoSendMercenaryToggle.checked = !!data.autoSendMerc.enabled;
         if (autoChooseMercToggle) autoChooseMercToggle.checked = !!data.autoSendMerc.autoChooseMerc;
+        if (autoChooseUsolFirstToggle) autoChooseUsolFirstToggle.checked = !!data.autoSendMerc.autoChooseUsolFirst;
+        if (ignoreEliteMercToggle) ignoreEliteMercToggle.checked = !!data.autoSendMerc.ignoreEliteMerc;
         selectedMercenaryId = data.autoSendMerc.mercenaryId || null;
         if (selectedMercenaryId && mercenaryConfigRow) {
             mercenaryConfigRow.style.display = '';
@@ -3992,6 +4188,8 @@ function saveAutoSendMercSettings() {
                 autoSendMerc: {
                     enabled: isEnabling,
                     autoChooseMerc: autoChooseMercToggle ? autoChooseMercToggle.checked : false,
+                    autoChooseUsolFirst: autoChooseUsolFirstToggle ? autoChooseUsolFirstToggle.checked : false,
+                    ignoreEliteMerc: ignoreEliteMercToggle ? ignoreEliteMercToggle.checked : false,
                     mercenaryId: selectedMercenaryId,
                     mercenaryName: selectedMercenaryName ? selectedMercenaryName.textContent : '',
                     // Clear disabledReason only when user re-enables; otherwise preserve it
@@ -4019,6 +4217,18 @@ if (autoChooseMercToggle) {
         loadMercenaries();
     });
 }
+if (autoChooseUsolFirstToggle) {
+    autoChooseUsolFirstToggle.addEventListener('change', () => {
+        saveAutoSendMercSettings();
+        loadMercenaries();
+    });
+}
+if (ignoreEliteMercToggle) {
+    ignoreEliteMercToggle.addEventListener('change', () => {
+        saveAutoSendMercSettings();
+        loadMercenaries();
+    });
+}
 
 // Auto-sell cheapest items toggle
 const autoSellCheapestToggle = document.getElementById('autoSellCheapestToggle');
@@ -4032,48 +4242,162 @@ if (autoSellCheapestToggle) {
 }
 
 async function loadMercenaries() {
-    const { mercenariesData, mercConfigData } = await chrome.storage.local.get(['mercenariesData', 'mercConfigData']);
-    // Attach expedition config data to each mercenary if available
-    if (mercenariesData && mercConfigData) {
-        let mercs = mercenariesData;
+    const { mercenariesData, usolMercenariesData, mercConfigData } = await chrome.storage.local.get(['mercenariesData', 'usolMercenariesData', 'mercConfigData']);
+    function attachConfigs(data) {
+        if (!data || !mercConfigData) return;
+        let mercs = data;
         if (mercs && !Array.isArray(mercs) && mercs.mercenaries) mercs = mercs.mercenaries;
         if (mercs && !Array.isArray(mercs) && mercs.data) mercs = mercs.data;
         if (Array.isArray(mercs)) {
             for (const merc of mercs) {
-                if (mercConfigData[merc.id]) {
-                    merc._expeditionConfig = mercConfigData[merc.id];
-                }
+                if (mercConfigData[merc.id]) merc._expeditionConfig = mercConfigData[merc.id];
             }
         }
+        // Also attach to eliteSlots mercenaries
+        const raw = data && data.data ? data.data : data;
+        if (raw && raw.eliteSlots && mercConfigData) {
+            raw.eliteSlots.forEach(es => {
+                if (es.mercenary && mercConfigData[es.mercenary.id]) es.mercenary._expeditionConfig = mercConfigData[es.mercenary.id];
+            });
+        }
     }
-    renderMercenaries(mercenariesData);
+    attachConfigs(mercenariesData);
+    attachConfigs(usolMercenariesData);
+    renderMercenaries(mercenariesData, usolMercenariesData);
     refreshAllTimestamps();
 }
 
-function renderMercenaries(data) {
+function parseMercList(data) {
+    if (!data) return { mercs: [], eliteSlots: [] };
+    let raw = data;
+    if (raw && !Array.isArray(raw) && raw.data) raw = raw.data;
+    let mercs = [];
+    let eliteSlots = [];
+    if (raw && raw.mercenaries) mercs = raw.mercenaries;
+    else if (Array.isArray(raw)) mercs = raw;
+    if (raw && raw.eliteSlots) eliteSlots = raw.eliteSlots;
+    return { mercs, eliteSlots };
+}
+
+function buildMercCard(merc, isElite) {
+    const card = document.createElement('div');
+    card.className = 'merc-card' + (selectedMercenaryId === merc.id ? ' selected' : '');
+    card.dataset.mercId = merc.id;
+
+    const status = (merc.status || 'AVAILABLE').toUpperCase();
+    let statusClass = 'available';
+    if (status === 'RESTING') statusClass = 'resting';
+    else if (status === 'CONTRACTED') statusClass = 'contracted';
+
+    let restTimer = '';
+    if (status === 'RESTING' && merc.restUntil) {
+        const restEnd = new Date(merc.restUntil).getTime();
+        const now = Date.now();
+        const diff = restEnd - now;
+        if (diff > 0) {
+            const h = Math.floor(diff / 3600000);
+            const m = Math.floor((diff % 3600000) / 60000);
+            restTimer = `<span class="merc-rest-timer">⏳ ${h}h ${m}m</span>`;
+            mercRestTimers[merc.id] = merc.restUntil;
+        }
+    }
+
+    const specName = merc.specializationName || merc.specialization || '--';
+    const specDesc = merc.specializationDescription || '';
+    const traitName = merc.traitName || merc.trait || '--';
+    const traitDesc = merc.traitDescription || '';
+
+    let avatarHtml = '';
+    if (merc.avatarSeed && merc.avatarSeed.startsWith('http')) {
+        avatarHtml = `<img class="merc-avatar" src="${merc.avatarSeed}" alt="${merc.callsign || ''}" loading="lazy">`;
+    }
+
+    let html = `${avatarHtml}<div class="merc-details">`;
+    html += `<div class="merc-name">${merc.callsign || merc.name || 'Unknown'}`;
+    if (isElite) html += `<span class="merc-elite-badge">ELITE</span>`;
+    html += `</div>`;
+    html += `<div style="margin-top:4px;"><span class="merc-status ${statusClass}">${status}</span>${restTimer}</div>`;
+    if (merc.faction) {
+        html += `<div class="merc-faction">`;
+        const factionDisplay = (merc.faction.name || '').replace('factions.', '').replace(/([A-Z])/g, ' $1').trim().split(" ")[0].toUpperCase();
+        html += `Faction: <b>${factionDisplay}</b></div>`;
+    }
+    html += `<div class="merc-info">`;
+    html += `Rank: ${merc.rank || '--'} · Missions: ${merc.missionsCompleted ?? '--'}<br>`;
+    html += `Spec: <b>${specName}</b>`;
+    if (specDesc) html += ` <span style="color:var(--text-dim);font-size:9px;">— ${specDesc}</span>`;
+    html += `<br>Trait: <b>${traitName}</b>`;
+    if (traitDesc) html += ` <span style="color:var(--text-dim);font-size:9px;">— ${traitDesc}</span>`;
+    if (merc.reputationRequirement) html += `<br>Rep Required: ${merc.reputationRequirement}`;
+    const cfg = merc._expeditionConfig;
+    if (cfg) {
+        html += `<br><span style="color:var(--accent-orange);">Cost: 💰 ${(cfg.totalCost || 0).toLocaleString()}</span>`;
+        html += ` · <span style="color:var(--accent-cyan);">Risk: ${cfg.riskScore ?? '--'}</span>`;
+        if (cfg.outcomeChances) {
+            html += `<br>Failed-Survive: ${cfg.outcomeChances.failureSurviveChance ?? '--'}%`;
+            html += ` · Death: ${cfg.outcomeChances.deathChance ?? '--'}%`;
+        }
+    }
+    html += `</div></div>`;
+    card.innerHTML = html;
+
+    card.addEventListener('click', () => {
+        if ((autoChooseMercToggle && autoChooseMercToggle.checked) || (autoSendMercenaryToggle && !autoSendMercenaryToggle.checked)) return;
+        selectedMercenaryId = merc.id;
+        if (selectedMercenaryName) selectedMercenaryName.textContent = merc.callsign || merc.name || merc.id;
+        if (mercenaryConfigRow) mercenaryConfigRow.style.display = '';
+        mercenariesContainer.querySelectorAll('.merc-card').forEach(c => c.classList.remove('selected'));
+        card.classList.add('selected');
+        saveAutoSendMercSettings();
+    });
+
+    return card;
+}
+
+function renderMercenaries(coreData, usolData) {
     if (!mercenariesContainer) return;
     mercenariesContainer.innerHTML = '';
 
-    let mercs = data;
-    if (data && !Array.isArray(data) && data.mercenaries) mercs = data.mercenaries;
-    if (data && !Array.isArray(data) && data.data) mercs = data.data;
+    const coreParsed = parseMercList(coreData);
+    const usolParsed = parseMercList(usolData);
 
-    if (!mercs || !Array.isArray(mercs) || mercs.length === 0) {
-        mercenariesContainer.innerHTML = '<div class="no-decisions">No mercenaries found.</div>';
-        return;
-    }
+    const eliteMercIds = new Set();
+    [...coreParsed.eliteSlots, ...usolParsed.eliteSlots].forEach(es => {
+        if (es.mercenary && es.mercenary.id) eliteMercIds.add(es.mercenary.id);
+    });
 
-    // Auto-choose: select cheapest AVAILABLE mercenary (least risk on tie)
+    // Combine all mercs for auto-choose (tag with _market and _isElite)
+    const allMercs = [];
+    coreParsed.mercs.forEach(m => { m._market = 'core'; m._isElite = eliteMercIds.has(m.id); allMercs.push(m); });
+    coreParsed.eliteSlots.forEach(es => {
+        if (es.mercenary) { es.mercenary._market = 'core'; es.mercenary._isElite = true; if (!allMercs.find(x => x.id === es.mercenary.id)) allMercs.push(es.mercenary); }
+    });
+    usolParsed.mercs.forEach(m => { m._market = 'usol'; m._isElite = eliteMercIds.has(m.id); allMercs.push(m); });
+    usolParsed.eliteSlots.forEach(es => {
+        if (es.mercenary) { es.mercenary._market = 'usol'; es.mercenary._isElite = true; if (!allMercs.find(x => x.id === es.mercenary.id)) allMercs.push(es.mercenary); }
+    });
+
+    // Auto-choose logic with multi-market support
     if (autoChooseMercToggle && autoChooseMercToggle.checked) {
-        const available = mercs.filter(m => m.status === 'AVAILABLE' && m._expeditionConfig);
+        const ignoreElite = ignoreEliteMercToggle && ignoreEliteMercToggle.checked;
+        const usolFirst = autoChooseUsolFirstToggle && autoChooseUsolFirstToggle.checked;
+        let available = allMercs.filter(m => m.status === 'AVAILABLE' && m._expeditionConfig);
+        if (ignoreElite) available = available.filter(m => !m._isElite);
         if (available.length > 0) {
             available.sort((a, b) => {
+                if (usolFirst) {
+                    if (a._market === 'usol' && b._market !== 'usol') return -1;
+                    if (a._market !== 'usol' && b._market === 'usol') return 1;
+                }
                 const costA = (a._expeditionConfig && a._expeditionConfig.totalCost) || Infinity;
                 const costB = (b._expeditionConfig && b._expeditionConfig.totalCost) || Infinity;
                 if (costA !== costB) return costA - costB;
                 const riskA = (a._expeditionConfig && a._expeditionConfig.riskScore) || 0;
                 const riskB = (b._expeditionConfig && b._expeditionConfig.riskScore) || 0;
-                return riskA - riskB;
+                if (riskA !== riskB) return riskA - riskB;
+                if (a._market === 'usol' && b._market !== 'usol') return -1;
+                if (a._market !== 'usol' && b._market === 'usol') return 1;
+                return 0;
             });
             selectedMercenaryId = available[0].id;
             if (selectedMercenaryName) selectedMercenaryName.textContent = available[0].callsign || available[0].name || available[0].id;
@@ -4082,89 +4406,70 @@ function renderMercenaries(data) {
         }
     }
 
-    for (const merc of mercs) {
-        const card = document.createElement('div');
-        card.className = 'merc-card' + (selectedMercenaryId === merc.id ? ' selected' : '');
-        card.dataset.mercId = merc.id;
+    const hasCore = coreParsed.mercs.length > 0 || coreParsed.eliteSlots.length > 0;
+    const hasUsol = usolParsed.mercs.length > 0 || usolParsed.eliteSlots.length > 0;
 
-        const status = (merc.status || 'AVAILABLE').toUpperCase();
-        let statusClass = 'available';
-        if (status === 'RESTING') statusClass = 'resting';
-        else if (status === 'CONTRACTED') statusClass = 'contracted';
+    if (!hasCore && !hasUsol) {
+        mercenariesContainer.innerHTML = '<div class="no-decisions">No mercenaries found.</div>';
+        return;
+    }
 
-        let restTimer = '';
-        if (status === 'RESTING' && merc.restUntil) {
-            const restEnd = new Date(merc.restUntil).getTime();
-            const now = Date.now();
-            const diff = restEnd - now;
-            if (diff > 0) {
-                const h = Math.floor(diff / 3600000);
-                const m = Math.floor((diff % 3600000) / 60000);
-                restTimer = `<span class="merc-rest-timer">⏳ ${h}h ${m}m</span>`;
-                mercRestTimers[merc.id] = merc.restUntil;
-            }
-        }
+    // Render CORE market row
+    if (hasCore) {
+        const row = document.createElement('div');
+        row.className = 'merc-market-row';
+        const header = document.createElement('div');
+        header.className = 'merc-market-header';
+        header.innerHTML = `<div><span class="expand-arrow-sub">▶</span><span class="merc-market-label">CORE Market (${coreParsed.mercs.length + coreParsed.eliteSlots.filter(es => es.mercenary).length})</span></div><img src="factions/core_faction-96x96.png" alt="CORE">`;
+        const body = document.createElement('div');
+        body.className = 'merc-market-body';
+        header.addEventListener('click', () => { header.classList.toggle('expanded'); body.classList.toggle('expanded'); });
+        coreParsed.eliteSlots.forEach(es => { if (es.mercenary) body.appendChild(buildMercCard(es.mercenary, true)); });
+        coreParsed.mercs.forEach(m => { if (!eliteMercIds.has(m.id)) body.appendChild(buildMercCard(m, false)); });
+        row.appendChild(header);
+        row.appendChild(body);
+        mercenariesContainer.appendChild(row);
+    }
 
-        const specName = merc.specializationName || merc.specialization || '--';
-        const specDesc = merc.specializationDescription || '';
-        const traitName = merc.traitName || merc.trait || '--';
-        const traitDesc = merc.traitDescription || '';
-
-        // Avatar image (avatarSeed is now a CDN URL)
-        let avatarHtml = '';
-        if (merc.avatarSeed && merc.avatarSeed.startsWith('http')) {
-            avatarHtml = `<img class="merc-avatar" src="${merc.avatarSeed}" alt="${merc.callsign || ''}" loading="lazy">`;
-        }
-
-        let html = `${avatarHtml}<div class="merc-details">`;
-        html += `<div class="merc-name">${merc.callsign || merc.name || 'Unknown'}</div>`;
-        html += `<div style="margin-bottom:4px;"><span class="merc-status ${statusClass}">${status}</span>${restTimer}</div>`;
-        html += `<div class="merc-info">`;
-        html += `Rank: ${merc.rank || '--'} · Missions: ${merc.missionsCompleted ?? '--'}<br>`;
-        html += `Spec: <b>${specName}</b>`;
-        if (specDesc) html += ` <span style="color:var(--text-dim);font-size:9px;">— ${specDesc}</span>`;
-        html += `<br>Trait: <b>${traitName}</b>`;
-        if (traitDesc) html += ` <span style="color:var(--text-dim);font-size:9px;">— ${traitDesc}</span>`;
-        if (merc.reputationRequirement) html += `<br>Rep Required: ${merc.reputationRequirement}`;
-        // Extended expedition config info (from configure call)
-        const cfg = merc._expeditionConfig;
-        if (cfg) {
-            html += `<br><span style="color:var(--accent-orange);">Cost: 💰 ${(cfg.totalCost || 0).toLocaleString()}</span>`;
-            html += ` · <span style="color:var(--accent-cyan);">Risk: ${cfg.riskScore ?? '--'}</span>`;
-            if (cfg.outcomeChances) {
-                html += `<br>Failed-Survive: ${cfg.outcomeChances.failureSurviveChance ?? '--'}%`;
-                html += ` · Death: ${cfg.outcomeChances.deathChance ?? '--'}%`;
-            }
-        }
-        html += `</div></div>`;
-
-        card.innerHTML = html;
-
-        // Click to select mercenary for auto-send (disabled when auto-choose merc is on)
-        card.addEventListener('click', () => {
-            if ((autoChooseMercToggle && autoChooseMercToggle.checked) || (autoSendMercenaryToggle && !autoSendMercenaryToggle.checked)) return;
-            selectedMercenaryId = merc.id;
-            if (selectedMercenaryName) selectedMercenaryName.textContent = merc.callsign || merc.name || merc.id;
-            if (mercenaryConfigRow) mercenaryConfigRow.style.display = '';
-            // Update visual selection
-            mercenariesContainer.querySelectorAll('.merc-card').forEach(c => c.classList.remove('selected'));
-            card.classList.add('selected');
-            // Save
-            saveAutoSendMercSettings();
-        });
-
-        mercenariesContainer.appendChild(card);
+    // Render USOL market row
+    if (hasUsol) {
+        const row = document.createElement('div');
+        row.className = 'merc-market-row';
+        const header = document.createElement('div');
+        header.className = 'merc-market-header';
+        header.innerHTML = `<div><span class="expand-arrow-sub">▶</span><span class="merc-market-label">USOL Market (${usolParsed.mercs.length + usolParsed.eliteSlots.filter(es => es.mercenary).length})</span></div><img src="factions/usol_faction-96x96.png" alt="USOL">`;
+        const body = document.createElement('div');
+        body.className = 'merc-market-body';
+        header.addEventListener('click', () => { header.classList.toggle('expanded'); body.classList.toggle('expanded'); });
+        usolParsed.eliteSlots.forEach(es => { if (es.mercenary) body.appendChild(buildMercCard(es.mercenary, true)); });
+        usolParsed.mercs.forEach(m => { if (!eliteMercIds.has(m.id)) body.appendChild(buildMercCard(m, false)); });
+        row.appendChild(header);
+        row.appendChild(body);
+        mercenariesContainer.appendChild(row);
     }
 }
 
-// Auto-load mercenaries from cache on popup open; if empty, fetch fresh
+// Auto-load mercenaries from cache on popup open; if empty, wait for initial fetch
 (async () => {
     const { mercenariesData } = await chrome.storage.local.get('mercenariesData');
     if (mercenariesData) {
         loadMercenaries();
     } else {
-        // No cached data — request fresh mercenary data
-        requestMercenaries();
+        // No cached data — wait for initial fetch to populate cache (avoids duplicate WS calls)
+        mercenariesContainer.innerHTML = '<div class="no-decisions">Waiting for mercenary data...</div>';
+        let waited = 0;
+        const pollInterval = setInterval(async () => {
+            waited += 2000;
+            const result = await chrome.storage.local.get('mercenariesData');
+            if (result.mercenariesData) {
+                clearInterval(pollInterval);
+                loadMercenaries();
+            } else if (waited >= 30000) {
+                // Timed out waiting — request fresh as fallback
+                clearInterval(pollInterval);
+                requestMercenaries();
+            }
+        }, 2000);
     }
 })();
 
@@ -4239,7 +4544,7 @@ checkUpdateBtn.addEventListener('click', async () => {
             updateResult.style.color = 'var(--accent-green)';
         }
     } catch (e) {
-        console.error('[COR3 Helper] Check for updates error:', e);
+        console.log('[COR3 Helper] Check for updates error:', e);
         cor3LogError('popup.js', e, { action: 'checkForUpdates' });
         updateResult.textContent = 'Could not check for updates. Check your connection.';
         updateResult.style.color = 'var(--accent-red)';
@@ -4344,7 +4649,7 @@ if (disableBackgroundToggle) {
                 }
             }
         } catch (e) {
-            console.error('[COR3 Helper] Failed to toggle background elements:', e);
+            console.log('[COR3 Helper] Failed to toggle background elements:', e);
             cor3LogError('popup.js', e, { action: 'toggleBackground' });
         }
     });
@@ -4374,7 +4679,7 @@ if (disableNetworkFogToggle) {
                 }
             }
         } catch (e) {
-            console.error('[COR3 Helper] Failed to toggle network fog:', e);
+            console.log('[COR3 Helper] Failed to toggle network fog:', e);
             cor3LogError('popup.js', e, { action: 'toggleNetworkFog' });
         }
     });
@@ -4396,7 +4701,7 @@ if (moveNotificationsToggle) {
                 }
             }
         } catch (e) {
-            console.error('[COR3 Helper] Failed to toggle notification position:', e);
+            console.log('[COR3 Helper] Failed to toggle notification position:', e);
             cor3LogError('popup.js', e, { action: 'toggleNotificationPosition' });
         }
     });
@@ -4414,7 +4719,7 @@ if (resizableNetworkMapToggle) {
                 await chrome.tabs.sendMessage(tab.id, { action: isEnabled ? "enableResizableNetworkMap" : "disableResizableNetworkMap" });
             }
         } catch (e) {
-            console.error('[COR3 Helper] Failed to toggle resizable network map:', e);
+            console.log('[COR3 Helper] Failed to toggle resizable network map:', e);
             cor3LogError('popup.js', e, { action: 'toggleResizableNetworkMap' });
         }
     });
@@ -4468,6 +4773,7 @@ const debugTabLogs = document.getElementById('debugTabLogs');
 const debugJobsBody = document.getElementById('debugJobsBody');
 const debugLogsBody = document.getElementById('debugLogsBody');
 const refreshAutoJobsBtn = document.getElementById('refreshAutoJobsBtn');
+const copyAllLogsBtn = document.getElementById('copyAllLogsBtn');
 const autoFinishAllJobsToggle = document.getElementById('autoFinishAllJobsToggle');
 
 const SUPPORTED_JOB_TYPES = [
@@ -4525,6 +4831,8 @@ function updateAutoJobSolverStatus(enabled) {
     autoJobSolverStatus.textContent = enabled ? 'Active' : 'Off';
     autoJobSolverStatus.style.color = enabled ? 'var(--accent-green)' : 'var(--text-dim)';
     autoJobSolverSection.style.display = enabled ? '' : 'none';
+    var card = autoJobSolverSection.closest('.popout-card');
+    if (card) card.style.display = enabled ? '' : 'none';
 }
 
 chrome.storage.sync.get('autoJobSolverEnabled', (data) => {
@@ -4780,6 +5088,196 @@ refreshAutoJobsBtn.addEventListener('click', async () => {
     renderAutoJobsTabs();
 });
 
+// Copy all logs button — collects all logs and trims to ~10 MB (Discord file size limit)
+copyAllLogsBtn.addEventListener('click', async () => {
+    if (copyAllLogsBtn.dataset.busy === 'true') return;
+    copyAllLogsBtn.dataset.busy = 'true';
+    copyAllLogsBtn.textContent = '⏳';
+    copyAllLogsBtn.title = 'Collecting logs...';
+    const MAX_COPY_BYTES = 10 * 1024 * 1024; // ~10 MB
+    try {
+        const storageKeys = ['autoJobsDebugLogs', 'valuableDebugLogs', 'cor3_errors', 'cor3_console_logs'];
+        const storageData = await chrome.storage.local.get(storageKeys);
+
+        const tab = await getCor3Tab();
+
+        // WS logs + categorized logs from IndexedDB via scripting
+        let wsLogs = [];
+        let idbAutoJobLogs = [];
+        let idbAutoValuableLogs = [];
+        let idbErrorLogs = [];
+        try {
+            if (tab) {
+                const results = await chrome.scripting.executeScript({
+                    target: { tabId: tab.id },
+                    func: () => {
+                        return new Promise((resolve) => {
+                            const req = indexedDB.open('cor3_ws_db');
+                            req.onsuccess = (e) => {
+                                const db = e.target.result;
+                                const result = { ws: [], autoJobs: [], autoValuable: [], errors: [] };
+                                const stores = [];
+                                if (db.objectStoreNames.contains('messages')) stores.push('messages');
+                                if (db.objectStoreNames.contains('logs')) stores.push('logs');
+                                if (stores.length === 0) { db.close(); resolve(result); return; }
+                                const tx = db.transaction(stores, 'readonly');
+                                let pending = stores.length;
+                                const done = () => { if (--pending <= 0) { resolve(result); db.close(); } };
+                                if (stores.includes('messages')) {
+                                    const idx = tx.objectStore('messages').index('timestamp');
+                                    const cur = idx.openCursor();
+                                    cur.onsuccess = (ev) => {
+                                        const c = ev.target.result;
+                                        if (!c) { done(); return; }
+                                        result.ws.push({ timestamp: c.value.timestamp, direction: c.value.direction, message: c.value.message });
+                                        c.continue();
+                                    };
+                                    cur.onerror = () => done();
+                                }
+                                if (stores.includes('logs')) {
+                                    const idx2 = tx.objectStore('logs').index('timestamp');
+                                    const cur2 = idx2.openCursor();
+                                    cur2.onsuccess = (ev) => {
+                                        const c = ev.target.result;
+                                        if (!c) { done(); return; }
+                                        const v = c.value;
+                                        const entry = { timestamp: v.timestamp, level: v.level, message: v.message };
+                                        if (v.category === 'auto-jobs') result.autoJobs.push(entry);
+                                        else if (v.category === 'auto-valuable') result.autoValuable.push(entry);
+                                        else if (v.category === 'error-logs') result.errors.push(entry);
+                                        c.continue();
+                                    };
+                                    cur2.onerror = () => done();
+                                }
+                            };
+                            req.onerror = () => resolve({ ws: [], autoJobs: [], autoValuable: [], errors: [] });
+                        });
+                    },
+                    args: []
+                });
+                if (results && results[0] && results[0].result) {
+                    const r = results[0].result;
+                    wsLogs = r.ws || [];
+                    idbAutoJobLogs = r.autoJobs || [];
+                    idbAutoValuableLogs = r.autoValuable || [];
+                    idbErrorLogs = r.errors || [];
+                }
+            }
+        } catch (e) {
+            console.log('[COR3 Helper] Could not read logs from IndexedDB:', e);
+        }
+
+        // Page console logs (MAIN world — stored in window.__cor3ConsoleLogs, all entries)
+        let pageConsoleLogs = [];
+        try {
+            if (tab) {
+                const results = await chrome.scripting.executeScript({
+                    target: { tabId: tab.id },
+                    world: 'MAIN',
+                    func: () => {
+                        if (!window.__cor3ConsoleLogs) return [];
+                        return window.__cor3ConsoleLogs.slice();
+                    },
+                    args: []
+                });
+                if (results && results[0] && results[0].result) {
+                    pageConsoleLogs = results[0].result;
+                }
+            }
+        } catch (e) {
+            console.log('[COR3 Helper] Could not read page console logs:', e);
+        }
+
+        // Extension console logs (content script, background, popup — from chrome.storage, all entries)
+        const extConsoleLogs = storageData.cor3_console_logs || [];
+
+        // Merge IDB logs with storage logs (IDB is the primary source; storage is fallback)
+        const mergedAutoJobLogs = idbAutoJobLogs.length > 0 ? idbAutoJobLogs : (storageData.autoJobsDebugLogs || []);
+        const mergedAutoValuableLogs = idbAutoValuableLogs.length > 0 ? idbAutoValuableLogs : (storageData.valuableDebugLogs || []);
+        const mergedErrors = idbErrorLogs.length > 0 ? idbErrorLogs : (storageData.cor3_errors || []);
+
+        const payload = {
+            exportedAt: new Date().toISOString(),
+            extensionVersion: chrome.runtime.getManifest().version,
+            autoJobSolverLogs: mergedAutoJobLogs,
+            autoValuableSellerLogs: mergedAutoValuableLogs,
+            extensionErrors: mergedErrors,
+            wsLogs: wsLogs,
+            pageConsoleLogs: pageConsoleLogs,
+            extensionConsoleLogs: extConsoleLogs
+        };
+
+        let json = JSON.stringify(payload, null, 2);
+
+        // Trim to ~10 MB by finding a global timestamp cutoff that applies equally to all categories
+        if (json.length > MAX_COPY_BYTES) {
+            const trimmableKeys = ['wsLogs', 'autoJobSolverLogs', 'autoValuableSellerLogs', 'extensionErrors', 'pageConsoleLogs', 'extensionConsoleLogs'];
+            const getTs = (entry) => entry.timestamp || entry.ts || '';
+            // Collect all timestamps to find oldest boundary
+            const allTs = [];
+            for (const key of trimmableKeys) {
+                const arr = payload[key];
+                if (arr && arr.length > 0) allTs.push(getTs(arr[0]));
+            }
+            if (allTs.length > 0) {
+                allTs.sort();
+                let lo = allTs[0];
+                let hi = new Date().toISOString();
+                // Binary search for the newest cutoff that makes json fit
+                for (let i = 0; i < 20 && json.length > MAX_COPY_BYTES; i++) {
+                    const loMs = new Date(lo).getTime();
+                    const hiMs = new Date(hi).getTime();
+                    const midMs = loMs + Math.floor((hiMs - loMs) / 2);
+                    const cutoff = new Date(midMs).toISOString();
+                    for (const key of trimmableKeys) {
+                        const arr = payload[key];
+                        if (!arr || arr.length === 0) continue;
+                        const idx = arr.findIndex(e => getTs(e) >= cutoff);
+                        if (idx > 0) arr.splice(0, idx);
+                    }
+                    json = JSON.stringify(payload, null, 2);
+                    if (json.length > MAX_COPY_BYTES) lo = cutoff;
+                    else break;
+                }
+                // Final fallback: if still too big, aggressively trim largest arrays
+                while (json.length > MAX_COPY_BYTES) {
+                    let largest = null, largestLen = 0;
+                    for (const key of trimmableKeys) {
+                        if (payload[key] && payload[key].length > largestLen) { largest = key; largestLen = payload[key].length; }
+                    }
+                    if (!largest || largestLen <= 1) break;
+                    const removeCount = Math.max(1, Math.floor(largestLen * 0.3));
+                    payload[largest].splice(0, removeCount);
+                    json = JSON.stringify(payload, null, 2);
+                }
+            }
+            console.log('[COR3 Helper] Trimmed logs to ' + (json.length / 1024 / 1024).toFixed(2) + ' MB');
+        }
+
+        const wrapped = '```json\n' + json + '\n```';
+        await navigator.clipboard.writeText(wrapped);
+
+        const sizeMB = (wrapped.length / 1024 / 1024).toFixed(1);
+        copyAllLogsBtn.textContent = '✅';
+        copyAllLogsBtn.title = 'Logs copied (' + sizeMB + ' MB)';
+        setTimeout(() => {
+            copyAllLogsBtn.textContent = '📋';
+            copyAllLogsBtn.title = 'Copy all debug logs to clipboard';
+            copyAllLogsBtn.dataset.busy = 'false';
+        }, 2000);
+    } catch (e) {
+        console.log('[COR3 Helper] Copy all logs failed:', e);
+        cor3LogError('popup.js', e, { action: 'copyAllLogs' });
+        copyAllLogsBtn.textContent = '❌';
+        copyAllLogsBtn.title = 'Failed to copy logs';
+        setTimeout(() => {
+            copyAllLogsBtn.textContent = '📋';
+            copyAllLogsBtn.title = 'Copy all debug logs to clipboard';
+            copyAllLogsBtn.dataset.busy = 'false';
+        }, 2000);
+    }
+});
+
 // Start/Stop button
 autoJobsStartBtn.addEventListener('click', async () => {
     if (autoJobsRunning) {
@@ -5010,7 +5508,7 @@ async function dismissFailedJobsForMarket(marketKey) {
         btn.addEventListener('click', async () => {
             btn.disabled = true;
             btn.textContent = '⏳';
-            try { await dismissFailedJobsForMarket(key); } catch (e) { console.error('[COR3 Helper] Cleanup error:', e); }
+            try { await dismissFailedJobsForMarket(key); } catch (e) { console.log('[COR3 Helper] Cleanup error:', e); cor3LogError('popup.js', e, { action: 'dismissFailedJobs', market: key }); }
             btn.disabled = false;
             btn.textContent = '🧹';
         });
@@ -5101,9 +5599,7 @@ function collectAllSupportedJobs(marketData, darkMarketData, soyuzMarketData, us
 
 // Add a log entry
 function addAutoJobLog(msg, level = 'info') {
-    const now = new Date();
-    const timeStr = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    autoJobsDebugLogs.push({ time: timeStr, msg, level });
+    autoJobsDebugLogs.push({ timestamp: new Date().toISOString(), msg, level });
     if (autoJobsDebugLogs.length > AUTO_JOBS_MAX_LOGS) {
         autoJobsDebugLogs.shift();
     }
@@ -5126,7 +5622,8 @@ function renderDebugLogs() {
         else if (log.level === 'success') levelClass = ' log-success';
         else if (log.level === 'warn') levelClass = ' log-warn';
         row.className = 'debug-log-row' + levelClass;
-        row.innerHTML = `<span class="log-time">[${log.time}]</span> ${log.msg}`;
+        const displayTime = log.timestamp ? log.timestamp.slice(11, 19) : (log.time || '');
+        row.innerHTML = `<span class="log-time">[${displayTime}]</span> ${log.msg}`;
         frag.appendChild(row);
     }
     debugLogsBody.replaceChildren(frag);
@@ -5401,5 +5898,476 @@ chrome.storage.local.get(['autoJobsDebugLogs', 'autoJobsTracker', 'autoJobsRunni
         autoJobsRunning = true;
         autoJobsStartBtn.textContent = '■ Stop Auto Jobs';
         autoJobsStartBtn.className = 'auto-jobs-btn-start stop';
+    }
+});
+
+// =====================================================
+// ===== AUTO VALUABLE SELLER =========================
+// =====================================================
+
+const valuableToggle = document.getElementById('autoValuableSellerToggle');
+const valuableStatus = document.getElementById('autoValuableSellerStatus');
+const valuableSection = document.getElementById('autoValuableSellerSection');
+const valuableTabServers = document.getElementById('valuableTabServers');
+const valuableTabDownloads = document.getElementById('valuableTabDownloads');
+const valuableContentServers = document.getElementById('valuableContentServers');
+const valuableContentDownloads = document.getElementById('valuableContentDownloads');
+const valuableSellerBtn = document.getElementById('valuableSellerBtn');
+const valuableSearchBtn = document.getElementById('valuableSearchBtn');
+const valuableDebugToggle = document.getElementById('valuableDebugToggle');
+const valuableDebugConsole = document.getElementById('valuableDebugConsole');
+const valuableDebugLogsBody = document.getElementById('valuableDebugLogsBody');
+
+let valuableSearchRunning = false;
+let valuableSellerRunning = false;
+let valuableDebugLogs = [];
+const VALUABLE_MAX_LOGS = 200;
+
+function updateValuableStatus(enabled) {
+    valuableStatus.textContent = enabled ? 'Active' : 'Off';
+    valuableStatus.style.color = enabled ? 'var(--accent-green)' : 'var(--text-dim)';
+    valuableSection.style.display = enabled ? '' : 'none';
+    var card = valuableSection.closest('.popout-card');
+    if (card) card.style.display = enabled ? '' : 'none';
+}
+
+chrome.storage.sync.get('autoValuableSellerEnabled', (data) => {
+    const enabled = !!data.autoValuableSellerEnabled;
+    valuableToggle.checked = enabled;
+    updateValuableStatus(enabled);
+    if (enabled) renderValuableTabs();
+});
+
+valuableToggle.addEventListener('change', async () => {
+    const enabled = valuableToggle.checked;
+    await chrome.storage.sync.set({ autoValuableSellerEnabled: enabled });
+    updateValuableStatus(enabled);
+    if (enabled) renderValuableTabs();
+});
+
+// Tab switching
+function switchValuableTab(tab) {
+    valuableTabServers.classList.toggle('active', tab === 'servers');
+    valuableTabDownloads.classList.toggle('active', tab === 'downloads');
+    valuableContentServers.classList.toggle('active', tab === 'servers');
+    valuableContentDownloads.classList.toggle('active', tab === 'downloads');
+}
+
+valuableTabServers.addEventListener('click', () => switchValuableTab('servers'));
+valuableTabDownloads.addEventListener('click', () => switchValuableTab('downloads'));
+
+// Render tabs from storage data
+async function renderValuableTabs() {
+    const data = await chrome.storage.local.get(['valuableServersData', 'valuableDownloadsData']);
+    renderValuableServers(data.valuableServersData);
+    renderValuableDownloads(data.valuableDownloadsData);
+}
+
+function renderValuableServers(data) {
+    valuableContentServers.innerHTML = '';
+    if (!data || !data.servers || data.servers.length === 0) {
+        valuableContentServers.innerHTML = '<div class="auto-jobs-no-jobs">No valuable data yet. Click "Start Valuable Search" to scan servers.</div>';
+        return;
+    }
+
+    // Select-all checkbox
+    const selectAllDiv = document.createElement('div');
+    selectAllDiv.className = 'auto-valuable-seller-select-all';
+    const selectAllCb = document.createElement('input');
+    selectAllCb.type = 'checkbox';
+    selectAllCb.id = 'valuableSelectAllServers';
+    const selectAllLabel = document.createElement('label');
+    selectAllLabel.className = 'job-type-label';
+    selectAllLabel.setAttribute('for', selectAllCb.id);
+    selectAllLabel.textContent = 'Select All';
+    const selectAllCount = document.createElement('span');
+    selectAllCount.className = 'job-type-count';
+    selectAllCount.textContent = `(${data.servers.length} servers)`;
+    selectAllDiv.appendChild(selectAllLabel);
+    selectAllDiv.appendChild(selectAllCount);
+    selectAllDiv.appendChild(selectAllCb);
+
+    const checkboxes = [];
+
+    for (const server of data.servers) {
+        const row = document.createElement('div');
+        row.className = 'valuable-server-row';
+
+        const header = document.createElement('div');
+        header.className = 'valuable-server-header';
+
+        const arrow = document.createElement('span');
+        arrow.className = 'expand-arrow';
+        arrow.textContent = '▶';
+
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'server-name';
+        nameSpan.textContent = server.name;
+
+        const countSpan = document.createElement('span');
+        countSpan.className = 'valuable-count';
+        const totalValuables = (server.files || []).length + (server.logs || []).length;
+        countSpan.textContent = `(${totalValuables})`;
+
+        const statusSpan = document.createElement('span');
+        const statusClass = (server.status || 'open').toLowerCase().replace(/\s+/g, '-');
+        statusSpan.className = 'valuable-status ' + statusClass;
+        statusSpan.textContent = (server.status || 'OPEN').toUpperCase();
+
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.dataset.serverId = server.id;
+        cb.checked = !!server.selected;
+        cb.addEventListener('change', () => {
+            updateValuableServerSelection();
+            updateSelectAllState(selectAllCb, checkboxes);
+        });
+        checkboxes.push(cb);
+
+        header.appendChild(arrow);
+        header.appendChild(nameSpan);
+        header.appendChild(countSpan);
+        header.appendChild(statusSpan);
+        header.appendChild(cb);
+
+        const detailDiv = document.createElement('div');
+        detailDiv.className = 'valuable-detail-table';
+
+        // Build table for files and logs
+        if (totalValuables > 0) {
+            let tableHtml = '<table><tr><th>Type</th><th>Name</th><th>Tags</th><th>Base Price</th><th>Detect Rate</th></tr>';
+            for (const f of (server.files || [])) {
+                const tags = (f.tags || []).map(t => t.label || t.key || t).join(', ');
+                tableHtml += `<tr><td>📄 File</td><td>${f.name || '—'}</td><td>${tags || '—'}</td><td>${f.basePrice || 0}</td><td>${f.detectRate || 0}</td></tr>`;
+            }
+            for (const l of (server.logs || [])) {
+                const tags = (l.tags || []).map(t => t.label || t.key || t).join(', ');
+                tableHtml += `<tr><td>📋 Log</td><td>${l.message || '—'}</td><td>${tags || '—'}</td><td>${l.basePrice || 0}</td><td>${l.detectRate || 0}</td></tr>`;
+            }
+            tableHtml += '</table>';
+            detailDiv.innerHTML = tableHtml;
+        }
+
+        // Click header to expand/collapse
+        header.addEventListener('click', (e) => {
+            if (e.target.tagName === 'INPUT') return;
+            arrow.classList.toggle('open');
+            detailDiv.classList.toggle('open');
+        });
+
+        row.appendChild(header);
+        row.appendChild(detailDiv);
+        valuableContentServers.appendChild(row);
+    }
+
+    valuableContentServers.appendChild(selectAllDiv);
+
+    // Wire select-all
+    selectAllCb.addEventListener('change', () => {
+        for (const cb of checkboxes) cb.checked = selectAllCb.checked;
+        updateValuableServerSelection();
+    });
+    updateSelectAllState(selectAllCb, checkboxes);
+}
+
+// Server path lengths for proximity sorting (shorter = closer)
+const VALUABLE_SERVER_PATH_LENGTHS = {
+    'RM7-E1L3': 1, 'RM7-E1L5': 1,
+    'RM7-E1L2CT': 2, 'RM7-E1SCP': 2, 'RM7-N2ECP': 2,
+    'RM7-S4L4': 3, 'D4RK RM7CE': 3, 'RM7-N2L2': 3, 'RM7-S4L2': 3, 'B43271N': 3,
+    'RM7-N2L3': 4, 'RM7-S4L3': 4, 'RM7-S4L1': 4, 'RM7-S4WCP': 4, 'B43272N': 4,
+    'RM7-W3NCP': 5, 'URM7-S5L2': 5, 'URM7-H': 5, 'D4RK RM7EG': 5,
+    'RM7-N1L1': 6, 'URM7-M': 6, 'B43274N': 6
+};
+
+function renderValuableDownloads(data) {
+    valuableContentDownloads.innerHTML = '';
+    if (!data || !data.files || data.files.length === 0) {
+        valuableContentDownloads.innerHTML = '<div class="auto-jobs-no-jobs">No download data yet. Click "Start Valuable Search" to scan.</div>';
+        return;
+    }
+
+    // Select-all
+    const selectAllDiv = document.createElement('div');
+    selectAllDiv.className = 'auto-valuable-seller-select-all';
+    const selectAllCb = document.createElement('input');
+    selectAllCb.type = 'checkbox';
+    selectAllCb.id = 'valuableSelectAllDownloads';
+    const selectAllLabel = document.createElement('label');
+    selectAllLabel.className = 'job-type-label';
+    selectAllLabel.setAttribute('for', selectAllCb.id);
+    selectAllLabel.textContent = 'Select All';
+    const selectAllCount = document.createElement('span');
+    selectAllCount.className = 'job-type-count';
+    selectAllCount.textContent = `(${data.files.length} files)`;
+    selectAllDiv.appendChild(selectAllLabel);
+    selectAllDiv.appendChild(selectAllCount);
+    selectAllDiv.appendChild(selectAllCb);
+
+    const checkboxes = [];
+
+    // Group files by source server
+    const serverGroups = {};
+    for (const file of data.files) {
+        const source = file.source || '—';
+        if (!serverGroups[source]) serverGroups[source] = [];
+        serverGroups[source].push(file);
+    }
+
+    // Sort server groups by proximity (closest first for display)
+    const sortedSources = Object.keys(serverGroups).sort((a, b) => {
+        const lenA = VALUABLE_SERVER_PATH_LENGTHS[a] || 99;
+        const lenB = VALUABLE_SERVER_PATH_LENGTHS[b] || 99;
+        return lenB - lenA;
+    });
+
+    // Render grouped by server
+    for (const source of sortedSources) {
+        const groupFiles = serverGroups[source];
+
+        // Server group header
+        const groupDiv = document.createElement('div');
+        groupDiv.className = 'valuable-dl-server-group';
+        const headerDiv = document.createElement('div');
+        headerDiv.className = 'valuable-dl-server-header';
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'dl-server-name';
+        nameSpan.textContent = source;
+        const countSpan = document.createElement('span');
+        countSpan.className = 'dl-server-count';
+        countSpan.textContent = `(${groupFiles.length})`;
+        headerDiv.appendChild(nameSpan);
+        headerDiv.appendChild(countSpan);
+        groupDiv.appendChild(headerDiv);
+
+        // File rows under this server
+        for (const file of groupFiles) {
+            const row = document.createElement('div');
+            row.className = 'valuable-file-row';
+
+            const nameEl = document.createElement('span');
+            nameEl.className = 'file-source';
+            nameEl.textContent = file.name || file.id;
+
+            const tagSpan = document.createElement('span');
+            tagSpan.className = 'file-tag';
+            const tags = (file.tags || []).map(t => t.label || t.key || t).join(', ');
+            tagSpan.textContent = tags || '—';
+
+            const statusSpan = document.createElement('span');
+            const statusClass = (file.status || 'open').toLowerCase().replace(/\s+/g, '-');
+            statusSpan.className = 'valuable-status ' + statusClass;
+            statusSpan.textContent = (file.status || 'OPEN').toUpperCase();
+
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.dataset.fileId = file.id;
+            cb.checked = !!file.selected;
+            cb.addEventListener('change', () => {
+                updateValuableDownloadSelection();
+                updateSelectAllState(selectAllCb, checkboxes);
+            });
+            checkboxes.push(cb);
+
+            row.appendChild(nameEl);
+            row.appendChild(tagSpan);
+            row.appendChild(statusSpan);
+            row.appendChild(cb);
+            groupDiv.appendChild(row);
+        }
+
+        valuableContentDownloads.appendChild(groupDiv);
+    }
+
+    valuableContentDownloads.appendChild(selectAllDiv);
+
+    selectAllCb.addEventListener('change', () => {
+        for (const cb of checkboxes) cb.checked = selectAllCb.checked;
+        updateValuableDownloadSelection();
+    });
+    updateSelectAllState(selectAllCb, checkboxes);
+}
+
+async function updateValuableServerSelection() {
+    const cbs = valuableContentServers.querySelectorAll('input[type="checkbox"][data-server-id]');
+    const selected = [];
+    cbs.forEach(cb => { if (cb.checked) selected.push(cb.dataset.serverId); });
+    await chrome.storage.local.set({ valuableSelectedServers: selected });
+}
+
+async function updateValuableDownloadSelection() {
+    const cbs = valuableContentDownloads.querySelectorAll('input[type="checkbox"][data-file-id]');
+    const selected = [];
+    cbs.forEach(cb => { if (cb.checked) selected.push(cb.dataset.fileId); });
+    await chrome.storage.local.set({ valuableSelectedDownloads: selected });
+}
+
+// Button mutual exclusion
+function updateValuableButtons() {
+    if (valuableSearchRunning) {
+        valuableSearchBtn.textContent = '■ Stop Valuable Search';
+        valuableSearchBtn.className = 'valuable-btn stop';
+        valuableSellerBtn.disabled = true;
+    } else if (valuableSellerRunning) {
+        valuableSellerBtn.textContent = '■ Stop Valuable Seller';
+        valuableSellerBtn.className = 'valuable-btn stop';
+        valuableSearchBtn.disabled = true;
+    } else {
+        valuableSearchBtn.textContent = '▶ Start Valuable Search';
+        valuableSearchBtn.className = 'valuable-btn start';
+        valuableSearchBtn.disabled = false;
+        valuableSellerBtn.textContent = '▶ Start Valuable Seller';
+        valuableSellerBtn.className = 'valuable-btn start';
+        valuableSellerBtn.disabled = false;
+    }
+}
+
+// Start Valuable Search
+valuableSearchBtn.addEventListener('click', async () => {
+    if (valuableSearchRunning) {
+        valuableSearchRunning = false;
+        updateValuableButtons();
+        addValuableLog('Valuable Search stopped by user.', 'warn');
+        try {
+            const tab = await getCor3Tab();
+            if (tab) await chrome.tabs.sendMessage(tab.id, { action: "stopValuable" });
+        } catch (e) {}
+        await chrome.storage.local.set({ valuableSearchRunning: false, valuableSellerRunning: false });
+    } else {
+        valuableSearchRunning = true;
+        updateValuableButtons();
+        addValuableLog('Starting Valuable Search...', 'info');
+        await chrome.storage.local.set({ valuableSearchRunning: true, valuableSellerRunning: false });
+        try {
+            const tab = await getCor3Tab();
+            if (tab) {
+                await chrome.tabs.sendMessage(tab.id, {
+                    action: "startValuableSearch"
+                });
+            }
+        } catch (e) {
+            addValuableLog('Failed to start Valuable Search: ' + e.message, 'error');
+        }
+    }
+});
+
+// Start Valuable Seller
+valuableSellerBtn.addEventListener('click', async () => {
+    if (valuableSellerRunning) {
+        valuableSellerRunning = false;
+        updateValuableButtons();
+        addValuableLog('Valuable Seller stopped by user.', 'warn');
+        try {
+            const tab = await getCor3Tab();
+            if (tab) await chrome.tabs.sendMessage(tab.id, { action: "stopValuable" });
+        } catch (e) {}
+        await chrome.storage.local.set({ valuableSellerRunning: false, valuableSearchRunning: false });
+    } else {
+        // Collect selected servers and downloads
+        const { valuableSelectedServers, valuableSelectedDownloads } = await chrome.storage.local.get(['valuableSelectedServers', 'valuableSelectedDownloads']);
+        const selectedServers = valuableSelectedServers || [];
+        const selectedDownloads = valuableSelectedDownloads || [];
+        if (selectedServers.length === 0 && selectedDownloads.length === 0) {
+            addValuableLog('No servers or downloads selected for selling.', 'warn');
+            return;
+        }
+        valuableSellerRunning = true;
+        updateValuableButtons();
+        addValuableLog(`Starting Valuable Seller: ${selectedServers.length} server(s), ${selectedDownloads.length} download(s) selected.`, 'info');
+        await chrome.storage.local.set({ valuableSellerRunning: true, valuableSearchRunning: false });
+        try {
+            const tab = await getCor3Tab();
+            if (tab) {
+                await chrome.tabs.sendMessage(tab.id, {
+                    action: "startValuableSeller",
+                    selectedServers,
+                    selectedDownloads
+                });
+            }
+        } catch (e) {
+            addValuableLog('Failed to start Valuable Seller: ' + e.message, 'error');
+        }
+    }
+});
+
+// Debug console toggle
+chrome.storage.sync.get('valuableDebugConsoleEnabled', (data) => {
+    const enabled = !!data.valuableDebugConsoleEnabled;
+    valuableDebugToggle.checked = enabled;
+    valuableDebugConsole.style.display = enabled ? '' : 'none';
+    if (enabled) renderValuableDebugLogs();
+});
+valuableDebugToggle.addEventListener('change', () => {
+    const enabled = valuableDebugToggle.checked;
+    chrome.storage.sync.set({ valuableDebugConsoleEnabled: enabled });
+    valuableDebugConsole.style.display = enabled ? '' : 'none';
+    if (enabled) renderValuableDebugLogs();
+});
+
+function addValuableLog(msg, level = 'info') {
+    valuableDebugLogs.push({ timestamp: new Date().toISOString(), msg, level });
+    if (valuableDebugLogs.length > VALUABLE_MAX_LOGS) valuableDebugLogs.shift();
+    renderValuableDebugLogs();
+    chrome.storage.local.set({ valuableDebugLogs });
+}
+
+function renderValuableDebugLogs() {
+    if (valuableDebugLogs.length === 0) {
+        valuableDebugLogsBody.innerHTML = '<div style="color:var(--text-dim);">No logs yet.</div>';
+        return;
+    }
+    const frag = document.createDocumentFragment();
+    for (const log of valuableDebugLogs) {
+        const row = document.createElement('div');
+        let levelClass = '';
+        if (log.level === 'error') levelClass = ' log-error';
+        else if (log.level === 'success') levelClass = ' log-success';
+        else if (log.level === 'warn') levelClass = ' log-warn';
+        row.className = 'debug-log-row' + levelClass;
+        const displayTime = log.timestamp ? log.timestamp.slice(11, 19) : (log.time || '');
+        row.innerHTML = `<span class="log-time">[${displayTime}]</span> ${log.msg}`;
+        frag.appendChild(row);
+    }
+    valuableDebugLogsBody.replaceChildren(frag);
+    valuableDebugLogsBody.scrollTop = valuableDebugLogsBody.scrollHeight;
+}
+
+// Listen for storage changes from auto-valuable-seller engine
+chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local') return;
+
+    if (changes.valuableServersData) {
+        renderValuableServers(changes.valuableServersData.newValue);
+    }
+    if (changes.valuableDownloadsData) {
+        renderValuableDownloads(changes.valuableDownloadsData.newValue);
+    }
+    if (changes.valuableSearchRunning) {
+        valuableSearchRunning = !!changes.valuableSearchRunning.newValue;
+        updateValuableButtons();
+    }
+    if (changes.valuableSellerRunning) {
+        valuableSellerRunning = !!changes.valuableSellerRunning.newValue;
+        updateValuableButtons();
+    }
+    if (changes.valuableDebugLogs) {
+        valuableDebugLogs = changes.valuableDebugLogs.newValue || [];
+        renderValuableDebugLogs();
+    }
+});
+
+// Restore state on popup open
+chrome.storage.local.get(['valuableDebugLogs', 'valuableSearchRunning', 'valuableSellerRunning'], (data) => {
+    if (data.valuableDebugLogs) {
+        valuableDebugLogs = data.valuableDebugLogs;
+        renderValuableDebugLogs();
+    }
+    if (data.valuableSearchRunning) {
+        valuableSearchRunning = true;
+        updateValuableButtons();
+    }
+    if (data.valuableSellerRunning) {
+        valuableSellerRunning = true;
+        updateValuableButtons();
     }
 });

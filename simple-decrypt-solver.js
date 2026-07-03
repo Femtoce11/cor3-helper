@@ -7,7 +7,7 @@
 
 (function () {
 	if (window.__simpleDecryptSolverActive) {
-		console.warn('\u26a0\ufe0f Simple Decrypt solver is already active. Aborting duplicate initialization.');
+		console.log('\u26a0\ufe0f Simple Decrypt solver is already active. Aborting duplicate initialization.');
 		return;
 	}
 	window.__simpleDecryptSolverActive = true;
@@ -64,7 +64,7 @@
 		// Find and click the Decrypt button
 		const btn = findDecryptButton();
 		if (!btn) {
-			console.warn('\uD83D\uDD13 [COR3 Helper] Decrypt button not found');
+			console.log('\uD83D\uDD13 [COR3 Helper] Decrypt button not found');
 			postStatus('Decrypt button not found', 'error');
 			return;
 		}
@@ -122,7 +122,7 @@
 			await sleep(500);
 		}
 
-		console.warn('\uD83D\uDD13 [COR3 Helper] Simple Decrypt timed out after 2 minutes');
+		console.log('\uD83D\uDD13 [COR3 Helper] Simple Decrypt timed out after 2 minutes');
 		postStatus('Decryption timed out after 2 minutes', 'error');
 	}
 

@@ -5,7 +5,7 @@
 
 (function () {
 	if (window.__solverActive) {
-		console.warn('⚠️ Solver is already active. Aborting duplicate initialization.');
+		console.log('⚠️ Solver is already active. Aborting duplicate initialization.');
 		return;
 	}
 	window.__solverActive = true;
@@ -57,7 +57,7 @@
 	async function submitGuess(fields, indices) {
 		const container = findHackContainer();
 		if (!container) {
-			console.warn('⚠️ [submitGuess] Hack container not found.');
+			console.log('⚠️ [submitGuess] Hack container not found.');
 			return false;
 		}
 
@@ -81,7 +81,7 @@
 			const currentIdx = options.indexOf(currentVal);
 
 			if (currentIdx === -1) {
-				console.warn(`⚠️ [submitGuess] Field ${f}: current value "${currentVal}" not found in options [${options.join(', ')}]`);
+				console.log(`⚠️ [submitGuess] Field ${f}: current value "${currentVal}" not found in options [${options.join(', ')}]`);
 			}
 
 			// Already at target? Skip navigation
@@ -104,7 +104,7 @@
 			const newVal = newValues[f];
 			const expectedVal = options[targetIdx];
 			if (newVal !== expectedVal) {
-				console.warn(`⚠️ [submitGuess] Field ${f}: expected "${expectedVal}" after navigation but got "${newVal}". Aborting guess.`);
+				console.log(`⚠️ [submitGuess] Field ${f}: expected "${expectedVal}" after navigation but got "${newVal}". Aborting guess.`);
 				return false;
 			}
 		}
@@ -130,7 +130,7 @@
 		while (Date.now() - start < timeout) {
 			if (window.__solverAbort) return null;
 			if (!findHackContainer()) {
-				console.warn('⚠️ [waitForResponse] Hack container disappeared while waiting.');
+				console.log('⚠️ [waitForResponse] Hack container disappeared while waiting.');
 				return null;
 			}
 			const lines = logLines();
@@ -140,7 +140,7 @@
 			}
 			await sleep(100);
 		}
-		console.warn(`⚠️ [waitForResponse] Timed out after ${timeout}ms waiting for combo: "${combo}"`);
+		console.log(`⚠️ [waitForResponse] Timed out after ${timeout}ms waiting for combo: "${combo}"`);
 		return null;
 	}
 
@@ -215,7 +215,7 @@
 		const FIELDS = detectFields(lines);
 
 		if (FIELDS.length === 0) {
-			console.warn('⚠️ Could not detect fields from logs.');
+			console.log('⚠️ Could not detect fields from logs.');
 			return;
 		}
 
@@ -226,7 +226,7 @@
 		);
 
 		if (!findHackContainer()) {
-			console.error('❌ Hack container not found');
+			console.log('❌ Hack container not found');
 			return;
 		}
 
@@ -344,7 +344,7 @@
 			possibilities = possibilities.filter((p) => getDist(bestGuessIdx, p) === m);
 
 			if (possibilities.length === 0) {
-				console.error('❌ No possibilities left. Something went wrong.');
+				console.log('❌ No possibilities left. Something went wrong.');
 				return;
 			}
 		}
