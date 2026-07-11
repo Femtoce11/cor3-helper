@@ -5,6 +5,69 @@ function isContextValid() {
     try { return !!chrome.runtime.id; } catch (e) { return false; }
 }
 
+// --- Automation Queue: prevents parallel endpoint-changing processes ---
+let _automationQueue = [];
+let _automationActive = null; // { type, startedAt }
+const _AUTOMATION_POLL_MS = 10000;
+
+function _automationQueueStatus() {
+    return {
+        active: _automationActive ? _automationActive.type : null,
+        queued: _automationQueue.map(q => q.type)
+    };
+}
+
+function _broadcastQueueStatus() {
+    if (!isContextValid()) return;
+    try { chrome.storage.local.set({ automationQueueStatus: _automationQueueStatus() }); } catch (e) {}
+}
+
+function _automationFinish(type) {
+    if (_automationActive && _automationActive.type === type) {
+        console.log('[COR3 Helper] Automation finished:', type);
+        _automationActive = null;
+        _broadcastQueueStatus();
+        _automationProcessNext();
+    }
+}
+
+function _automationProcessNext() {
+    if (_automationActive) return;
+    if (_automationQueue.length === 0) {
+        _broadcastQueueStatus();
+        setTimeout(() => {
+            if (_automationActive || _automationQueue.length > 0) return;
+            chrome.storage.local.get('expeditionsData', (result) => {
+                if (result.expeditionsData) {
+                    checkAutoSendOnExpeditionData(result.expeditionsData);
+                }
+            });
+        }, 3000);
+        return;
+    }
+    var next = _automationQueue.shift();
+    _automationActive = { type: next.type, startedAt: Date.now() };
+    console.log('[COR3 Helper] Automation starting:', next.type);
+    _broadcastQueueStatus();
+    next.run();
+}
+
+function _automationEnqueue(type, runFn) {
+    if (_automationActive && _automationActive.type === type) return 'already-running';
+    if (_automationQueue.some(q => q.type === type)) return 'already-queued';
+    if (!_automationActive) {
+        _automationActive = { type: type, startedAt: Date.now() };
+        console.log('[COR3 Helper] Automation starting:', type);
+        _broadcastQueueStatus();
+        runFn();
+        return 'started';
+    }
+    _automationQueue.push({ type: type, run: runFn });
+    console.log('[COR3 Helper] Automation queued:', type, '(waiting for', _automationActive.type, ')');
+    _broadcastQueueStatus();
+    return 'queued';
+}
+
 // Auto Update Markets toggle: when OFF, only explicit refresh operations update market data in storage
 let _autoUpdateMarkets = false;
 let _marketRefreshInProgress = false;
@@ -57,18 +120,20 @@ setInterval(() => {
     const now = Date.now();
     if (now - _autoUpdateMarketsLastRefresh < _AUTO_UPDATE_MARKETS_INTERVAL) return;
     _autoUpdateMarketsLastRefresh = now;
-    _marketRefreshInProgress = true;
-    console.log('[COR3 Helper] Auto Update Markets: triggering periodic 10-min refresh');
-    window.postMessage({ type: 'COR3_REFRESH_ALL_MARKETS_SEQ' }, '*');
-    // Safety: clear flag after 30s if completion signal not received
-    setTimeout(() => { _marketRefreshInProgress = false; }, 30000);
-    function onDone(evt) {
-        if (evt.data && evt.data.type === 'COR3_ALL_MARKETS_REFRESHED') {
-            window.removeEventListener('message', onDone);
-            _marketRefreshInProgress = false;
+    _automationEnqueue('auto-update-markets', () => {
+        _marketRefreshInProgress = true;
+        console.log('[COR3 Helper] Auto Update Markets: triggering periodic 10-min refresh');
+        window.postMessage({ type: 'COR3_REFRESH_ALL_MARKETS_SEQ' }, '*');
+        setTimeout(() => { _marketRefreshInProgress = false; _automationFinish('auto-update-markets'); }, 30000);
+        function onDone(evt) {
+            if (evt.data && evt.data.type === 'COR3_ALL_MARKETS_REFRESHED') {
+                window.removeEventListener('message', onDone);
+                _marketRefreshInProgress = false;
+                _automationFinish('auto-update-markets');
+            }
         }
-    }
-    window.addEventListener('message', onDone);
+        window.addEventListener('message', onDone);
+    });
 }, 30000); // check every 30s
 
 // Helper: sell cheapest sellable items to free up `count` stash slots
@@ -113,6 +178,7 @@ function disableAutoSendDueToStashFull() {
         message: 'Stash is full. Clear stash before claiming more items. Auto-send mercenary disabled.'
     }, '*');
     autoSendInProgress = false;
+    _automationFinish('auto-send');
     autoSendExpeditionId = null;
 }
 
@@ -344,6 +410,7 @@ window.addEventListener('message', (event) => {
                                 message: `Stash is full. Need ${spaceNeeded} spaces but only ${availableSpace2} available. Clear stash before claiming more items. Auto-send mercenary disabled.`
                             }, '*');
                             autoSendInProgress = false;
+                            _automationFinish('auto-send');
                         }
                     });
                 }
@@ -404,6 +471,7 @@ window.addEventListener('message', (event) => {
             }
         });
         autoSendInProgress = false;
+        _automationFinish('auto-send');
         autoSendExpeditionId = null;
     }
     // Handle insufficient credits error during reward container opening (collect.all)
@@ -429,6 +497,7 @@ window.addEventListener('message', (event) => {
             }
         });
         autoSendInProgress = false;
+        _automationFinish('auto-send');
         autoSendExpeditionId = null;
     }
     // Expedition archived — clear active expedition data since it's now in the archive
@@ -492,6 +561,7 @@ window.addEventListener('message', (event) => {
             if (!settings.autoSendMerc || !settings.autoSendMerc.enabled) {
                 console.log('[COR3 Helper] Auto-send: disabled, aborting');
                 autoSendInProgress = false;
+                _automationFinish('auto-send');
                 return;
             }
             // Gather CORE and USOL mercs from storage (configures are done, data is fresh)
@@ -574,12 +644,14 @@ window.addEventListener('message', (event) => {
             if (!mercId) {
                 console.log('[COR3 Helper] Auto-send: no mercenary selected, aborting');
                 autoSendInProgress = false;
+                _automationFinish('auto-send');
                 return;
             }
             const selectedMerc = allMercs.find(m => m.id === mercId);
             if (!selectedMerc || selectedMerc.status !== 'AVAILABLE') {
                 console.log('[COR3 Helper] Auto-send: selected mercenary not AVAILABLE (status: ' + (selectedMerc ? selectedMerc.status : 'not found') + '), aborting');
                 autoSendInProgress = false;
+                _automationFinish('auto-send');
                 return;
             }
             // Determine market and config based on merc's market tag
@@ -590,6 +662,7 @@ window.addEventListener('message', (event) => {
             if (!config || !config.locations || config.locations.length === 0) {
                 console.log('[COR3 Helper] Auto-send: no expedition config available for ' + (isUsol ? 'USOL' : 'CORE') + ', aborting');
                 autoSendInProgress = false;
+                _automationFinish('auto-send');
                 return;
             }
             const loc = config.locations[0];
@@ -598,6 +671,7 @@ window.addEventListener('message', (event) => {
             if (!zone || !goal) {
                 console.log('[COR3 Helper] Auto-send: missing zone/goal config, aborting');
                 autoSendInProgress = false;
+                _automationFinish('auto-send');
                 return;
             }
             const launchConfig = {
@@ -613,6 +687,7 @@ window.addEventListener('message', (event) => {
                 chrome.storage.local.set({ lastExpeditionLaunchData: launchConfig });
                 window.postMessage({ type: 'COR3_LAUNCH_EXPEDITION', config: launchConfig }, '*');
                 autoSendInProgress = false;
+                _automationFinish('auto-send');
             }, 1500 + Math.floor(Math.random() * 500));
         }
     }
@@ -629,6 +704,7 @@ window.addEventListener('message', (event) => {
             // active expedition completes and fresh expedition data arrives.
             console.log('[COR3 Helper] Active expedition detected — silently waiting for it to finish');
             autoSendInProgress = false;
+            _automationFinish('auto-send');
             autoSendExpeditionId = null;
         } else {
             // Store other errors for UI display
@@ -759,6 +835,25 @@ let autoSendDeferredWaiting = false;
 
 function checkAutoSendOnExpeditionData(expeditions) {
     if (!expeditions || !Array.isArray(expeditions) || autoSendInProgress) return;
+    if (_automationActive && _automationActive.type !== 'auto-send') {
+        if (!_automationQueue.some(q => q.type === 'auto-send')) {
+            console.log('[COR3 Helper] Auto-send: queued (waiting for', _automationActive.type, 'to finish)');
+            _automationQueue.push({ type: 'auto-send', run: function () {
+                chrome.storage.local.get('expeditionsData', (result) => {
+                    _automationActive = null;
+                    if (result.expeditionsData) {
+                        checkAutoSendOnExpeditionData(result.expeditionsData);
+                    } else {
+                        _automationProcessNext();
+                    }
+                });
+            }});
+            _broadcastQueueStatus();
+        } else {
+            console.log('[COR3 Helper] Auto-send: already queued (waiting for', _automationActive.type, ')');
+        }
+        return;
+    }
     chrome.storage.sync.get('autoSendMerc', (settings) => {
         if (!settings.autoSendMerc || !settings.autoSendMerc.enabled) return;
         if (!settings.autoSendMerc.mercenaryId && !settings.autoSendMerc.autoChooseMerc) return;
@@ -808,6 +903,8 @@ function checkAutoSendOnExpeditionData(expeditions) {
             }
             console.log('[COR3 Helper] Auto-send: No active expeditions, refreshing mercs (CORE + USOL) before launch');
             autoSendInProgress = true;
+            if (!_automationActive) _automationActive = { type: 'auto-send', startedAt: Date.now() };
+            _broadcastQueueStatus();
             autoSendExpeditionId = null;
             autoSendAwaitingMercenaries = false;
             autoSendAwaitingUsolMercs = true;
@@ -822,6 +919,8 @@ function checkAutoSendOnExpeditionData(expeditions) {
         for (const exp of expeditions) {
             if (exp.status === 'COMPLETED' && !exp.completedAt) {
                 autoSendInProgress = true;
+                if (!_automationActive) _automationActive = { type: 'auto-send', startedAt: Date.now() };
+                _broadcastQueueStatus();
                 autoSendExpeditionId = exp.id;
                 if (!exp.containerOpenedAt) {
                     // Container not opened yet — Step 1: open container (10s delay for UI visibility)
@@ -1025,6 +1124,19 @@ try { chrome.storage.onChanged.addListener((changes, area) => {
                 if (resetAt && new Date(resetAt).getTime() > Date.now()) {
                     autoRefreshExpiredRetryAt[refreshKey] = 0; // timer updated — clear cooldown
                 }
+            }
+        }
+        // Relay background/popup console logs to IndexedDB
+        if (changes.cor3_console_logs && changes.cor3_console_logs.newValue) {
+            const oldLen = (changes.cor3_console_logs.oldValue || []).length;
+            const newEntries = changes.cor3_console_logs.newValue.slice(oldLen);
+            const bgPopupEntries = newEntries.filter(e => e.source !== 'content');
+            if (bgPopupEntries.length > 0) {
+                try {
+                    for (const e of bgPopupEntries) {
+                        cor3LogEntry('ext-console', '[' + (e.source || 'unknown') + '] ' + (e.args || ''), e.level || 'log');
+                    }
+                } catch (err) { /* silently ignore */ }
             }
         }
     }
@@ -1451,15 +1563,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             patchVersion: window.__cor3PatchVersion
         });
     } else if (request.action === "startAutoJobs") {
-        _autoJobsActive = true;
-        injectAutoJobSolver();
-        setTimeout(() => {
-            window.postMessage({ type: 'COR3_AUTOJOB_START', jobs: request.jobs, settings: request.settings || {} }, '*');
-        }, 500);
-        sendResponse({ success: true });
+        const jobs = request.jobs;
+        const settings = request.settings || {};
+        const result = _automationEnqueue('auto-jobs', () => {
+            _autoJobsActive = true;
+            injectAutoJobSolver();
+            setTimeout(() => {
+                window.postMessage({ type: 'COR3_AUTOJOB_START', jobs: jobs, settings: settings }, '*');
+            }, 500);
+        });
+        sendResponse({ success: true, queueResult: result, queueStatus: _automationQueueStatus() });
     } else if (request.action === "stopAutoJobs") {
         _autoJobsActive = false;
+        _automationQueue = _automationQueue.filter(q => q.type !== 'auto-jobs');
         window.postMessage({ type: 'COR3_AUTOJOB_STOP' }, '*');
+        _automationFinish('auto-jobs');
         sendResponse({ success: true });
     } else if (request.action === "enableHackSolvers") {
         // Enable all hack solvers (used by background.js before hack.start)
@@ -1494,6 +1612,27 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
         pollClose();
         sendResponse({ success: true });
+    } else if (request.action === "dismissFailedJobs") {
+        // Clear failed jobs — routed through automation queue
+        var dismissJobs = request.jobs || []; // [{marketId, jobId}]
+        var dismissMarketKey = request.marketKey || '';
+        var result = _automationEnqueue('clear-failed-jobs', function () {
+            (async function () {
+                try {
+                    for (var i = 0; i < dismissJobs.length; i++) {
+                        window.postMessage({ type: 'COR3_AUTOJOB_CMD', cmd: 'job.dismiss', data: dismissJobs[i] }, '*');
+                        if (i < dismissJobs.length - 1) await new Promise(function (r) { setTimeout(r, 500); });
+                    }
+                    // Brief delay then finish queue slot
+                    await new Promise(function (r) { setTimeout(r, 1000); });
+                } catch (e) {
+                    console.log('[COR3 Helper] dismissFailedJobs error:', e);
+                } finally {
+                    _automationFinish('clear-failed-jobs');
+                }
+            })();
+        });
+        sendResponse({ success: true, queueResult: result, queueStatus: _automationQueueStatus() });
     } else if (request.action === "autoClearIpsCmd") {
         // Relay auto-clear-ips WS commands to MAIN world
         window.postMessage({ type: 'COR3_AUTOJOB_CMD', cmd: request.cmd, data: request.data || {} }, '*');
@@ -1503,23 +1642,34 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         window.postMessage({ type: 'COR3_DEVTOOLS_WS_SEND', message: request.message }, '*');
         sendResponse({ success: true });
     } else if (request.action === "startValuableSearch") {
-        injectAutoValuableSeller();
-        setTimeout(() => {
-            window.postMessage({ type: 'COR3_VALUABLE_START_SEARCH' }, '*');
-        }, 500);
-        sendResponse({ success: true });
+        const result = _automationEnqueue('auto-valuable', () => {
+            injectAutoValuableSeller();
+            setTimeout(() => {
+                window.postMessage({ type: 'COR3_VALUABLE_START_SEARCH' }, '*');
+            }, 500);
+        });
+        sendResponse({ success: true, queueResult: result, queueStatus: _automationQueueStatus() });
     } else if (request.action === "startValuableSeller") {
-        injectAutoValuableSeller();
-        setTimeout(() => {
-            window.postMessage({
-                type: 'COR3_VALUABLE_START_SELLER',
-                selectedServers: request.selectedServers || [],
-                selectedDownloads: request.selectedDownloads || []
-            }, '*');
-        }, 500);
-        sendResponse({ success: true });
+        const selServers = request.selectedServers || [];
+        const selDownloads = request.selectedDownloads || [];
+        const result = _automationEnqueue('auto-valuable', () => {
+            injectAutoValuableSeller();
+            setTimeout(() => {
+                window.postMessage({
+                    type: 'COR3_VALUABLE_START_SELLER',
+                    selectedServers: selServers,
+                    selectedDownloads: selDownloads
+                }, '*');
+            }, 500);
+        });
+        sendResponse({ success: true, queueResult: result, queueStatus: _automationQueueStatus() });
     } else if (request.action === "stopValuable") {
+        _automationQueue = _automationQueue.filter(q => q.type !== 'auto-valuable');
         window.postMessage({ type: 'COR3_VALUABLE_STOP' }, '*');
+        _automationFinish('auto-valuable');
+        sendResponse({ success: true });
+    } else if (request.action === "startIpSearch") {
+        window.postMessage({ type: 'COR3_IP_SEARCH_START' }, '*');
         sendResponse({ success: true });
     }
 });
@@ -1849,12 +1999,27 @@ window.addEventListener('message', (event) => {
     if (event.data && event.data.type === 'COR3_WS_NETWORK_MAP') {
         chrome.storage.local.set({ serverMaintenanceMap: event.data.servers });
     }
+    // Secret Finder: relay log updates and auto-disable toggle on completion
+    if (event.data && event.data.type === 'COR3_IP_SEARCH_LOG') {
+        if (isContextValid()) {
+            try { chrome.storage.local.set({ secretFinderLog: event.data.html }); } catch (e) {}
+        }
+    }
+    if (event.data && event.data.type === 'COR3_IP_SEARCH_DONE') {
+        if (isContextValid()) {
+            try {
+                chrome.storage.local.set({ secretFinderLog: event.data.html });
+                chrome.storage.sync.set({ secretFinderEnabled: false });
+            } catch (e) {}
+        }
+    }
     if (event.data && event.data.type === 'COR3_AUTOJOB_TRACKER_UPDATE') {
         chrome.storage.local.set({ autoJobsTracker: event.data.tracker });
     }
     if (event.data && event.data.type === 'COR3_AUTOJOB_DONE') {
         _autoJobsActive = false;
         chrome.storage.local.set({ autoJobsRunning: false });
+        _automationFinish('auto-jobs');
     }
     if (event.data && event.data.type === 'COR3_ALL_MARKETS_REFRESHED') {
         _marketRefreshInProgress = false;
@@ -1894,6 +2059,7 @@ window.addEventListener('message', (event) => {
     }
     if (event.data && event.data.type === 'COR3_VALUABLE_DONE') {
         chrome.storage.local.set({ valuableSearchRunning: false, valuableSellerRunning: false });
+        _automationFinish('auto-valuable');
     }
     // --- Auto Clear IPs: relay WS responses to storage for background.js ---
     if (event.data && event.data.type === 'COR3_AUTOJOB_SAI_TRANSIT') {

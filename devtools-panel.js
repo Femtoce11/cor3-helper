@@ -803,14 +803,23 @@
 
     async function loadCurrentPage() {
         const start = currentPage * PAGE_SIZE;
-        allMessages = isLogCategory() ? await logDbGetPage(currentCategory, start, PAGE_SIZE) : await dbGetPage(start, PAGE_SIZE);
+        if (isLogCategory()) {
+            allMessages = await logDbGetPage(currentCategory, start, PAGE_SIZE);
+        } else {
+            allMessages = await dbGetPage(start, PAGE_SIZE);
+        }
         applyFilters();
     }
 
     async function pullLiveMessages() {
         try {
             if (!lastLiveTimestamp) return;
-            const newMsgs = isLogCategory() ? await logDbGetAfter(currentCategory, lastLiveTimestamp) : await dbGetAfter(lastLiveTimestamp);
+            let newMsgs;
+            if (isLogCategory()) {
+                newMsgs = await logDbGetAfter(currentCategory, lastLiveTimestamp);
+            } else {
+                newMsgs = await dbGetAfter(lastLiveTimestamp);
+            }
             if (newMsgs.length === 0) return;
             for (const m of newMsgs) allMessages.push(m);
             if (allMessages.length > PAGE_SIZE) {
@@ -1277,6 +1286,12 @@
             liveTimer = null;
         }
         loadCurrentPage();
+    });
+
+    const btnPopout = document.getElementById('btnPopout');
+    btnPopout.addEventListener('click', () => {
+        const url = chrome.runtime.getURL('devtools-log-viewer.html');
+        window.open(url, '_blank', 'width=1200,height=700,menubar=no,toolbar=no,location=no,status=no');
     });
 
     btnExport.addEventListener('click', (e) => {

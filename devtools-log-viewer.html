@@ -2,6 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
+    <title>COR3 Helper — Log Viewer</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
@@ -21,7 +22,6 @@
             --col-size: 54px;
         }
 
-        /* ===== Toolbar ===== */
         .toolbar {
             display: flex;
             align-items: center;
@@ -44,8 +44,6 @@
         }
         .toolbar button:hover { background: #45475a; }
         .toolbar button.active { background: #585b70; border-color: #89b4fa; color: #89b4fa; }
-        .toolbar button.danger { color: #f38ba8; border-color: #f38ba8; }
-        .toolbar button.danger:hover { background: #45172a; }
 
         .toolbar .separator {
             width: 1px;
@@ -92,14 +90,12 @@
             white-space: nowrap;
         }
 
-        /* ===== Main content ===== */
         .main-content {
             display: flex;
             flex: 1;
             overflow: hidden;
         }
 
-        /* ===== Message list ===== */
         .message-list-container {
             flex: 1;
             overflow: hidden;
@@ -161,61 +157,22 @@
         .msg-row:hover { background: #313244; }
         .msg-row.selected { background: #45475a; }
 
-        .msg-dir {
-            font-size: 11px;
-            font-weight: bold;
-            text-align: center;
-        }
+        .msg-dir { font-size: 11px; font-weight: bold; text-align: center; }
         .msg-dir.sent { color: #a6e3a1; }
         .msg-dir.received { color: #89b4fa; }
 
-        .msg-time {
-            font-size: 10px;
-            color: #6c7086;
-            font-family: Consolas, monospace;
-        }
+        .msg-time { font-size: 10px; color: #6c7086; font-family: Consolas, monospace; }
 
-        .msg-event {
-            font-size: 11px;
-            color: #f9e2af;
-            font-weight: 500;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
+        .msg-event { font-size: 11px; color: #f9e2af; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-        .msg-action {
-            font-size: 10px;
-            color: #cba6f7;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
+        .msg-action { font-size: 10px; color: #cba6f7; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-        .msg-server {
-            font-size: 10px;
-            color: #94e2d5;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
+        .msg-server { font-size: 10px; color: #94e2d5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-        .msg-preview {
-            font-size: 10px;
-            color: #6c7086;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
+        .msg-preview { font-size: 10px; color: #6c7086; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-        .msg-size {
-            font-size: 10px;
-            color: #585b70;
-            text-align: right;
-            font-family: Consolas, monospace;
-        }
+        .msg-size { font-size: 10px; color: #585b70; text-align: right; font-family: Consolas, monospace; }
 
-        /* ===== Detail panel ===== */
         .detail-panel {
             width: 0;
             min-width: 0;
@@ -227,13 +184,8 @@
             flex-direction: column;
             position: relative;
         }
-        .detail-panel.open {
-            width: 45%;
-            min-width: 200px;
-        }
-        .detail-panel.resizing {
-            transition: none;
-        }
+        .detail-panel.open { width: 45%; min-width: 200px; }
+        .detail-panel.resizing { transition: none; }
 
         .detail-resize-handle {
             position: absolute;
@@ -246,9 +198,7 @@
             background: transparent;
         }
         .detail-resize-handle:hover,
-        .detail-resize-handle.active {
-            background: #89b4fa;
-        }
+        .detail-resize-handle.active { background: #89b4fa; }
 
         .detail-header {
             display: flex;
@@ -261,19 +211,8 @@
             gap: 6px;
         }
         .detail-header span { font-weight: bold; font-size: 11px; }
-        .detail-header-actions {
-            display: flex;
-            align-items: center;
-            gap: 4px;
-        }
-        .detail-close {
-            background: none;
-            border: none;
-            color: #6c7086;
-            cursor: pointer;
-            font-size: 14px;
-            line-height: 1;
-        }
+        .detail-header-actions { display: flex; align-items: center; gap: 4px; }
+        .detail-close { background: none; border: none; color: #6c7086; cursor: pointer; font-size: 14px; line-height: 1; }
         .detail-close:hover { color: #f38ba8; }
 
         .detail-format-select {
@@ -318,25 +257,13 @@
             white-space: nowrap;
         }
         .detail-search-bar button:hover { background: #45475a; }
-        .detail-search-bar .search-count {
-            font-size: 10px;
-            color: #6c7086;
-            white-space: nowrap;
-        }
+        .detail-search-bar .search-count { font-size: 10px; color: #6c7086; white-space: nowrap; }
         .search-highlight { background: #f9e2af33; color: #f9e2af; border-radius: 2px; }
         .search-highlight.current { background: #f9e2af88; }
 
-        /* Tree view */
         .tree-view { font-family: Consolas, monospace; font-size: 11px; line-height: 1.6; }
         .tree-node { }
-        .tree-toggle {
-            cursor: pointer;
-            user-select: none;
-            color: #89b4fa;
-            display: inline-block;
-            width: 14px;
-            text-align: center;
-        }
+        .tree-toggle { cursor: pointer; user-select: none; color: #89b4fa; display: inline-block; width: 14px; text-align: center; }
         .tree-toggle:hover { color: #cdd6f4; }
         .tree-key { color: #cba6f7; }
         .tree-string { color: #a6e3a1; }
@@ -346,37 +273,6 @@
         .tree-bracket { color: #6c7086; }
         .tree-children { margin-left: 18px; }
         .tree-children.collapsed { display: none; }
-
-        /* Export dropdown */
-        .export-dropdown {
-            position: relative;
-            display: inline-block;
-        }
-        .export-menu {
-            display: none;
-            position: absolute;
-            top: 100%;
-            left: 0;
-            background: #313244;
-            border: 1px solid #45475a;
-            border-radius: 4px;
-            z-index: 100;
-            min-width: 140px;
-            margin-top: 2px;
-        }
-        .export-menu.open { display: block; }
-        .export-menu button {
-            display: block;
-            width: 100%;
-            text-align: left;
-            padding: 5px 10px;
-            border: none;
-            background: none;
-            color: #cdd6f4;
-            font-size: 11px;
-            cursor: pointer;
-        }
-        .export-menu button:hover { background: #45475a; }
 
         .detail-body {
             flex: 1;
@@ -403,43 +299,6 @@
         .detail-meta .dir-sent { color: #a6e3a1; font-weight: bold; }
         .detail-meta .dir-received { color: #89b4fa; font-weight: bold; }
 
-        /* ===== Send panel ===== */
-        .send-panel {
-            border-top: 1px solid #313244;
-            background: #181825;
-            padding: 6px 8px;
-            flex-shrink: 0;
-            display: none;
-        }
-        .send-panel.open { display: flex; gap: 6px; align-items: flex-start; }
-
-        .send-panel textarea {
-            flex: 1;
-            background: #11111b;
-            border: 1px solid #45475a;
-            color: #cdd6f4;
-            padding: 6px 8px;
-            border-radius: 4px;
-            font-family: Consolas, monospace;
-            font-size: 11px;
-            resize: vertical;
-            min-height: 36px;
-            max-height: 120px;
-        }
-        .send-panel textarea:focus { outline: none; border-color: #89b4fa; }
-        .send-panel button {
-            background: #313244;
-            border: 1px solid #a6e3a1;
-            color: #a6e3a1;
-            padding: 6px 14px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 11px;
-            white-space: nowrap;
-        }
-        .send-panel button:hover { background: #1a3a1a; }
-
-        /* ===== Empty state ===== */
         .empty-state {
             display: flex;
             align-items: center;
@@ -496,19 +355,17 @@
             padding: 2px 4px; font-size: 11px; cursor: pointer; max-width: 140px;
         }
         #pageSelector:focus { outline: 1px solid #89b4fa; }
-        /* Scrollbar styling */
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-track { background: #11111b; }
         ::-webkit-scrollbar-thumb { background: #45475a; border-radius: 3px; }
         ::-webkit-scrollbar-thumb:hover { background: #585b70; }
+
+        #importFileInput { display: none; }
     </style>
 </head>
 <body>
 <!-- Toolbar -->
 <div class="toolbar">
-    <button id="btnLive" title="Toggle live auto-refresh">● Live</button>
-    <button id="btnRefresh" title="Refresh current page messages">⟳ Refresh</button>
-    <div class="separator"></div>
     <label><input type="checkbox" id="filterSent" checked> Sent</label>
     <label><input type="checkbox" id="filterReceived" checked> Received</label>
     <div class="separator"></div>
@@ -522,17 +379,8 @@
     </select>
     <input type="text" id="searchInput" placeholder="Filter by event or content..." style="min-width:120px;">
     <div class="separator"></div>
-    <button id="btnSendToggle" title="Toggle send panel">✉ Send</button>
-    <button id="btnClear" class="danger" title="Clear all messages">✕ Clear</button>
-    <div class="separator"></div>
-    <div class="export-dropdown">
-        <button id="btnExport" title="Export filtered messages">⬇ Export</button>
-        <div class="export-menu" id="exportMenu">
-            <button id="btnExportJson">📄 Export as JSON</button>
-            <button id="btnExportMd">📋 Export as MD Table</button>
-        </div>
-    </div>
-    <button id="btnPopout" title="Open external log viewer on new window" style="font-size:13px;padding:3px 7px;">⧉</button>
+    <button id="btnImport" title="Import log file (JSON, MD, or Discord clipboard format)">📂 Import</button>
+    <input type="file" id="importFileInput" accept=".json,.md,.txt,.log">
     <select id="pageSelector" title="Log section"></select>
     <span class="stats" id="statsLabel">(▲0 ▼0)</span>
 </div>
@@ -556,7 +404,7 @@
         </div>
         <div class="message-list" id="messageList">
             <div class="empty-state" id="emptyState">
-                No WebSocket messages yet.<br>Enable "Live" for real-time updates<br>or select a log section to browse history.
+                No logs loaded.<br>Click "📂 Import" to load an exported log file.
             </div>
         </div>
     </div>
@@ -583,12 +431,6 @@
     </div>
 </div>
 
-<!-- Send panel -->
-<div class="send-panel" id="sendPanel">
-    <textarea id="sendInput" placeholder='Enter WS message, e.g. 42["desktop",{"action":"get.options"}]' rows="2"></textarea>
-    <button id="btnSend">▶ Send</button>
-</div>
-
-<script src="devtools-panel.js"></script>
+<script src="devtools-log-viewer.js"></script>
 </body>
 </html>

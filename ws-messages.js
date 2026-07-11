@@ -6,6 +6,8 @@ const COR3_WS_DB_VERSION = 2;
 const COR3_WS_STORE = 'messages';
 const COR3_WS_LOGS_STORE = 'logs';
 const COR3_WS_MAX_AGE = 24 * 60 * 60 * 1000;
+const COR3_WS_MAX_ENTRIES = 30000;
+const COR3_WS_LOGS_MAX_ENTRIES = 30000;
 
 let _wsDbInstance = null;
 let _wsLastPurge = 0;
@@ -86,9 +88,32 @@ async function _wsPurgeOld() {
         };
         await new Promise((resolve, reject) => { tx2.oncomplete = resolve; tx2.onerror = () => reject(tx2.error); });
         if (purged2 > 0) console.log('[COR3 WS-Log] Purged', purged2, 'log entries older than 24h');
+        // Count-based trim: keep at most COR3_WS_MAX_ENTRIES in messages store
+        await _wsTrimByCount(db, COR3_WS_STORE, COR3_WS_MAX_ENTRIES);
+        // Count-based trim: keep at most COR3_WS_LOGS_MAX_ENTRIES in logs store
+        await _wsTrimByCount(db, COR3_WS_LOGS_STORE, COR3_WS_LOGS_MAX_ENTRIES);
     } catch (e) {
         console.log('[COR3 WS-Log] Purge failed:', e);
     }
+}
+
+async function _wsTrimByCount(db, storeName, maxEntries) {
+    const tx = db.transaction(storeName, 'readonly');
+    const store = tx.objectStore(storeName);
+    const countReq = store.count();
+    const count = await new Promise((resolve) => { countReq.onsuccess = () => resolve(countReq.result); countReq.onerror = () => resolve(0); });
+    if (count <= maxEntries) return;
+    const excess = count - maxEntries;
+    const tx2 = db.transaction(storeName, 'readwrite');
+    const store2 = tx2.objectStore(storeName);
+    let deleted = 0;
+    const cursorReq = store2.openCursor();
+    cursorReq.onsuccess = (e) => {
+        const cursor = e.target.result;
+        if (cursor && deleted < excess) { cursor.delete(); deleted++; cursor.continue(); }
+    };
+    await new Promise((resolve, reject) => { tx2.oncomplete = resolve; tx2.onerror = () => reject(tx2.error); });
+    if (deleted > 0) console.log('[COR3 WS-Log] Trimmed', deleted, 'entries from', storeName, '(limit:', maxEntries, ')');
 }
 
 async function _wsWriteEntry(entry) {
@@ -104,12 +129,19 @@ async function _wsWriteEntry(entry) {
     });
 }
 
+function _sanitizeWsMessage(msg) {
+    var s = String(msg);
+    // Remove redundant backslash escapes (e.g. \" → ", \\ → \)
+    try { s = s.replace(/\\\\/g, '\\').replace(/\\"/g, '"'); } catch (e) {}
+    return s;
+}
+
 async function cor3LogWsMessage(direction, message) {
     try {
         const entry = {
             timestamp: new Date().toISOString(),
             direction: direction,
-            message: String(message)
+            message: _sanitizeWsMessage(message)
         };
         try {
             await _wsWriteEntry(entry);

@@ -4742,6 +4742,77 @@ updateMoveNotificationsStatus();
 updateResizableNetworkMapStatus();
 updateAutoUpdateMarketsStatus();
 
+// --- Secret Connection/Server Finder ---
+const secretFinderToggle = document.getElementById('secretFinderToggle');
+const secretFinderStatus = document.getElementById('secretFinderStatus');
+const secretFinderLogEl = document.getElementById('secretFinderLog');
+
+function updateSecretFinderStatusLabel(enabled) {
+    secretFinderStatus.textContent = enabled ? 'Active' : 'Off';
+    secretFinderStatus.style.color = enabled ? 'var(--accent-green)' : 'var(--text-dim)';
+}
+
+chrome.storage.sync.get('secretFinderEnabled', (data) => {
+    const enabled = !!data.secretFinderEnabled;
+    secretFinderToggle.checked = enabled;
+    updateSecretFinderStatusLabel(enabled);
+});
+chrome.storage.local.get('secretFinderLog', (data) => {
+    if (data.secretFinderLog && secretFinderLogEl && secretFinderToggle.checked) {
+        secretFinderLogEl.innerHTML = data.secretFinderLog;
+        secretFinderLogEl.style.display = '';
+    }
+});
+
+secretFinderToggle.addEventListener('change', async () => {
+    const enabled = secretFinderToggle.checked;
+    await chrome.storage.sync.set({ secretFinderEnabled: enabled });
+    updateSecretFinderStatusLabel(enabled);
+
+    if (enabled) {
+        if (secretFinderLogEl) {
+            secretFinderLogEl.innerHTML = '<span style="color:var(--accent-cyan);">Starting search...</span>';
+            secretFinderLogEl.style.display = '';
+        }
+        try {
+            const tab = await getCor3Tab();
+            if (tab) {
+                await chrome.tabs.sendMessage(tab.id, { action: "startIpSearch" });
+            } else {
+                if (secretFinderLogEl) {
+                    secretFinderLogEl.innerHTML = '<span style="color:var(--accent-red);">No cor3.gg tab found</span>';
+                }
+                secretFinderToggle.checked = false;
+                await chrome.storage.sync.set({ secretFinderEnabled: false });
+                updateSecretFinderStatusLabel(false);
+            }
+        } catch (e) {
+            console.log('[COR3 Helper] Failed to start secret finder:', e);
+            if (secretFinderLogEl) {
+                secretFinderLogEl.innerHTML = '<span style="color:var(--accent-red);">Error: ' + e.message + '</span>';
+            }
+            secretFinderToggle.checked = false;
+            await chrome.storage.sync.set({ secretFinderEnabled: false });
+            updateSecretFinderStatusLabel(false);
+        }
+    }
+});
+
+chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && changes.secretFinderLog) {
+        const msg = changes.secretFinderLog.newValue;
+        if (msg && secretFinderLogEl) {
+            secretFinderLogEl.innerHTML = msg;
+            secretFinderLogEl.style.display = '';
+        }
+    }
+    if (area === 'sync' && changes.secretFinderEnabled) {
+        const enabled = !!changes.secretFinderEnabled.newValue;
+        secretFinderToggle.checked = enabled;
+        updateSecretFinderStatusLabel(enabled);
+    }
+});
+
 // --- Toggles Show More/Less ---
 const togglesExtra = document.getElementById('togglesExtra');
 const togglesShowMoreBtn = document.getElementById('togglesShowMoreBtn');
@@ -5096,7 +5167,7 @@ copyAllLogsBtn.addEventListener('click', async () => {
     copyAllLogsBtn.title = 'Collecting logs...';
     const MAX_COPY_BYTES = 10 * 1024 * 1024; // ~10 MB
     try {
-        const storageKeys = ['autoJobsDebugLogs', 'valuableDebugLogs', 'cor3_errors', 'cor3_console_logs'];
+        const storageKeys = ['autoJobsDebugLogs', 'valuableDebugLogs', 'cor3_errors'];
         const storageData = await chrome.storage.local.get(storageKeys);
 
         const tab = await getCor3Tab();
@@ -5106,6 +5177,8 @@ copyAllLogsBtn.addEventListener('click', async () => {
         let idbAutoJobLogs = [];
         let idbAutoValuableLogs = [];
         let idbErrorLogs = [];
+        let idbPageConsoleLogs = [];
+        let idbExtConsoleLogs = [];
         try {
             if (tab) {
                 const results = await chrome.scripting.executeScript({
@@ -5115,7 +5188,7 @@ copyAllLogsBtn.addEventListener('click', async () => {
                             const req = indexedDB.open('cor3_ws_db');
                             req.onsuccess = (e) => {
                                 const db = e.target.result;
-                                const result = { ws: [], autoJobs: [], autoValuable: [], errors: [] };
+                                const result = { ws: [], autoJobs: [], autoValuable: [], errors: [], pageConsole: [], extConsole: [] };
                                 const stores = [];
                                 if (db.objectStoreNames.contains('messages')) stores.push('messages');
                                 if (db.objectStoreNames.contains('logs')) stores.push('logs');
@@ -5145,12 +5218,14 @@ copyAllLogsBtn.addEventListener('click', async () => {
                                         if (v.category === 'auto-jobs') result.autoJobs.push(entry);
                                         else if (v.category === 'auto-valuable') result.autoValuable.push(entry);
                                         else if (v.category === 'error-logs') result.errors.push(entry);
+                                        else if (v.category === 'page-console') result.pageConsole.push(entry);
+                                        else if (v.category === 'ext-console') result.extConsole.push(entry);
                                         c.continue();
                                     };
                                     cur2.onerror = () => done();
                                 }
                             };
-                            req.onerror = () => resolve({ ws: [], autoJobs: [], autoValuable: [], errors: [] });
+                            req.onerror = () => resolve({ ws: [], autoJobs: [], autoValuable: [], errors: [], pageConsole: [], extConsole: [] });
                         });
                     },
                     args: []
@@ -5161,35 +5236,13 @@ copyAllLogsBtn.addEventListener('click', async () => {
                     idbAutoJobLogs = r.autoJobs || [];
                     idbAutoValuableLogs = r.autoValuable || [];
                     idbErrorLogs = r.errors || [];
+                    idbPageConsoleLogs = r.pageConsole || [];
+                    idbExtConsoleLogs = r.extConsole || [];
                 }
             }
         } catch (e) {
             console.log('[COR3 Helper] Could not read logs from IndexedDB:', e);
         }
-
-        // Page console logs (MAIN world — stored in window.__cor3ConsoleLogs, all entries)
-        let pageConsoleLogs = [];
-        try {
-            if (tab) {
-                const results = await chrome.scripting.executeScript({
-                    target: { tabId: tab.id },
-                    world: 'MAIN',
-                    func: () => {
-                        if (!window.__cor3ConsoleLogs) return [];
-                        return window.__cor3ConsoleLogs.slice();
-                    },
-                    args: []
-                });
-                if (results && results[0] && results[0].result) {
-                    pageConsoleLogs = results[0].result;
-                }
-            }
-        } catch (e) {
-            console.log('[COR3 Helper] Could not read page console logs:', e);
-        }
-
-        // Extension console logs (content script, background, popup — from chrome.storage, all entries)
-        const extConsoleLogs = storageData.cor3_console_logs || [];
 
         // Merge IDB logs with storage logs (IDB is the primary source; storage is fallback)
         const mergedAutoJobLogs = idbAutoJobLogs.length > 0 ? idbAutoJobLogs : (storageData.autoJobsDebugLogs || []);
@@ -5203,8 +5256,8 @@ copyAllLogsBtn.addEventListener('click', async () => {
             autoValuableSellerLogs: mergedAutoValuableLogs,
             extensionErrors: mergedErrors,
             wsLogs: wsLogs,
-            pageConsoleLogs: pageConsoleLogs,
-            extensionConsoleLogs: extConsoleLogs
+            pageConsoleLogs: idbPageConsoleLogs,
+            extensionConsoleLogs: idbExtConsoleLogs
         };
 
         let json = JSON.stringify(payload, null, 2);
@@ -5469,7 +5522,7 @@ autoClearIpsToggle.addEventListener('change', async () => {
 });
 
 // --- Per-Market Cleanup (Dismiss Failed Jobs) ---
-async function dismissFailedJobsForMarket(marketKey) {
+async function dismissFailedJobsForMarket(marketKey, btn) {
     const storageKey = { home: 'marketData', dark: 'darkMarketData', soyuz: 'soyuzMarketData', usol: 'usolMarketData' }[marketKey];
     const data = await chrome.storage.local.get(storageKey);
     const md = data[storageKey];
@@ -5480,21 +5533,52 @@ async function dismissFailedJobsForMarket(marketKey) {
     if (!marketId) return;
     const tab = await getCor3Tab();
     if (!tab) return;
-    for (let i = 0; i < failedJobs.length; i++) {
-        const job = failedJobs[i];
-        await chrome.tabs.sendMessage(tab.id, {
-            action: 'autoClearIpsCmd',
-            cmd: 'job.dismiss',
-            data: { marketId, jobId: job.id }
+
+    // Build dismiss list for content.js
+    const dismissList = failedJobs.map(j => ({ marketId, jobId: j.id }));
+
+    // Send through automation queue
+    let resp;
+    try {
+        resp = await chrome.tabs.sendMessage(tab.id, {
+            action: 'dismissFailedJobs',
+            jobs: dismissList,
+            marketKey: marketKey
         });
+    } catch (e) {
+        console.log('[COR3 Helper] dismissFailedJobs sendMessage error:', e);
+        return;
+    }
+
+    // If queued, show delayed state and poll until done
+    if (resp && (resp.queueResult === 'queued' || resp.queueResult === 'already-running')) {
+        const activeType = resp.queueStatus && resp.queueStatus.active ? resp.queueStatus.active : 'another automation';
+        const friendlyNames = { 'auto-jobs': 'Auto Job Solver', 'auto-valuable': 'Auto Valuable Seller', 'auto-update-markets': 'Auto Update Markets', 'auto-send': 'Auto Send Mercenary', 'clear-failed-jobs': 'Clear Failed Jobs' };
+        const activeName = friendlyNames[activeType] || activeType;
+        if (btn) {
+            btn.textContent = '⏳';
+            btn.title = 'Delayed — waiting for "' + activeName + '" to finish';
+            btn.style.cursor = 'help';
+        }
+        // Poll until clear-failed-jobs is no longer queued or active
+        while (true) {
+            await new Promise(r => setTimeout(r, 10000));
+            const qs = await chrome.storage.local.get('automationQueueStatus');
+            const status = qs.automationQueueStatus || {};
+            if (status.active !== 'clear-failed-jobs' && !(status.queued || []).includes('clear-failed-jobs')) break;
+        }
+    }
+
+    // Remove dismissed jobs from local storage
+    for (const job of failedJobs) {
         const fresh = await chrome.storage.local.get(storageKey);
         const freshMd = fresh[storageKey];
         if (freshMd && freshMd.recentJobs) {
             freshMd.recentJobs = freshMd.recentJobs.filter(j => j.id !== job.id);
             await chrome.storage.local.set({ [storageKey]: freshMd });
         }
-        if (i < failedJobs.length - 1) await new Promise(r => setTimeout(r, 500));
     }
+
     addAutoJobLog(`🧹 Dismissed ${failedJobs.length} failed job(s) from ${marketKey} market`, 'info');
     const refreshActions = { home: 'refreshMarket', dark: 'refreshDarkMarket', soyuz: 'refreshSoyuzMarket', usol: 'refreshUsolMarket' };
     setTimeout(async () => {
@@ -5508,9 +5592,12 @@ async function dismissFailedJobsForMarket(marketKey) {
         btn.addEventListener('click', async () => {
             btn.disabled = true;
             btn.textContent = '⏳';
-            try { await dismissFailedJobsForMarket(key); } catch (e) { console.log('[COR3 Helper] Cleanup error:', e); cor3LogError('popup.js', e, { action: 'dismissFailedJobs', market: key }); }
+            const origTitle = btn.title;
+            try { await dismissFailedJobsForMarket(key, btn); } catch (e) { console.log('[COR3 Helper] Cleanup error:', e); cor3LogError('popup.js', e, { action: 'dismissFailedJobs', market: key }); }
             btn.disabled = false;
             btn.textContent = '🧹';
+            btn.title = origTitle;
+            btn.style.cursor = '';
         });
     }
 });

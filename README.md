@@ -41,6 +41,7 @@ The use of automation tools may be detectable by the site's developers and could
 - **Archived Expeditions** — View past expeditions with outcome, cost, risk, location, loot container details and item images. Auto-loaded on startup
 - **Multi-Alarm System** — Create multiple configurable alarms for any timer (daily ops, market job resets, expeditions). Each alarm has its own threshold, volume, continuous mode, and on/off toggle
 - **Move Notifications** — Option to move in-game notification toasts and history panel from the right side to the left side of the screen
+- **Secret Link/Server Finder** — Scans all known server IPs on the network map to discover hidden connections and servers. Sends `connect.ip` for each known IP, then compares before/after map data. Uses a toggle switch (auto-disables after scan) with progress and results shown in a log box. Reports new connections and new servers found
 - **Resizable Network Map** — Toggle to make the in-game network map window resizable via drag
 - **Helper-Only Mode** — Toggle to hide all automation features, converting the extension to a pure info/helper tool
 - **Auto Update Markets** — Toggle to automatically refresh market data when WebSocket events arrive
@@ -48,7 +49,7 @@ The use of automation tools may be detectable by the site's developers and could
 - **Check for Updates** — Compare your installed extension, web, and system versions against the latest on GitHub. It lets user know if an update is required for extension or if web/system versions are different from what's stored.
 - **Cache-First Design** — Data loads instantly from cache on popup open. Use the "Refresh All" button or per-section refresh buttons to fetch fresh data
 - **Real-Time Updates** — WebSocket listeners auto-update daily ops, markets, expeditions, decisions, inventory, mercenaries, loadout, and archived expeditions live when data arrives — even if the popup is opened before data is ready
-- **DevTools WS Inspector** — Built-in Chrome DevTools panel for real-time WebSocket message inspection and multi-category log viewer. Features include: category selector (WS Messages, Auto Job Solver, Auto Valuable Seller, Error Logs), direction/event/action/server column filtering for WS messages, level/message columns for log categories, format dropdown (Raw / JSON-pretty / Interactive Tree View with inline object/array previews), search with highlight & navigation inside message detail (including tree view traversal with auto-expand), export filtered data as JSON or Markdown table, paginated log display (1000 entries per page) with section selector, IndexedDB-backed storage with 24-hour auto-cleanup, per-category clear, and resizable columns/detail pane
+- **DevTools WS Inspector** — Built-in Chrome DevTools panel for real-time WebSocket message inspection and multicategory log viewer. Features include: category selector (WS Messages, Auto Job Solver, Auto Valuable Seller, Error Logs, Page Console Logs, Extension Console Logs), direction/event/action/server column filtering for WS messages, level/message columns for log categories, format dropdown (Raw / JSON-pretty / Interactive Tree View with inline object/array previews), search with highlight & navigation inside message detail (including tree view traversal with auto-expand), export filtered data as JSON or Markdown table, paginated log display (1000 entries per page) with section selector, IndexedDB-backed storage with 24-hour auto-cleanup, per-category clear, and resizable columns/detail pane. Includes an offline popout log viewer that imports exported log files (JSON, MD, Discord clipboard format) for offline analysis
 - **Lightweight** — Only intercepts existing WebSocket traffic and re-triggers some API calls that the game already sends
 
 ## Installation
@@ -87,37 +88,40 @@ The use of automation tools may be detectable by the site's developers and could
 - **Enable auto choose decision** for extension to automatically choose best decision according to scoring which is calculated by default/modified loot/risk modifiers.
 - **Enable auto send mercenary** for extension to send selected mercenary by itself after the current expedition ends.
 - **Enable auto choose mercenary** for extension to choose which mercenary to send for next expedition according to their cost and risk values across CORE and USOL markets. It only works if "auto-send" feature is turned on. Use "Auto-choose USOL first" to prioritize USOL mercs and "Ignore elite mercenary" to exclude elite mercs from selection.
+- **Secret Link/Server Finder** — Toggle the switch to enable. It scans all known server IPs by connecting to each one, then compares the network map before and after to discover any new hidden connections or servers. The toggle auto-disables when the scan completes.
 - **Alarms** — Click ➕ in the Alarms section to create a new alarm. Choose a timer source, set a threshold, and configure volume/continuous beeping. Toggle alarms on/off or edit/delete them anytime.
 - **Check for Updates** — Click the button at the bottom of the popup to see if a new version of extension is available on GitHub. It also shows if web/system versions are changed recently.
-- **DevTools WS Inspector** — Open Chrome DevTools (F12) and navigate to the "COR3 Helper" tab. Use the category selector to switch between WS Messages, Auto Job Solver logs, Auto Valuable Seller logs, and Error Logs. Use the page selector to browse log history (1000 entries per page). Use the filter inputs, format dropdown, search bar, and export buttons to analyze data. Toggle Live mode to see only new entries from the activation point onward.
+- **DevTools WS Inspector** — Open Chrome DevTools (F12) and navigate to the "COR3 Helper" tab. Use the category selector to switch between WS Messages, Auto Job Solver logs, Auto Valuable Seller logs, Error Logs, Page Console Logs, and Extension Console Logs. Use the page selector to browse log history (1000 entries per page). Use the filter inputs, format dropdown, search bar, and export buttons to analyze data. Toggle Live mode to see only new entries from the activation point onward. Click the ⧉ popout button to open an offline log viewer in a new window where you can import previously exported log files.
 
 ## Files
 
-| File                       | Description                                                                                                                       |
-|----------------------------|-----------------------------------------------------------------------------------------------------------------------------------|
-| `manifest.json`            | Extension manifest (Manifest V3) — permissions include storage, scripting, activeTab, tabs, alarms, sidePanel                     |
-| `popup.html`               | Popup UI (HTML + CSS) — includes auto job solver section, debug console, and all toggle UIs                                       |
-| `popup.js`                 | Popup logic, rendering, alarm management, auto job solver UI, debug console, live storage update listeners                        |
-| `console-logger.js`        | Console interceptor — captures console.log/warn/error in both MAIN world and extension contexts for DevTools log viewing          |
-| `errors.js`                | Centralized error logging — stores errors to chrome.storage.local with source, message, stack, and context (max 200 entries)      |
-| `notepack.min.js`          | Bundled notepack.io 3.0.1 library — local copy of msgpack encoder/decoder used by the binary WS codec                            |
-| `msgpack-codec.js`         | Socket.IO v5 binary packet codec — converts between legacy 42[...] strings and binary msgpack WS frames using notepack.io        |
-| `content-early.js`         | Injected at `document_start` — intercepts WebSocket/HTTP polling messages, WS send functions, D4RK path-through logic             |
-| `content.js`               | Injected at `document_idle` — relays data to storage, handles auto-refresh, auto job solver injection, notification repositioning |
-| `background.js`            | Service worker — auto finish all jobs scheduling, auto clear IPs scheduling, expedition polling, alarm management                 |
-| `ws-messages.js`           | IndexedDB writer for WS messages and categorized logs (auto-jobs, auto-valuable, errors). 24h purge                               |
-| `ws-interceptor.js`        | WebSocket interceptor helper                                                                                                      |
-| `decrypt-solver.js`        | Auto-solver for decryption hacking minigame (injected into page when enabled)                                                     |
-| `ice-wall-solver.js`       | Auto-solver for ICE Wall hacking minigame — detects triangle patterns and clicks them in sequence                                 |
-| `simple-decrypt-solver.js` | Auto-solver for Simple Decrypt hacking minigame — clicks decrypt button and monitors progress                                     |
-| `daily-hack-solver.js`     | Fully automated daily ops solver — opens tab, starts task, detects puzzle, solves it, closes windows, auto-disables toggle        |
-| `auto-job-solver.js`       | MAIN world auto job solver engine — handles 9 job types with promise-based WS event orchestration                                 |
-| `auto-valuable-seller.js`  | MAIN world valuable seller engine — scans servers for valuable files/logs, downloads them, and sells to markets with auto loadout |
-| `devtools.html`            | DevTools entry point — registers the WS Inspector panel                                                                           |
-| `devtools.js`              | DevTools page script — creates the panel tab                                                                                      |
-| `devtools-panel.html`      | DevTools panel UI — message table, detail pane, export/search/format controls                                                     |
-| `devtools-panel.js`        | DevTools panel logic — multi-category viewing, filtering, raw/json-pretty/tree-view, search, export, live mode, paginated IndexedDB loading, WS send |
-| `versions.json`            | Version tracking file for update checks (extension, web, system, patch)                                                           |
+| File                       | Description                                                                                                                                                               |
+|----------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `manifest.json`            | Extension manifest (Manifest V3) — permissions include storage, scripting, activeTab, tabs, alarms, sidePanel                                                             |
+| `popup.html`               | Popup UI (HTML + CSS) — includes auto job solver section, debug console, and all toggle UIs                                                                               |
+| `popup.js`                 | Popup logic, rendering, alarm management, auto job solver UI, debug console, live storage update listeners                                                                |
+| `console-logger.js`        | Console interceptor — captures console.log/warn/error in both MAIN world and extension contexts for DevTools log viewing                                                  |
+| `errors.js`                | Centralized error logging — stores errors to chrome.storage.local with source, message, stack, and context (max 200 entries)                                              |
+| `notepack.min.js`          | Bundled notepack.io 3.0.1 library — local copy of msgpack encoder/decoder used by the binary WS codec                                                                     |
+| `msgpack-codec.js`         | Socket.IO v5 binary packet codec — converts between legacy 42[...] strings and binary msgpack WS frames using notepack.io                                                 |
+| `content-early.js`         | Injected at `document_start` — intercepts WebSocket/HTTP polling messages, WS send functions, D4RK path-through logic                                                     |
+| `content.js`               | Injected at `document_idle` — relays data to storage, handles auto-refresh, auto job solver injection, notification repositioning                                         |
+| `background.js`            | Service worker — auto finish all jobs scheduling, auto clear IPs scheduling, expedition polling, alarm management                                                         |
+| `ws-messages.js`           | IndexedDB writer for WS messages and categorized logs (auto-jobs, auto-valuable, errors). 24h purge                                                                       |
+| `ws-interceptor.js`        | WebSocket interceptor helper                                                                                                                                              |
+| `decrypt-solver.js`        | Auto-solver for decryption hacking minigame (injected into page when enabled)                                                                                             |
+| `ice-wall-solver.js`       | Auto-solver for ICE Wall hacking minigame — detects triangle patterns and clicks them in sequence                                                                         |
+| `simple-decrypt-solver.js` | Auto-solver for Simple Decrypt hacking minigame — clicks decrypt button and monitors progress                                                                             |
+| `daily-hack-solver.js`     | Fully automated daily ops solver — opens tab, starts task, detects puzzle, solves it, closes windows, auto-disables toggle                                                |
+| `auto-job-solver.js`       | MAIN world auto job solver engine — handles 9 job types with promise-based WS event orchestration                                                                         |
+| `auto-valuable-seller.js`  | MAIN world valuable seller engine — scans servers for valuable files/logs, downloads them, and sells to markets with auto loadout                                         |
+| `devtools.html`            | DevTools entry point — registers the WS Inspector panel                                                                                                                   |
+| `devtools.js`              | DevTools page script — creates the panel tab                                                                                                                              |
+| `devtools-panel.html`      | DevTools panel UI — message table, detail pane, export/search/format controls, popout button                                                                              |
+| `devtools-panel.js`        | DevTools panel logic — multi-category viewing (incl. console logs), filtering, raw/json-pretty/tree-view, search, export, live mode, paginated IndexedDB loading, WS send |
+| `devtools-log-viewer.html` | Offline log viewer UI — standalone popout window for importing and viewing exported logs                                                                                  |
+| `devtools-log-viewer.js`   | Offline log viewer logic — import/parse JSON, MD table, Discord clipboard formats, category switching, filtering, detail view                                             |
+| `versions.json`            | Version tracking file for update checks (extension, web, system, patch)                                                                                                   |
 
 ## Requirements
 

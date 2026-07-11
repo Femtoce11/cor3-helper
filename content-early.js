@@ -198,6 +198,9 @@ var webVersion = null;
                                 pollFileError = { message: 'insufficient_power', kind: 'insufficient_power', ability: payload.data.ability, required: payload.data.required, available: payload.data.available };
                             }
                             window.postMessage({ type: 'COR3_AUTOJOB_DESKTOP_FILE', data: payload.data || null, error: pollFileError }, '*');
+                            if (payload.event.action === 'update.file') {
+                                window.postMessage({ type: 'COR3_AUTOJOB_DESKTOP_UPDATE_FILE', data: payload.data || null, error: payload.error || null }, '*');
+                            }
                         }
                     }
                 }
@@ -809,6 +812,8 @@ var webVersion = null;
                 }
                 window.__cor3ServerTypeMap = serverTypeMap;
                 window.postMessage({ type: 'COR3_WS_NETWORK_MAP', servers: maintenanceInfo }, '*');
+                // Post full map data for IP Search and other consumers
+                window.postMessage({ type: 'COR3_WS_MAP_DATA', servers: payload.data.servers, connections: payload.data.connections || [] }, '*');
             }
         }
 
@@ -910,6 +915,9 @@ var webVersion = null;
                     fileError = { message: 'insufficient_power', kind: 'insufficient_power', ability: payload.data.ability, required: payload.data.required, available: payload.data.available };
                 }
                 window.postMessage({ type: 'COR3_AUTOJOB_DESKTOP_FILE', data: payload.data, error: fileError }, '*');
+                if (dAction === 'update.file') {
+                    window.postMessage({ type: 'COR3_AUTOJOB_DESKTOP_UPDATE_FILE', data: payload.data, error: payload.error || null }, '*');
+                }
             }
             if (dAction === 'get.file.analysis') {
                 window.postMessage({ type: 'COR3_AUTOJOB_FILE_ANALYSIS', data: payload.data, error: payload.error || null }, '*');
@@ -3290,6 +3298,109 @@ var webVersion = null;
             else if (cmd === 'log.search-valuable') window.__cor3ValuableLogSearch(d.serverId);
             else if (cmd === 'get.sellable-items') window.__cor3ValuableGetSellableItems(d.marketId);
             else if (cmd === 'sell.items') window.__cor3ValuableSellItems(d.marketId, d.items);
+        }
+        // --- Secret Connection/Server Finder ---
+        if (event.data && event.data.type === 'COR3_IP_SEARCH_START') {
+            (function runSecretFinder() {
+                var DELAY_MS = 2500;
+                var getMapMsg = '42["event",{"event":{"name":"network-map","action":"get.map"},"data":{}}]';
+
+                function logMsg(html) {
+                    window.postMessage({ type: 'COR3_IP_SEARCH_LOG', html: html }, '*');
+                }
+                function doneMsg(html) {
+                    window.postMessage({ type: 'COR3_IP_SEARCH_DONE', html: html }, '*');
+                }
+
+                function waitForMap(timeout) {
+                    return new Promise(function (resolve) {
+                        var done = false;
+                        function onMsg(evt) {
+                            if (done) return;
+                            if (evt.data && evt.data.type === 'COR3_WS_MAP_DATA') {
+                                done = true;
+                                window.removeEventListener('message', onMsg);
+                                clearTimeout(timer);
+                                resolve(evt.data);
+                            }
+                        }
+                        window.addEventListener('message', onMsg);
+                        var timer = setTimeout(function () {
+                            if (!done) { done = true; window.removeEventListener('message', onMsg); resolve(null); }
+                        }, timeout || 10000);
+                    });
+                }
+
+                function connectIp(ip) {
+                    wsSend('42["event",{"event":{"name":"network-map","action":"connect.ip"},"data":{"ipAddress":"' + ip + '"}}]');
+                }
+
+                logMsg('<span style="color:var(--accent-cyan);">Fetching network map...</span>');
+                wsSend(getMapMsg);
+                waitForMap(10000).then(function (mapData1) {
+                    if (!mapData1 || !mapData1.servers || !mapData1.connections) {
+                        doneMsg('<span style="color:var(--accent-red);">Failed to fetch initial map data</span>');
+                        return;
+                    }
+                    var oldConnections = new Set(mapData1.connections.map(function (c) { return c.id; }));
+                    var oldServerIds = new Set(mapData1.servers.map(function (s) { return s.id; }));
+                    var serverIps = mapData1.servers.map(function (s) { return s.serverIp; }).filter(Boolean);
+                    var serverNameMap = {};
+                    mapData1.servers.forEach(function (s) { serverNameMap[s.id] = s.serverName; });
+                    var total = serverIps.length;
+                    var idx = 0;
+
+                    logMsg('<span style="color:var(--accent-cyan);">Found ' + total + ' IPs to scan. Starting...</span>');
+
+                    function connectNext() {
+                        if (idx >= total) {
+                            logMsg('<span style="color:var(--accent-cyan);">Scanning complete. Fetching updated map...</span>');
+                            setTimeout(function () {
+                                wsSend(getMapMsg);
+                                waitForMap(10000).then(function (mapData2) {
+                                    if (!mapData2 || !mapData2.connections) {
+                                        doneMsg('<span style="color:var(--accent-red);">Failed to fetch updated map data</span>');
+                                        return;
+                                    }
+                                    if (mapData2.servers) {
+                                        mapData2.servers.forEach(function (s) { serverNameMap[s.id] = s.serverName; });
+                                    }
+                                    var newConns = mapData2.connections.filter(function (c) { return !oldConnections.has(c.id); });
+                                    var newServers = (mapData2.servers || []).filter(function (s) { return !oldServerIds.has(s.id); });
+                                    var parts = [];
+                                    if (newConns.length > 0) {
+                                        parts.push('<div style="color:var(--accent-green);font-weight:bold;">Found ' + newConns.length + ' new connection(s):</div>');
+                                        newConns.forEach(function (c) {
+                                            var a = serverNameMap[c.serverA] || c.serverA;
+                                            var b = serverNameMap[c.serverB] || c.serverB;
+                                            parts.push('<div style="padding:1px 0;margin-left:8px;color:var(--accent-cyan);">' + a + ' ↔ ' + b + (c.isHidden ? ' <span style="color:var(--accent-orange);">(hidden)</span>' : '') + '</div>');
+                                        });
+                                    }
+                                    if (newServers.length > 0) {
+                                        parts.push('<div style="color:var(--accent-green);font-weight:bold;margin-top:4px;">Found ' + newServers.length + ' new server(s):</div>');
+                                        newServers.forEach(function (s) {
+                                            parts.push('<div style="padding:1px 0;margin-left:8px;color:var(--accent-cyan);">🖥️ ' + (s.serverName || s.id) + '</div>');
+                                        });
+                                    }
+                                    if (newConns.length === 0 && newServers.length === 0) {
+                                        parts.push('<span style="color:var(--accent-orange);">Couldn\'t find anything new... (' + total + ' IPs scanned)</span>');
+                                    } else {
+                                        parts.push('<div style="margin-top:4px;color:var(--text-dim);">Scanned ' + total + ' IPs</div>');
+                                    }
+                                    doneMsg(parts.join(''));
+                                });
+                            }, 3000);
+                            return;
+                        }
+                        var ip = serverIps[idx];
+                        idx++;
+                        logMsg('<span style="color:var(--accent-cyan);">Connecting ' + idx + '/' + total + ': ' + ip + '</span>');
+                        connectIp(ip);
+                        setTimeout(connectNext, DELAY_MS);
+                    }
+                    connectNext();
+                });
+            })();
         }
         // --- DevTools panel: send raw WS message ---
         if (event.data && event.data.type === 'COR3_DEVTOOLS_WS_SEND') {

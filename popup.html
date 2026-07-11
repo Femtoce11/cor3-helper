@@ -3,6 +3,28 @@
 <head>
     <meta charset="UTF-8">
     <style>
+        /* 1. Define the width of the entire scrollbar vertical strip */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        /* 2. Style the background track (currently the dark grey background) */
+        ::-webkit-scrollbar-track {
+            background: var(--bg-primary);
+            border-radius: 3px;
+        }
+
+        /* 3. Style the actual movable scroll wheel pill (the "thumb") */
+        ::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 3px;
+        }
+
+        /* 4. Optional: Change color when the user hovers over it */
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--text-dim);
+        }
+
         /* ===== Theme CSS Variables ===== */
         body {
             --bg-primary: #05080b;
@@ -241,7 +263,7 @@
         /* ===== Base Styles (using variables) ===== */
         body {
             width: 300px;
-            padding: 15px;
+            padding: 15px 12px 15px 15px;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background-color: var(--bg-primary);
             color: var(--text);
@@ -2603,7 +2625,7 @@
             <div id="dailyHackLog" style="display:none;font-size:10px;margin-top:6px;padding:6px 8px;background:var(--bg-card);border-radius:6px;border:1px solid var(--border);color:var(--accent-cyan);"></div>
             <!-- Auto Job Solver Toggle -->
             <div class="auto-decrypt-row" style="margin-top:8px;">
-                <span class="decrypt-label">🤖 Auto Job Solver</span>
+                <span class="decrypt-label">🤖 Auto Job Solver UI</span>
                 <div style="display:flex;align-items:center;gap:8px;">
                     <span class="decrypt-status" id="autoJobSolverStatus">Off</span>
                     <label class="alarm-toggle-switch">
@@ -2614,7 +2636,7 @@
             </div>
             <!-- Auto Valuable Seller Toggle -->
             <div class="auto-decrypt-row" style="margin-top:8px;">
-                <span class="decrypt-label">💎 Auto Valuable Seller</span>
+                <span class="decrypt-label">💎 Auto Valuable Seller UI</span>
                 <div style="display:flex;align-items:center;gap:8px;">
                     <span class="decrypt-status" id="autoValuableSellerStatus">Off</span>
                     <label class="alarm-toggle-switch">
@@ -2678,6 +2700,18 @@
                     </label>
                 </div>
             </div>
+            <!-- Secret Connection/Server Finder -->
+            <div class="auto-decrypt-row" style="margin-top:8px;">
+                <span class="decrypt-label">🔍 Secret Link/Server Finder</span>
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <span class="decrypt-status" id="secretFinderStatus">Off</span>
+                    <label class="alarm-toggle-switch">
+                        <input type="checkbox" id="secretFinderToggle">
+                        <span class="slider-track"></span>
+                    </label>
+                </div>
+            </div>
+            <div id="secretFinderLog" style="display:none;font-size:10px;margin-top:6px;padding:6px 8px;background:var(--bg-card);border-radius:6px;border:1px solid var(--border);color:var(--accent-cyan);max-height:120px;overflow-y:auto;"></div>
         </div>
         <div style="text-align:center;margin-top:8px;">
             <button id="togglesShowMoreBtn" style="background:none;border:1px solid var(--border);color:var(--text-secondary);font-size:10px;padding:3px 12px;border-radius:6px;cursor:pointer;">Show More ▼</button>

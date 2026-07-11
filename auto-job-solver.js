@@ -390,25 +390,30 @@
                     }
                 }
                 window.addEventListener('message', onEvent);
-                // Poll for minigame close (solver finished but SAI event missed)
                 var pollTimerId = 0;
-                if (canPollClose) {
-                    function pollClose() {
-                        if (done) return;
-                        if (!isHackMinigameOpen()) {
-                            if (!done) { done = true; window.removeEventListener('message', onEvent); safeClearTimeout(timeoutTimerId); resolve(); }
-                        } else {
-                            pollTimerId = safeTimeout(pollClose, 500);
-                        }
+                function pollClose() {
+                    if (done) return;
+                    if (abortFlag) {
+                        if (!done) { done = true; window.removeEventListener('message', onEvent); safeClearTimeout(timeoutTimerId); reject(new Error('Aborted')); }
+                        return;
                     }
-                    pollTimerId = safeTimeout(pollClose, 500);
+                    if (canPollClose && !isHackMinigameOpen()) {
+                        if (!done) { done = true; window.removeEventListener('message', onEvent); safeClearTimeout(timeoutTimerId); resolve(); }
+                    } else {
+                        pollTimerId = safeTimeout(pollClose, 500);
+                    }
                 }
+                pollTimerId = safeTimeout(pollClose, 500);
                 // Hard timeout
                 var timeoutTimerId = safeTimeout(function () {
                     if (!done) { done = true; window.removeEventListener('message', onEvent); safeClearTimeout(pollTimerId); reject(new Error('timeout')); }
                 }, hackSolverTimeout);
             });
         } catch (e) {
+            if (abortFlag) {
+                log('Hack wait aborted by user', 'warn');
+                return;
+            }
             log('Hack solver did not complete in ' + (hackSolverTimeout / 1000) + 's — checking login status directly', 'warn');
         }
         if (saiUpdateReceived) {
@@ -464,9 +469,10 @@
 
     // Delay helper — resistant to Chrome background-tab throttling
     function delay(ms) {
-        return new Promise(function (resolve) {
+        return new Promise(function (resolve, reject) {
             var target = Date.now() + ms;
             function check() {
+                if (abortFlag) { reject(new Error('Aborted')); return; }
                 if (Date.now() >= target) { resolve(); return; }
                 var remaining = target - Date.now();
                 if (remaining > 200) {
@@ -496,6 +502,12 @@
             window.addEventListener('message', handler);
             function checkTimeout() {
                 if (done) return;
+                if (abortFlag) {
+                    done = true;
+                    window.removeEventListener('message', handler);
+                    reject(new Error('Aborted'));
+                    return;
+                }
                 if (Date.now() >= deadline) {
                     done = true;
                     window.removeEventListener('message', handler);
@@ -577,7 +589,7 @@
         'market-not-reachable': 'Market not reachable',
         'Error: File is encrypted': 'Unable to decrypt that file extension. Please install the appropriate decryption software',
         'insufficient_power': 'Insufficient decrypt power for this file',
-        'insufficient-power': 'Insufficient decrypt power for this file'
+        'file-already-decrypted': 'File is already decrypted'
     };
     function friendlyError(errMsg, failedConditions) {
         if (!errMsg) return 'Unknown error';
@@ -1679,7 +1691,7 @@
             }
 
             // Need to hack — retry up to MAX_HACK_ATTEMPTS times if hack fails
-            var MAX_HACK_ATTEMPTS = 3;
+            var MAX_HACK_ATTEMPTS = 6;
             var hackAttempt = 0;
             var loggedIn = false;
 
@@ -2105,9 +2117,11 @@
 
         // Listen for file updates (server may regenerate fileId after take)
         var latestFileId = null;
+        var latestFileName = null;
         var fileUpdateHandler = function (evt) {
             if (evt.data && evt.data.type === 'COR3_AUTOJOB_DESKTOP_FILE' && evt.data.data && evt.data.data.file) {
                 latestFileId = evt.data.data.file.id;
+                latestFileName = evt.data.data.file.name;
                 log('File updated: ' + evt.data.data.file.name + ' (new id: ' + latestFileId + ')');
             }
         };
@@ -2117,7 +2131,6 @@
             // 1. Take the job
             await stepTakeJob(job);
 
-            // If already taken and completable, try completing first
             if (job.alreadyTaken && job.canComplete) {
                 log('Job already taken and completable — completing now');
                 var earlyReward = await stepCompleteJob(job);
@@ -2187,15 +2200,29 @@
                         if (targetFile) log('Matched file by conditions name: ' + targetFile.name);
                     }
                 }
-                // 4. Fallback: prefer encrypted files (isEncrypted or .enc extension), then isNew, then last
+                if (!targetFile && latestFileName) {
+                    targetFile = files.find(function (f) { return f.name === latestFileName; });
+                    if (targetFile) log('Matched file by update event name: ' + targetFile.name);
+                }
+                if (!targetFile && fileInfo && fileInfo.name) {
+                    var fdBaseName = fileInfo.name.replace(/\.[^.]+$/, '');
+                    targetFile = files.find(function (f) { return f.name && f.name.replace(/\.[^.]+$/, '') === fdBaseName; });
+                    if (targetFile) log('Matched file by base name "' + fdBaseName + '": ' + targetFile.name);
+                }
                 if (!targetFile) {
                     var encFiles = files.filter(function (f) { return f.isEncrypted || (f.name && f.name.indexOf('.enc') >= 0); });
                     if (encFiles.length > 0) {
                         targetFile = encFiles.find(function (f) { return f.isNew; }) || encFiles[encFiles.length - 1];
                         log('Matched encrypted file by fallback: ' + targetFile.name, 'warn');
                     } else {
-                        targetFile = files.find(function (f) { return f.isNew; }) || files[files.length - 1];
-                        if (targetFile) log('Matched file by final fallback (isNew/last): ' + targetFile.name, 'warn');
+                        var newFiles = files.filter(function (f) { return f.isNew; });
+                        if (newFiles.length === 1) {
+                            targetFile = newFiles[0];
+                            log('Matched file by single isNew file: ' + targetFile.name, 'warn');
+                        } else {
+                            targetFile = files[files.length - 1];
+                            if (targetFile) log('Matched file by final fallback (last): ' + targetFile.name, 'warn');
+                        }
                     }
                 }
             }
@@ -2256,9 +2283,9 @@
                 var errMsg = openFileResult.error.message || openFileResult.error.kind || JSON.stringify(openFileResult.error);
                 var isLoadoutError = errMsg.indexOf('missing-software') >= 0 || errMsg.indexOf('insufficient_power') >= 0 ||
                     errMsg.indexOf('insufficient-power') >= 0 || errMsg.indexOf('File is encrypted') >= 0;
-                var isAlreadyDecrypted = errMsg.indexOf('cannot-read-sai-file') >= 0 || errMsg.indexOf('Cannot read SAI file') >= 0;
+                var isAlreadyDecrypted = errMsg.indexOf('cannot-read-sai-file') >= 0 || errMsg.indexOf('Cannot read SAI file') >= 0 || errMsg.indexOf('file-already-decrypted') >= 0;
                 if (isAlreadyDecrypted) {
-                    log('File already decrypted (cannot-read-sai-file) — attempting job completion directly', 'success');
+                    log('File already decrypted — attempting job completion directly', 'success');
                 } else if (isLoadoutError) {
                     log('Loadout: file open failed (' + errMsg + ') — attempting software swap');
                     var swapOk = await tryLoadoutSwapForError(errMsg, job, openFileResult.error);
@@ -2301,7 +2328,7 @@
             // 6. Wait for server to register completion, then complete job
             await delay(1500);
             var decryptRetries = 0;
-            var MAX_DECRYPT_RETRIES = 3;
+            var MAX_DECRYPT_RETRIES = 6;
             while (true) {
                 try {
                     var reward = await stepCompleteJob(job);
@@ -2448,126 +2475,185 @@
     async function solveDataDownload(job) {
         log('=== Data Download: ' + jobLabel(job) + ' ===');
 
-        // 1. Take the job
-        await stepTakeJob(job);
+        var latestFileId = null;
+        var latestFileName = null;
+        var fileUpdateHandler = function (evt) {
+            if (evt.data && evt.data.type === 'COR3_AUTOJOB_DESKTOP_FILE' && evt.data.data && evt.data.data.file) {
+                latestFileId = evt.data.data.file.id;
+                latestFileName = evt.data.data.file.name;
+                log('File updated: ' + evt.data.data.file.name + ' (new id: ' + latestFileId + ')');
+            }
+        };
+        window.addEventListener('message', fileUpdateHandler);
 
-        if (!job.serverId) {
-            throw new Error('No target server for Data Download job');
-        }
-
-        // If already taken and completable, try completing first
-        if (job.alreadyTaken && job.canComplete) {
-            log('Job already taken and completable — completing now');
-            var earlyReward = await stepCompleteJob(job);
-            if (earlyReward) return earlyReward;
-            log('Completion failed — continuing with remaining steps');
-        } else if (job.alreadyTaken) {
-            log('Job already taken but not yet completable — continuing with remaining steps');
-        }
-
-        // 2. Set endpoint
-        await stepSetEndpoint(job.serverId);
-
-        // 3. Login
-        await stepLogin(job.serverId);
-
-        // 4. Get files list
-        log('Getting server files');
-        sendCmd('get.files', { serverId: job.serverId });
-        var filesData;
         try {
-            filesData = await waitForEvent('COR3_AUTOJOB_SAI_FILES', 10000);
-        } catch (e) {
-            throw new Error('Failed to get server files');
-        }
+            // 1. Take the job
+            await stepTakeJob(job);
 
-        if (filesData.error) {
-            throw new Error('Files error: ' + friendlyError(filesData.error.message || JSON.stringify(filesData.error)));
-        }
+            if (!job.serverId) {
+                throw new Error('No target server for Data Download job');
+            }
 
-        // 5. Find the job file (has jobId matching ours)
-        var jobFile = null;
-        if (filesData.data && filesData.data.files) {
-            jobFile = filesData.data.files.find(function (f) {
-                return f.jobId === job.jobId;
-            });
-        }
+            if (job.alreadyTaken && job.canComplete) {
+                log('Job already taken and completable — completing now');
+                var earlyReward = await stepCompleteJob(job);
+                if (earlyReward) return earlyReward;
+                log('Completion failed — continuing with remaining steps');
+            } else if (job.alreadyTaken) {
+                log('Job already taken but not yet completable — continuing with remaining steps');
+            }
 
-        if (!jobFile) {
-            // File may already be downloaded — skip to decrypt/complete
-            log('Job file not found on server (may already be downloaded)', 'warn');
-        } else {
-            // 6. Download the file
-            log('Downloading file: ' + jobFile.name);
-            sendCmd('file.download', { serverId: job.serverId, fileId: jobFile.fileId });
+            // 2. Set endpoint
+            await stepSetEndpoint(job.serverId);
 
+            // 3. Login
+            await stepLogin(job.serverId);
+
+            // 4. Get files list
+            log('Getting server files');
+            sendCmd('get.files', { serverId: job.serverId });
+            var filesData;
             try {
-                var dlResult = await waitForEvent('COR3_AUTOJOB_SAI_FILE_DOWNLOAD', 10000);
-                if (dlResult.error) {
-                    // May already be downloaded
-                    log('File download response: ' + friendlyError(dlResult.error.message || JSON.stringify(dlResult.error)), 'warn');
-                }
+                filesData = await waitForEvent('COR3_AUTOJOB_SAI_FILES', 10000);
             } catch (e) {
-                log('File download timed out (may already be downloaded)', 'warn');
+                throw new Error('Failed to get server files');
             }
 
-            log('File downloaded', 'success');
-        }
-        await delay(humanDelay());
+            if (filesData.error) {
+                throw new Error('Files error: ' + friendlyError(filesData.error.message || JSON.stringify(filesData.error)));
+            }
 
-        // 7. Check if job is completable or needs decryption
-        // Refresh market to check canComplete
-        sendCmd('get.jobs', { marketId: job.marketId });
-        await delay(1000);
+            // 5. Find the job file (has jobId matching ours)
+            var jobFile = null;
+            var serverFileName = null;
+            if (filesData.data && filesData.data.files) {
+                jobFile = filesData.data.files.find(function (f) {
+                    return f.jobId === job.jobId;
+                });
+            }
 
-        // Try to complete — if it fails, we may need to decrypt
-        var reward = await stepCompleteJob(job);
-        if (reward) return reward;
+            if (!jobFile) {
+                log('Job file not found on server (may already be downloaded)', 'warn');
+            } else {
+                serverFileName = jobFile.name;
+                log('Downloading file: ' + jobFile.name);
+                sendCmd('file.download', { serverId: job.serverId, fileId: jobFile.fileId });
 
-        // If not completed, might need decryption step
-        log('Job not yet complete — checking if decryption needed');
-
-        if (!downloadFolderId) {
-            await stepDiscoverDownloadFolder();
-        }
-        if (!downloadFolderId) {
-            throw new Error('Download folder ID not found — could not discover Downloads folder');
-        }
-
-        sendCmd('open.folder', { folderId: downloadFolderId });
-        var folderData;
-        try {
-            folderData = await waitForEvent('COR3_AUTOJOB_DESKTOP_FOLDER', 10000);
-        } catch (e) {
-            log('Could not open download folder for decryption', 'warn');
-            return null;
-        }
-
-        if (folderData && folderData.data && folderData.data.files && folderData.data.files.length > 0) {
-            var encFile = folderData.data.files.find(function (f) { return f.isNew; }) || folderData.data.files[folderData.data.files.length - 1];
-            if (encFile) {
-                if (encFile.name) {
-                    var ddDotIdx = encFile.name.lastIndexOf('.');
-                    if (ddDotIdx >= 0) job.fileType = encFile.name.substring(ddDotIdx);
-                }
-                await ensureDecryptOnlyLoadout(job);
-                await delay(humanDelay());
-                ensureDecryptSolverEnabled();
-                ensureIceWallSolverEnabled();
-                ensureSimpleDecryptSolverEnabled();
-                log('Opening file for decryption: ' + encFile.name);
-                sendCmd('decrypt.file', { fileId: encFile.id });
                 try {
-                    await waitForEvent('COR3_AUTOJOB_MINIGAME_START', 10000);
-                } catch (e) { /* solver may handle directly */ }
-                await waitForHackToBeDone();
+                    var dlResult = await waitForEvent('COR3_AUTOJOB_SAI_FILE_DOWNLOAD', 10000);
+                    if (dlResult.error) {
+                        log('File download response: ' + friendlyError(dlResult.error.message || JSON.stringify(dlResult.error)), 'warn');
+                    }
+                } catch (e) {
+                    log('File download timed out (may already be downloaded)', 'warn');
+                }
 
-                // Try completing again
-                reward = await stepCompleteJob(job);
+                log('File downloaded', 'success');
             }
-        }
+            await delay(humanDelay());
 
-        return reward;
+            // 7. Try to complete — set endpoint to market first
+            var reward = await stepCompleteJob(job);
+            if (reward) return reward;
+
+            log('Job not yet complete — checking if decryption needed');
+
+            // Re-fetch job info to verify conditions
+            var condFile = extractFileInfoFromConditions(job);
+            if (condFile) {
+                log('Job conditions file: ' + (condFile.name || 'unknown') + ' (id: ' + (condFile.id || 'unknown') + ')');
+            }
+
+            if (!downloadFolderId) {
+                await stepDiscoverDownloadFolder();
+            }
+            if (!downloadFolderId) {
+                throw new Error('Download folder ID not found — could not discover Downloads folder');
+            }
+
+            sendCmd('open.folder', { folderId: downloadFolderId });
+            var folderData;
+            try {
+                folderData = await waitForEvent('COR3_AUTOJOB_DESKTOP_FOLDER', 10000);
+            } catch (e) {
+                log('Could not open download folder for decryption', 'warn');
+                return null;
+            }
+
+            var encFile = null;
+            if (folderData && folderData.data && folderData.data.files) {
+                var files = folderData.data.files;
+                if (latestFileId) {
+                    encFile = files.find(function (f) { return f.id === latestFileId; });
+                    if (encFile) log('Matched file by update event ID: ' + encFile.name);
+                }
+                if (!encFile && condFile && condFile.id) {
+                    encFile = files.find(function (f) { return f.id === condFile.id; });
+                    if (encFile) log('Matched file by conditions ID: ' + encFile.name);
+                }
+                if (!encFile && condFile && condFile.name) {
+                    encFile = files.find(function (f) { return f.name === condFile.name; });
+                    if (encFile) log('Matched file by conditions name: ' + encFile.name);
+                }
+                if (!encFile && latestFileName) {
+                    encFile = files.find(function (f) { return f.name === latestFileName; });
+                    if (encFile) log('Matched file by update event name: ' + encFile.name);
+                }
+                if (!encFile && serverFileName) {
+                    var baseName = serverFileName.replace(/\.[^.]+$/, '');
+                    encFile = files.find(function (f) { return f.name && f.name.replace(/\.[^.]+$/, '') === baseName; });
+                    if (encFile) log('Matched file by base name "' + baseName + '": ' + encFile.name);
+                }
+                if (!encFile) {
+                    var encFiles = files.filter(function (f) { return f.isNew; });
+                    if (encFiles.length === 1) {
+                        encFile = encFiles[0];
+                        log('Matched file by single isNew file: ' + encFile.name, 'warn');
+                    } else {
+                        encFile = files[files.length - 1];
+                        if (encFile) log('Matched file by final fallback (last): ' + encFile.name, 'warn');
+                    }
+                }
+            }
+
+            if (!encFile) {
+                throw new Error('No file found in download folder for decryption');
+            }
+
+            if (encFile.name) {
+                var ddDotIdx = encFile.name.lastIndexOf('.');
+                if (ddDotIdx >= 0) job.fileType = encFile.name.substring(ddDotIdx);
+            }
+
+            await ensureDecryptOnlyLoadout(job);
+            await delay(humanDelay());
+
+            var analysisOk = await checkDecryptPowerViaAnalysis(encFile.id, job);
+            if (!analysisOk) {
+                log('Decrypt power still insufficient after loadout swap — attempting hardware upgrade');
+                var swapOk = await tryLoadoutSwapForError('insufficient_power', job, {});
+                if (!swapOk) {
+                    throw new Error('Insufficient decrypt power — no loadout can meet requirement');
+                }
+                await delay(humanDelay());
+            }
+
+            ensureDecryptSolverEnabled();
+            ensureIceWallSolverEnabled();
+            ensureSimpleDecryptSolverEnabled();
+            log('Opening file for decryption: ' + encFile.name + ' (id: ' + encFile.id + ')');
+            sendCmd('decrypt.file', { fileId: encFile.id });
+            try {
+                await waitForEvent('COR3_AUTOJOB_MINIGAME_START', 10000);
+            } catch (e) { /* solver may handle directly */ }
+            await waitForHackToBeDone();
+
+            reward = await stepCompleteJob(job);
+
+            return reward;
+        } finally {
+            window.removeEventListener('message', fileUpdateHandler);
+        }
     }
 
     // ---- Log Deletion Job ----
@@ -2731,9 +2817,11 @@
 
         // Listen for file updates (server may regenerate fileId after take)
         var latestFileId = null;
+        var latestFileName = null;
         var fileUpdateHandler = function (evt) {
             if (evt.data && evt.data.type === 'COR3_AUTOJOB_DESKTOP_FILE' && evt.data.data && evt.data.data.file) {
                 latestFileId = evt.data.data.file.id;
+                latestFileName = evt.data.data.file.name;
                 log('File updated: ' + evt.data.data.file.name + ' (new id: ' + latestFileId + ')');
             }
         };
@@ -2747,7 +2835,6 @@
                 throw new Error('No target server for Decrypt & Extract job');
             }
 
-            // If already taken and completable, try completing first
             if (job.alreadyTaken && job.canComplete) {
                 log('Job already taken and completable — completing now');
                 var earlyReward = await stepCompleteJob(job);
@@ -2783,6 +2870,7 @@
 
             // 5. Find the job file
             var jobFile = null;
+            var serverFileName = null;
             if (filesData.data && filesData.data.files) {
                 jobFile = filesData.data.files.find(function (f) {
                     return f.jobId === job.jobId;
@@ -2795,6 +2883,7 @@
                 log('Job file not found on server (may already be downloaded)', 'warn');
                 fileAlreadyDownloaded = true;
             } else {
+                serverFileName = jobFile.name;
                 log('Downloading file: ' + jobFile.name);
                 sendCmd('file.download', { serverId: job.serverId, fileId: jobFile.fileId });
 
@@ -2831,20 +2920,36 @@
             if (folderData && folderData.data && folderData.data.files) {
                 var files = folderData.data.files;
                 var condFileInfo = extractFileInfoFromConditions(job);
-                if (condFileInfo && condFileInfo.id) {
+                if (latestFileId) {
+                    encFile = files.find(function (f) { return f.id === latestFileId; });
+                    if (encFile) log('Matched file by update event ID: ' + encFile.name);
+                }
+                if (!encFile && condFileInfo && condFileInfo.id) {
                     encFile = files.find(function (f) { return f.id === condFileInfo.id; });
-                    if (encFile) log('Matched file from job conditions: ' + encFile.name);
+                    if (encFile) log('Matched file from job conditions ID: ' + encFile.name);
                 }
                 if (!encFile && condFileInfo && condFileInfo.name) {
                     encFile = files.find(function (f) { return f.name === condFileInfo.name; });
-                    if (encFile) log('Matched file by name from conditions: ' + encFile.name);
+                    if (encFile) log('Matched file by conditions name: ' + encFile.name);
                 }
-                if (!encFile && latestFileId) {
-                    encFile = files.find(function (f) { return f.id === latestFileId; });
+                if (!encFile && latestFileName) {
+                    encFile = files.find(function (f) { return f.name === latestFileName; });
+                    if (encFile) log('Matched file by update event name: ' + encFile.name);
+                }
+                if (!encFile && serverFileName) {
+                    var baseName = serverFileName.replace(/\.[^.]+$/, '');
+                    encFile = files.find(function (f) { return f.name && f.name.replace(/\.[^.]+$/, '') === baseName; });
+                    if (encFile) log('Matched file by base name "' + baseName + '": ' + encFile.name);
                 }
                 if (!encFile) {
-                    encFile = files.find(function (f) { return f.isNew; }) ||
-                              files[files.length - 1];
+                    var encNewFiles = files.filter(function (f) { return f.isNew; });
+                    if (encNewFiles.length === 1) {
+                        encFile = encNewFiles[0];
+                        log('Matched file by single isNew file: ' + encFile.name, 'warn');
+                    } else {
+                        encFile = files[files.length - 1];
+                        if (encFile) log('Matched file by final fallback (last): ' + encFile.name, 'warn');
+                    }
                 }
             }
 
@@ -2899,12 +3004,16 @@
                 window.addEventListener('message', onMinigame);
             });
 
-            // Handle desktop error (missing-software, insufficient_power, file encrypted)
+            // Handle desktop error (missing-software, insufficient_power, file encrypted, file-already-decrypted)
+            var isAlreadyDecrypted2 = false;
             if (openFileResult2.error) {
                 var errMsg2 = openFileResult2.error.message || openFileResult2.error.kind || JSON.stringify(openFileResult2.error);
                 var isLoadoutError2 = errMsg2.indexOf('missing-software') >= 0 || errMsg2.indexOf('insufficient_power') >= 0 ||
                     errMsg2.indexOf('insufficient-power') >= 0 || errMsg2.indexOf('File is encrypted') >= 0;
-                if (isLoadoutError2) {
+                isAlreadyDecrypted2 = errMsg2.indexOf('cannot-read-sai-file') >= 0 || errMsg2.indexOf('Cannot read SAI file') >= 0 || errMsg2.indexOf('file-already-decrypted') >= 0;
+                if (isAlreadyDecrypted2) {
+                    log('File already decrypted — skipping minigame, proceeding to extraction', 'success');
+                } else if (isLoadoutError2) {
                     log('Loadout: file open failed (' + errMsg2 + ') — attempting software swap');
                     var swapOk2 = await tryLoadoutSwapForError(errMsg2, job, openFileResult2.error);
                     if (swapOk2) {
@@ -2939,12 +3048,14 @@
                 log('Minigame start not detected (solver may handle directly)', 'warn');
             }
             // else: minigame started normally
-            await waitForHackToBeDone();
+            if (!isAlreadyDecrypted2) {
+                await waitForHackToBeDone();
+            }
 
             // 9. Wait for server to register completion, then complete job
             await delay(1500);
             var decryptRetries = 0;
-            var MAX_DECRYPT_RETRIES = 3;
+            var MAX_DECRYPT_RETRIES = 6;
             while (true) {
                 try {
                     var reward = await stepCompleteJob(job);
@@ -3464,7 +3575,14 @@
                 }
             } catch (e) {
                 var errText = friendlyError(e.message);
-                // If failure is maintenance-related, mark as skipped so background.js can reschedule
+                if (e.message === 'Aborted' || abortFlag) {
+                    job.status = 'skipped';
+                    job.error = 'Aborted by user';
+                    log('⚠️ Job aborted: ' + job.name, 'warn');
+                    _currentJobRef = null;
+                    updateTracker();
+                    break;
+                }
                 if (e.message && (e.message.includes('token-expired') || e.message.includes('invalid-access-token'))) {
                     job.status = 'skipped';
                     job.error = errText;
@@ -3495,18 +3613,18 @@
             updateTracker();
             saveCompletedResultsIncremental();
 
-            // Human delay after job completion to avoid "too many requests"
-            await delay(humanDelay());
-
-            // Refresh market data so UI updates (completed jobs disappear)
-            sendCmd('get.jobs', { marketId: job.marketId });
-            await delay(1000);
-
-            // Delay between jobs
-            if (i < jobQueue.length - 1 && !abortFlag) {
-                var interJobDelay = 2000 + Math.floor(Math.random() * 1500);
-                log('Waiting ' + Math.round(interJobDelay / 1000) + 's before next job...');
-                await delay(interJobDelay);
+            if (abortFlag) break;
+            try {
+                await delay(humanDelay());
+                sendCmd('get.jobs', { marketId: job.marketId });
+                await delay(1000);
+                if (i < jobQueue.length - 1 && !abortFlag) {
+                    var interJobDelay = 2000 + Math.floor(Math.random() * 1500);
+                    log('Waiting ' + Math.round(interJobDelay / 1000) + 's before next job...');
+                    await delay(interJobDelay);
+                }
+            } catch (delayErr) {
+                if (abortFlag) break;
             }
         }
 

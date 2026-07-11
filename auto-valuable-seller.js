@@ -11,6 +11,7 @@
     var _fileAnalysisCache = {}; // fileId → analysis result, avoids redundant get.file.analysis calls
     var _loginStatusCache = {}; // serverId → { data, ts }, avoids redundant get.login.status calls
     var LOGIN_STATUS_CACHE_TTL = 3000; // 3 seconds
+    var _desktopToServerMap = {}; // desktopFileId → { serverId, type: 'file'|'log', originalId }
 
     // Server path map — copied from auto-job-solver.js for maintenance checks
     var SERVER_PATH_MAP = {
@@ -205,9 +206,10 @@
     }
 
     function delay(ms) {
-        return new Promise(function (resolve) {
+        return new Promise(function (resolve, reject) {
             var target = Date.now() + ms;
             function check() {
+                if (!running) { reject(new Error('Stopped')); return; }
                 if (Date.now() >= target) { resolve(); return; }
                 var remaining = target - Date.now();
                 if (remaining > 200) {
@@ -236,6 +238,12 @@
             window.addEventListener('message', handler);
             function checkTimeout() {
                 if (done) return;
+                if (!running) {
+                    done = true;
+                    window.removeEventListener('message', handler);
+                    reject(new Error('Stopped'));
+                    return;
+                }
                 if (Date.now() >= deadline) {
                     done = true;
                     window.removeEventListener('message', handler);
@@ -1422,15 +1430,27 @@
 
     // Download a file from a server
     async function downloadFile(serverId, fileId) {
+        var desktopFileId = null;
+        function onUpdateFile(evt) {
+            if (evt.data && evt.data.type === 'COR3_AUTOJOB_DESKTOP_UPDATE_FILE' && evt.data.data && evt.data.data.file) {
+                desktopFileId = evt.data.data.file.id;
+            }
+        }
+        window.addEventListener('message', onUpdateFile);
         sendCmd('file.download', { serverId: serverId, fileId: fileId });
         try {
             var resp = await waitForEvent('COR3_AUTOJOB_SAI_FILE_DOWNLOAD', 30000);
+            window.removeEventListener('message', onUpdateFile);
             if (resp.error) {
                 log('File download error: ' + JSON.stringify(resp.error), 'error');
                 return false;
             }
+            if (desktopFileId) {
+                _desktopToServerMap[desktopFileId] = { serverId: serverId, type: 'file', originalId: fileId };
+            }
             return true;
         } catch (e) {
+            window.removeEventListener('message', onUpdateFile);
             log('File download timeout', 'warn');
             return false;
         }
@@ -1438,15 +1458,27 @@
 
     // Download a log from a server
     async function downloadLog(serverId, logSeq) {
+        var desktopFileId = null;
+        function onUpdateFile(evt) {
+            if (evt.data && evt.data.type === 'COR3_AUTOJOB_DESKTOP_UPDATE_FILE' && evt.data.data && evt.data.data.file) {
+                desktopFileId = evt.data.data.file.id;
+            }
+        }
+        window.addEventListener('message', onUpdateFile);
         sendCmd('log.download', { serverId: serverId, seq: logSeq });
         try {
             var resp = await waitForEvent('COR3_AUTOJOB_SAI_LOG_DOWNLOAD', 30000);
+            window.removeEventListener('message', onUpdateFile);
             if (resp.error) {
                 log('Log download error: ' + JSON.stringify(resp.error), 'error');
                 return false;
             }
+            if (desktopFileId) {
+                _desktopToServerMap[desktopFileId] = { serverId: serverId, type: 'log', originalId: logSeq };
+            }
             return true;
         } catch (e) {
+            window.removeEventListener('message', onUpdateFile);
             log('Log download timeout', 'warn');
             return false;
         }
@@ -1660,7 +1692,8 @@
     // ===== SELLER MODE =====
     async function runSeller(selectedServers, selectedDownloads) {
         log('=== Valuable Seller Started ===', 'info');
-        _cachedMapData = null; // invalidate cached map at start of each run
+        _cachedMapData = null;
+        _desktopToServerMap = {};
 
         // Sort selected servers furthest-first (longer path = further) to reduce maintenance risk
         selectedServers = selectedServers.slice().sort(function (a, b) {
@@ -1707,10 +1740,11 @@
                 log(serverName + ': searching for valuable files...');
                 var fileSearchResult = await searchValuableFiles(serverId);
                 if (fileSearchResult && fileSearchResult.found) {
-                    for (var dfi = 0; dfi < fileSearchResult.found.length; dfi++) {
-                        detectedFileIds[fileSearchResult.found[dfi].id] = true;
+                    var valuableFound = fileSearchResult.found.filter(function (f) { return f.basePrice > 0; });
+                    for (var dfi = 0; dfi < valuableFound.length; dfi++) {
+                        detectedFileIds[valuableFound[dfi].id] = true;
                     }
-                    log(serverName + ': file search-valuable completed — detected ' + fileSearchResult.found.length + ' file(s), searchPower used: ' + (fileSearchResult.searchPowerUsed || '?'), 'success');
+                    log(serverName + ': file search-valuable completed — detected ' + valuableFound.length + ' file(s)' + (valuableFound.length < fileSearchResult.found.length ? ' (' + (fileSearchResult.found.length - valuableFound.length) + ' skipped, basePrice=0)' : '') + ', searchPower used: ' + (fileSearchResult.searchPowerUsed || '?'), 'success');
                 }
                 await delay(humanDelay());
             } else {
@@ -1723,10 +1757,11 @@
                 log(serverName + ': searching for valuable logs...');
                 var logSearchResult = await searchValuableLogs(serverId);
                 if (logSearchResult && logSearchResult.found) {
-                    for (var dli = 0; dli < logSearchResult.found.length; dli++) {
-                        detectedLogIds[logSearchResult.found[dli].id] = true;
+                    var valuableLogsFound = logSearchResult.found.filter(function (l) { return l.basePrice > 0; });
+                    for (var dli = 0; dli < valuableLogsFound.length; dli++) {
+                        detectedLogIds[valuableLogsFound[dli].id] = true;
                     }
-                    log(serverName + ': log search-valuable completed — detected ' + logSearchResult.found.length + ' log(s)', 'success');
+                    log(serverName + ': log search-valuable completed — detected ' + valuableLogsFound.length + ' log(s)' + (valuableLogsFound.length < logSearchResult.found.length ? ' (' + (logSearchResult.found.length - valuableLogsFound.length) + ' skipped, basePrice=0)' : ''), 'success');
                 }
                 await delay(humanDelay());
             } else {
@@ -1781,7 +1816,7 @@
             var hasLogFilter = Object.keys(detectedLogIds).length > 0;
             if (hasLogFilter) {
                 var beforeLogCount = valuableLogs.length;
-                valuableLogs = valuableLogs.filter(function (l) { return detectedLogIds[l.logId || l.id]; });
+                valuableLogs = valuableLogs.filter(function (l) { return detectedLogIds[String(l.seq)]; });
                 if (beforeLogCount !== valuableLogs.length) {
                     log(serverName + ': filtered logs: ' + valuableLogs.length + ' detected of ' + beforeLogCount + ' total valuable');
                 }
@@ -1824,13 +1859,14 @@
 
             // Refresh downloads folder and update Downloads tab
             log(serverName + ': refreshing downloads folder...');
-            await delay(humanDelay());
+            await delay(500);
             var dlFiles = await getDownloadsFolder();
             var valuableDlFiles = dlFiles.filter(function (f) { return f.isValuable; });
             _sellerDownloadsData = { files: [] };
             for (var di = 0; di < valuableDlFiles.length; di++) {
                 var dlFile = valuableDlFiles[di];
-                await delay(humanDelay());
+                var isCached = !!_fileAnalysisCache[dlFile.id];
+                if (!isCached) await delay(300);
                 var analysis = await getFileAnalysis(dlFile.id);
                 var dlTags = [];
                 var dlSource = '—';
@@ -1899,10 +1935,21 @@
                         _sellerDownloadsData.files = _sellerDownloadsData.files.filter(function (f) { return f.id !== sid; });
                         updateDownloadsUI(_sellerDownloadsData);
                         if (_lastServersData) {
-                            for (var si2 = 0; si2 < _lastServersData.servers.length; si2++) {
-                                var srv = _lastServersData.servers[si2];
-                                srv.files = (srv.files || []).filter(function (f) { return (f.fileId || f.id) !== sid; });
-                                srv.logs = (srv.logs || []).filter(function (l) { return (l.logId || l.id || l.seq) !== sid; });
+                            var mapping = _desktopToServerMap[sid];
+                            if (mapping) {
+                                var targetSrv = _lastServersData.servers.find(function (s) { return s.id === mapping.serverId; });
+                                if (targetSrv) {
+                                    if (mapping.type === 'file') {
+                                        targetSrv.files = (targetSrv.files || []).filter(function (f) { return (f.fileId || f.id) !== mapping.originalId; });
+                                    } else if (mapping.type === 'log') {
+                                        targetSrv.logs = (targetSrv.logs || []).filter(function (l) { return l.seq !== mapping.originalId; });
+                                    }
+                                    var remaining = (targetSrv.files || []).length + (targetSrv.logs || []).length;
+                                    if (remaining === 0 && targetSrv.status === 'DOWNLOADED') {
+                                        targetSrv.status = 'DONE';
+                                    }
+                                }
+                                delete _desktopToServerMap[sid];
                             }
                             updateServersUI(_lastServersData);
                         }
@@ -1933,7 +1980,7 @@
             running = true;
             mode = 'search';
             runSearch().catch(function (err) {
-                log('Search error: ' + err.message, 'error');
+                if (err.message !== 'Stopped') log('Search error: ' + err.message, 'error');
                 signalDone();
             });
         }
@@ -1948,7 +1995,7 @@
             var sServers = event.data.selectedServers || [];
             var sDownloads = event.data.selectedDownloads || [];
             runSeller(sServers, sDownloads).catch(function (err) {
-                log('Seller error: ' + err.message, 'error');
+                if (err.message !== 'Stopped') log('Seller error: ' + err.message, 'error');
                 signalDone();
             });
         }

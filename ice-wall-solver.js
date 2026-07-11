@@ -39,11 +39,84 @@
 		);
 	}
 
+	// --- SVG Imagery Extraction (for debug logging) --------------------------
+
+	// Extract a compact SVG snippet from a glyph <g> element.
+	// Strips data-sentry-* attributes and excess whitespace to keep logs small.
+	function trimGlyphHtml(g) {
+		if (!g) return '';
+		var clone = g.cloneNode(true);
+		// Remove data-sentry-* attributes from all elements
+		var allEls = clone.querySelectorAll('*');
+		for (var i = 0; i < allEls.length; i++) {
+			var attrs = Array.from(allEls[i].attributes);
+			for (var j = 0; j < attrs.length; j++) {
+				if (attrs[j].name.startsWith('data-sentry')) allEls[i].removeAttribute(attrs[j].name);
+			}
+		}
+		// Also strip from root
+		var rootAttrs = Array.from(clone.attributes);
+		for (var k = 0; k < rootAttrs.length; k++) {
+			if (rootAttrs[k].name.startsWith('data-sentry')) clone.removeAttribute(rootAttrs[k].name);
+		}
+		return clone.outerHTML.replace(/\s{2,}/g, ' ').trim();
+	}
+
+	// Build a minimal SVG string for the target preview panel.
+	function getTargetPreviewHtml() {
+		var preview = document.querySelector('[data-component-name="TargetPreview"]');
+		if (!preview) return null;
+		var children = preview.querySelectorAll(':scope > g');
+		if (children.length === 0) return null;
+		var viewBox = preview.getAttribute('viewBox') || '0 0 200 120';
+		var parts = ['<svg viewBox="' + viewBox + '">'];
+		for (var i = 0; i < children.length; i++) parts.push(trimGlyphHtml(children[i]));
+		parts.push('</svg>');
+		return parts.join('');
+	}
+
+	// Build a minimal SVG string for the board region around a specific position
+	// (anchor + offset cells from the target pattern).
+	function getAttemptRegionHtml(cellMap, anchorCol, anchorRow, targetPattern) {
+		if (!cellMap || !targetPattern) return null;
+		var cells = [];
+		var anchorCell = cellMap.get(anchorCol + ',' + anchorRow + ',up');
+		if (anchorCell && anchorCell.el) cells.push(anchorCell.el);
+		for (var i = 0; i < targetPattern.offsets.length; i++) {
+			var o = targetPattern.offsets[i];
+			var c = cellMap.get((anchorCol + o.dc) + ',' + (anchorRow + o.dr) + ',' + o.orient);
+			if (c && c.el) cells.push(c.el);
+		}
+		if (cells.length === 0) return null;
+		// Compute a tight viewBox around these cells
+		var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+		for (var j = 0; j < cells.length; j++) {
+			var t = cells[j].getAttribute('transform') || '';
+			var m = t.match(/translate\(\s*([^,]+),\s*([^)]+)\)/);
+			if (m) {
+				var tx = parseFloat(m[1]), ty = parseFloat(m[2]);
+				if (tx < minX) minX = tx;
+				if (ty < minY) minY = ty;
+				if (tx + 63 > maxX) maxX = tx + 63;
+				if (ty + 54 > maxY) maxY = ty + 54;
+			}
+		}
+		var vb = (minX - 2) + ' ' + (minY - 2) + ' ' + (maxX - minX + 4) + ' ' + (maxY - minY + 4);
+		var parts = ['<svg viewBox="' + vb + '">'];
+		for (var k = 0; k < cells.length; k++) parts.push(trimGlyphHtml(cells[k]));
+		parts.push('</svg>');
+		return parts.join('');
+	}
+
 	// --- Glyph Fingerprinting -------------------------------------------------
 
 	// Build a fingerprint string from a glyph <g> element's visible SVG children.
 	// Skips the bounding triangle hit-area, opacity-0 elements, and the outer
 	// outline. Uses raw path "d" attributes for precision.
+	function normalizeCoords(s) {
+		return s.replace(/-?\d+(\.\d+)?/g, function (m) { return Math.round(parseFloat(m)).toString(); });
+	}
+
 	function getCellFingerprint(g) {
 		if (g.querySelector('path[fill="#00121D"]')) return null;
 
@@ -55,15 +128,15 @@
 
 			if (el.tagName === 'path') {
 				const d = el.getAttribute('d');
-				if (d) parts.push('p:' + d);
+				if (d) parts.push('p:' + normalizeCoords(d));
 			} else if (el.tagName === 'rect') {
-				parts.push('r:' + [
+				parts.push('r:' + normalizeCoords([
 					el.getAttribute('x'),
 					el.getAttribute('y'),
 					el.getAttribute('width'),
 					el.getAttribute('height'),
-					el.getAttribute('transform')
-				].join(','));
+					el.getAttribute('transform') || ''
+				].join(',')));
 			}
 		}
 		return parts.length === 0 ? null : parts.join('|');
@@ -184,7 +257,8 @@
 			});
 		}
 
-		return { anchorFingerprint: anchor.fingerprint, offsets: offsets };
+		var pattern = { anchorFingerprint: anchor.fingerprint, anchorCol: anchorCol, anchorRow: anchorRow, offsets: offsets };
+		return pattern;
 	}
 
 	// --- Candidate Finding ----------------------------------------------------
@@ -332,13 +406,30 @@
 		return new Promise(function (resolve) {
 			var settled = false;
 			var debounceTimer = null;
+			var startTime = Date.now();
+			var TIMEOUT_MS = 30000;
 
+			function cleanup() {
+				settled = true;
+				observer.disconnect();
+				clearInterval(pollInterval);
+				document.removeEventListener('visibilitychange', onVisibilityChange);
+			}
+
+			var diagLogged = false;
 			function tryEval() {
 				if (settled) return;
+				if (window.__iceWallSolverAbort) {
+					cleanup();
+					return resolve(null);
+				}
 				if (!document.querySelector('[data-component-name="WallBoard"]')) {
-					settled = true;
-					observer.disconnect();
-					clearInterval(pollInterval);
+					cleanup();
+					return resolve(null);
+				}
+				if (Date.now() - startTime > TIMEOUT_MS) {
+					console.log('\uD83D\uDD13 [COR3 Helper] \u26a0\ufe0f waitForUniqueCandidate timed out after ' + (TIMEOUT_MS / 1000) + 's');
+					cleanup();
 					return resolve(null);
 				}
 				var cellMap = buildCellMap();
@@ -346,38 +437,40 @@
 
 				if (candidates.length === 0) {
 					var possible = findPossiblePositions(cellMap, targetPattern, invalidPositions);
+					if (!diagLogged && Date.now() - startTime > 5000) {
+						diagLogged = true;
+						var revealed = 0;
+						for (var _e of cellMap.values()) { if (_e.fingerprint !== null) revealed++; }
+						console.log('\uD83D\uDD13 [COR3 Helper] Diag: 0 candidates, ' + possible.length + ' possible, ' + revealed + '/' + cellMap.size + ' revealed, anchor fp: ' + (targetPattern.anchorFingerprint || 'null').substring(0, 40));
+					}
 					if (possible.length === 1) {
-						settled = true;
-						observer.disconnect();
-						clearInterval(pollInterval);
+						cleanup();
 						resolve(cellMap);
+					} else if (possible.length === 0) {
+						console.log('\uD83D\uDD13 [COR3 Helper] \u26a0\ufe0f No possible positions remain — giving up');
+						cleanup();
+						resolve(null);
 					}
 					return;
 				}
 
-				// Accept immediately if any candidate is a complete match
 				if (candidates.some(function (c) { return c.isCompleteMatch; })) {
-					settled = true;
-					observer.disconnect();
-					clearInterval(pollInterval);
+					cleanup();
 					resolve(cellMap);
 					return;
 				}
 
-				if (candidates.length > 1) {
-					console.log(
-						'%c\uD83D\uDD13 [COR3 Helper] ' + candidates.length +
-						' candidates (best: ' + candidates[0].matches + ' matches) \u2014 waiting for more reveals...',
-						'color: #76C1D1'
-					);
+				if (candidates.length === 1) {
+					cleanup();
+					resolve(cellMap);
 					return;
 				}
 
-				// Exactly 1 candidate
-				settled = true;
-				observer.disconnect();
-				clearInterval(pollInterval);
-				resolve(cellMap);
+				console.log(
+					'%c\uD83D\uDD13 [COR3 Helper] ' + candidates.length +
+					' candidates (best: ' + candidates[0].matches + ' matches) \u2014 waiting for more reveals...',
+					'color: #76C1D1'
+				);
 			}
 
 			function scheduledEval() {
@@ -386,24 +479,41 @@
 				debounceTimer = setTimeout(tryEval, 80);
 			}
 
+			function onVisibilityChange() {
+				if (document.visibilityState === 'visible') {
+					tryEval();
+				}
+			}
+
 			var board = document.querySelector('[data-component-name="WallBoard"]');
 			if (!board) { resolve(null); return; }
 
 			var observer = new MutationObserver(scheduledEval);
 			observer.observe(board, { subtree: true, childList: true, attributes: true });
 
-			// Poll to detect board disappearing (game closed between mutations)
+			document.addEventListener('visibilitychange', onVisibilityChange);
+
 			var pollInterval = setInterval(function () {
 				if (settled) { clearInterval(pollInterval); return; }
-				if (!document.querySelector('[data-component-name="WallBoard"]')) {
-					settled = true;
-					clearInterval(pollInterval);
-					observer.disconnect();
+				if (window.__iceWallSolverAbort) {
+					cleanup();
 					resolve(null);
+					return;
 				}
-			}, 250);
+				if (!document.querySelector('[data-component-name="WallBoard"]')) {
+					cleanup();
+					resolve(null);
+					return;
+				}
+				if (Date.now() - startTime > TIMEOUT_MS) {
+					console.log('\uD83D\uDD13 [COR3 Helper] \u26a0\ufe0f waitForUniqueCandidate poll timeout');
+					cleanup();
+					resolve(null);
+					return;
+				}
+				tryEval();
+			}, 300);
 
-			// Run initial check immediately
 			scheduledEval();
 		});
 	}
@@ -425,6 +535,8 @@
 
 	async function runIceWallRound(targetPattern) {
 		const invalidPositions = new Set();
+		const MAX_FALSE_POSITIVES = 8;
+		let falsePositiveCount = 0;
 
 		while (true) {
 			if (window.__iceWallSolverAbort) return;
@@ -472,13 +584,42 @@
 			var advanced = await waitForAdvance(prevSig);
 			if (advanced) return; // success — round advanced
 
-			// False positive — mark this position as invalid and retry
+			falsePositiveCount++;
+			var failedParts = [];
+			var failAnchor = cellMap.get(best.col + ',' + best.row + ',up');
+			failedParts.push('anchor(' + best.col + ',' + best.row + '):' + (failAnchor && failAnchor.fingerprint ? failAnchor.fingerprint.substring(0, 40) : 'null'));
+			for (var fi = 0; fi < targetPattern.offsets.length; fi++) {
+				var fo = targetPattern.offsets[fi];
+				var fCell = cellMap.get((best.col + fo.dc) + ',' + (best.row + fo.dr) + ',' + fo.orient);
+				var match = fCell && fCell.fingerprint && fo.fingerprint && fCell.fingerprint === fo.fingerprint;
+				failedParts.push('off(' + fo.dc + ',' + fo.dr + ',' + fo.orient + '):' + (fCell && fCell.fingerprint ? fCell.fingerprint.substring(0, 40) : 'null') + (match ? ' ✓' : ' ✗'));
+			}
+			console.log('\uD83D\uDD13 [COR3 Helper] \u26a0\ufe0f Failed sequence at col=' + best.col + ' row=' + best.row + ':', failedParts.join(' | '));
+			var attemptHtml = getAttemptRegionHtml(cellMap, best.col, best.row, targetPattern);
+			if (attemptHtml) console.log('\uD83D\uDD13 [COR3 Helper] Failed attempt SVG (col=' + best.col + ' row=' + best.row + '):\n' + attemptHtml);
 			console.log(
 				'\uD83D\uDD13 [COR3 Helper] \u26a0\ufe0f False positive at col=' + best.col +
-				' row=' + best.row + ' \u2014 marking invalid and retrying...'
+				' row=' + best.row + ' (' + falsePositiveCount + '/' + MAX_FALSE_POSITIVES + ') \u2014 marking invalid and retrying...'
 			);
-			postStatus('False positive, retrying...', 'warn');
+			postStatus('False positive (' + falsePositiveCount + '/' + MAX_FALSE_POSITIVES + '), retrying...', 'warn');
 			invalidPositions.add(best.col + ',' + best.row);
+
+			if (falsePositiveCount >= MAX_FALSE_POSITIVES) {
+				console.log('\uD83D\uDD13 [COR3 Helper] \u26a0\ufe0f Max false positives reached — abandoning round');
+				postStatus('Max retries reached, skipping round', 'error');
+				return;
+			}
+
+			var freshTarget = extractTargetPattern();
+			if (freshTarget) {
+				targetPattern = freshTarget;
+			}
+
+			var remainingMap = buildCellMap();
+			var remainingPositions = findPossiblePositions(remainingMap, targetPattern, invalidPositions);
+			console.log('\uD83D\uDD13 [COR3 Helper] Retrying with ' + remainingPositions.length + ' remaining possible position(s)');
+
+			await sleep(200);
 		}
 	}
 
@@ -515,6 +656,16 @@
 				await sleep(100);
 				continue;
 			}
+
+			// Debug: log target sequence fingerprints + SVG imagery (once per round)
+			var targetSeqParts = ['anchor(' + targetPattern.anchorCol + ',' + targetPattern.anchorRow + '):' + (targetPattern.anchorFingerprint ? targetPattern.anchorFingerprint.substring(0, 40) : 'null')];
+			for (var ti = 0; ti < targetPattern.offsets.length; ti++) {
+				var o = targetPattern.offsets[ti];
+				targetSeqParts.push('off(' + o.dc + ',' + o.dr + ',' + o.orient + '):' + (o.fingerprint ? o.fingerprint.substring(0, 40) : 'null'));
+			}
+			console.log('\uD83D\uDD13 [COR3 Helper] Target sequence:', targetSeqParts.join(' | '));
+			var targetHtml = getTargetPreviewHtml();
+			if (targetHtml) console.log('\uD83D\uDD13 [COR3 Helper] Target SVG:\n' + targetHtml);
 
 			var roundLabel = 'Round ' + (roundsCompleted + 1) + totalLabel();
 			var hintCount = 1 + targetPattern.offsets.length;
