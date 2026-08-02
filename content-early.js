@@ -338,9 +338,11 @@ var webVersion = null;
                     console.log('[COR3 Helper] WS connected — scheduling initial data fetch');
                     // Wait for connection to stabilize, then fetch all data
                     setTimeout(function () {
-                        // If this is a reconnect after token-expired, retry pending ops
+                        // Clear pending retry ops — initial fetch covers expeditions, stash, dailyOps
                         if (tokenExpiredFlag || pendingRetryOps.length > 0) {
-                            setTimeout(function () { runPendingRetries(); }, 2000);
+                            console.log('[COR3 Helper] Clearing pending retries (initial fetch will cover them):', pendingRetryOps.join(', '));
+                            pendingRetryOps = [];
+                            tokenExpiredFlag = false;
                         }
                         window.__cor3InitialFetch && window.__cor3InitialFetch();
                     }, 3000);
@@ -353,6 +355,10 @@ var webVersion = null;
                     if (idx !== -1) trackedSockets.splice(idx, 1);
                     socketLastActivity.delete(ws);
                     if (activeSocket === ws) activeSocket = null;
+                    // Notify ICE Wall solver when its minigame WS closes
+                    if (ws.__cor3IsMinigame && ws.__cor3Url && ws.__cor3Url.indexOf('ice-wall-break') !== -1) {
+                        window.postMessage({ type: 'COR3_ICE_WALL_GAME_ENDED' }, '*');
+                    }
                 });
             }
 
@@ -441,6 +447,14 @@ var webVersion = null;
                 }
             }, 15000);
             return;
+        }
+
+        // Intercept specialists responses (stash expansion timers)
+        if (eventName === 'specialists' && payload && payload.data) {
+            window.postMessage({
+                type: 'COR3_WS_SPECIALISTS',
+                data: payload.data
+            }, '*');
         }
 
         // Intercept stash (inventory) responses
@@ -561,7 +575,7 @@ var webVersion = null;
         // Intercept collect.all response
         if (eventName === 'expeditions' && payload && payload.event && payload.event.action === 'collect.all') {
             // Check for stash full error
-            if (payload.error && payload.error.message === 'stash.error.insufficient_capacity') {
+            if (payload.error && (payload.error.message === 'Insufficient stash capacity' || payload.error.message === 'stash.error.insufficient_capacity')) {
                 window.postMessage({
                     type: 'COR3_WS_STASH_FULL',
                     error: payload.error.message,
@@ -572,6 +586,13 @@ var webVersion = null;
                 window.postMessage({
                     type: 'COR3_WS_COLLECT_INSUFFICIENT_CREDITS',
                     error: payload.error.message
+                }, '*');
+            } else if (payload.error) {
+                console.log('[COR3 Helper] collect.all failed with unexpected error:', payload.error.message);
+                window.postMessage({
+                    type: 'COR3_WS_STASH_FULL',
+                    error: payload.error.message,
+                    requestId: payload.requestId
                 }, '*');
             } else {
                 window.postMessage({
@@ -605,17 +626,17 @@ var webVersion = null;
                 console.log('[COR3 Helper] Expedition launch failed: Maximum 1 active expedition allowed');
                 window.postMessage({
                     type: 'COR3_WS_EXPEDITION_LAUNCH_ERROR',
-                    error: payload.error.message,
-                    retryAfter: 120000 // 2 minutes in milliseconds
+                    error: payload.error.message
                 }, '*');
-                // Schedule retry after 2 minutes
-                setTimeout(function() {
-                    console.log('[COR3 Helper] Retrying expedition launch after 2 minutes');
-                    window.postMessage({
-                        type: 'COR3_WS_EXPEDITION_RETRY_LAUNCH',
-                        retryData: payload.requestId
-                    }, '*');
-                }, 120000);
+                return;
+            }
+
+            if (payload.error && payload.error.message === 'Mercenary is not available') {
+                console.log('[COR3 Helper] Expedition launch failed: Mercenary is not available');
+                window.postMessage({
+                    type: 'COR3_WS_MERC_NOT_AVAILABLE',
+                    error: payload.error.message
+                }, '*');
                 return;
             }
 
@@ -769,7 +790,8 @@ var webVersion = null;
                         window.postMessage({
                             type: 'COR3_WS_ENDPOINT_RESULT',
                             success: false,
-                            error: payload.error
+                            error: payload.error,
+                            serverId: payload.error.serverId || null
                         }, '*');
                     } else if (window.__cor3UsolMarketPending) {
                         // USOL market refresh failed — fetch network-map for maintenance blocker
@@ -783,11 +805,13 @@ var webVersion = null;
                     }
                 } else {
                     var success = !payload.error;
+                    var epServerId = (payload.error && payload.error.serverId) || null;
                     window.postMessage({
                         type: 'COR3_WS_ENDPOINT_RESULT',
                         success: success,
                         data: payload.data,
-                        error: payload.error || null
+                        error: payload.error || null,
+                        serverId: epServerId
                     }, '*');
                 }
             }
@@ -801,7 +825,8 @@ var webVersion = null;
                     maintenanceInfo[srv.id] = {
                         serverName: srv.serverName,
                         isInMaintenance: !!srv.isInMaintenance,
-                        maintenanceEndsAt: srv.maintenanceEndsAt || null
+                        maintenanceEndsAt: srv.maintenanceEndsAt || null,
+                        timeUntilMaintenance: srv.timeUntilMaintenance || null
                     };
                     // Cache server type + defence rate for loadout power calculations
                     serverTypeMap[srv.id] = {
@@ -814,6 +839,9 @@ var webVersion = null;
                 window.postMessage({ type: 'COR3_WS_NETWORK_MAP', servers: maintenanceInfo }, '*');
                 // Post full map data for IP Search and other consumers
                 window.postMessage({ type: 'COR3_WS_MAP_DATA', servers: payload.data.servers, connections: payload.data.connections || [] }, '*');
+            }
+            if (payload.event.action === 'maintenance' && payload.data) {
+                window.postMessage({ type: 'COR3_WS_MAINTENANCE_STARTED', data: payload.data }, '*');
             }
         }
 
@@ -938,10 +966,13 @@ var webVersion = null;
 
         // --- Auto Job Solver: Intercept minigame start ---
         if (eventName === 'minigames' && payload && payload.event && payload.event.action === 'start.minigame') {
-            window.postMessage({ type: 'COR3_AUTOJOB_MINIGAME_START', data: payload.data }, '*');
-            // Also notify ICE Wall solver if this is an EXTERNAL minigame (ice-wall-break)
-            if (payload.data && payload.data.type === 'EXTERNAL' && payload.data.url && payload.data.url.indexOf('ice-wall-break') !== -1) {
-                window.postMessage({ type: 'COR3_ICE_WALL_MINIGAME_START', data: payload.data }, '*');
+            if (payload.data && payload.data.lockExpiresAt && !payload.data.token) {
+                window.postMessage({ type: 'COR3_AUTOJOB_MINIGAME_LOCKED', data: payload.data }, '*');
+            } else {
+                window.postMessage({ type: 'COR3_AUTOJOB_MINIGAME_START', data: payload.data }, '*');
+                if (payload.data && payload.data.type === 'EXTERNAL' && payload.data.url && payload.data.url.indexOf('ice-wall-break') !== -1) {
+                    window.postMessage({ type: 'COR3_ICE_WALL_MINIGAME_START', data: payload.data }, '*');
+                }
             }
         }
 
@@ -1701,6 +1732,14 @@ var webVersion = null;
                 window.__cor3RequestStash();
             }, 1500);
         }
+        return true;
+    };
+
+    // --- Specialists WS send function ---
+    window.__cor3RequestSpecialists = function () {
+        console.log('[COR3 Helper] Requesting specialists data');
+        var msg = '42["event",{"event":{"name":"specialists","action":"get.state"},"data":{}}]';
+        wsSend(msg);
         return true;
     };
 
@@ -3081,6 +3120,10 @@ var webVersion = null;
                         setTimeout(function () {
                             window.__cor3RequestStash();
                         }, humanDelay());
+                        // Fetch specialists data (stash expansion timers) after stash
+                        setTimeout(function () {
+                            window.__cor3RequestSpecialists();
+                        }, humanDelay() + 500);
                         // CORE mercs after stash
                         setTimeout(function () {
                             console.log('[COR3 Helper] Initial: Starting CORE mercs');
@@ -3106,6 +3149,7 @@ var webVersion = null;
                                             window.__cor3RequestUpdater();
                                             window.__cor3InitialFetchInProgress = false;
                                             console.log('[COR3 Helper] Initial data fetch complete');
+                                            window.postMessage({ type: 'COR3_INITIAL_FETCH_DONE' }, '*');
                                         }, 3500);
                                     });
                                 }, humanDelay());
@@ -3151,6 +3195,9 @@ var webVersion = null;
         }
         if (event.data && event.data.type === 'COR3_REQUEST_STASH') {
             window.__cor3RequestStash();
+        }
+        if (event.data && event.data.type === 'COR3_REQUEST_SPECIALISTS') {
+            window.__cor3RequestSpecialists();
         }
         if (event.data && event.data.type === 'COR3_REQUEST_LOADOUT') {
             window.__cor3RequestLoadout();
@@ -3303,6 +3350,8 @@ var webVersion = null;
         if (event.data && event.data.type === 'COR3_IP_SEARCH_START') {
             (function runSecretFinder() {
                 var DELAY_MS = 2500;
+                var HARD_TIMEOUT_MS = 180000; // 3 minutes hard timeout
+                var aborted = false;
                 var getMapMsg = '42["event",{"event":{"name":"network-map","action":"get.map"},"data":{}}]';
 
                 function logMsg(html) {
@@ -3311,6 +3360,13 @@ var webVersion = null;
                 function doneMsg(html) {
                     window.postMessage({ type: 'COR3_IP_SEARCH_DONE', html: html }, '*');
                 }
+
+                var hardTimer = setTimeout(function () {
+                    if (!aborted) {
+                        aborted = true;
+                        doneMsg('<span style="color:var(--accent-orange);">⏱️ Search timed out after 3 minutes — auto-disabled</span>');
+                    }
+                }, HARD_TIMEOUT_MS);
 
                 function waitForMap(timeout) {
                     return new Promise(function (resolve) {
@@ -3338,7 +3394,9 @@ var webVersion = null;
                 logMsg('<span style="color:var(--accent-cyan);">Fetching network map...</span>');
                 wsSend(getMapMsg);
                 waitForMap(10000).then(function (mapData1) {
+                    if (aborted) return;
                     if (!mapData1 || !mapData1.servers || !mapData1.connections) {
+                        clearTimeout(hardTimer);
                         doneMsg('<span style="color:var(--accent-red);">Failed to fetch initial map data</span>');
                         return;
                     }
@@ -3353,11 +3411,15 @@ var webVersion = null;
                     logMsg('<span style="color:var(--accent-cyan);">Found ' + total + ' IPs to scan. Starting...</span>');
 
                     function connectNext() {
+                        if (aborted) return;
                         if (idx >= total) {
                             logMsg('<span style="color:var(--accent-cyan);">Scanning complete. Fetching updated map...</span>');
                             setTimeout(function () {
+                                if (aborted) return;
                                 wsSend(getMapMsg);
                                 waitForMap(10000).then(function (mapData2) {
+                                    clearTimeout(hardTimer);
+                                    if (aborted) return;
                                     if (!mapData2 || !mapData2.connections) {
                                         doneMsg('<span style="color:var(--accent-red);">Failed to fetch updated map data</span>');
                                         return;
@@ -3401,6 +3463,35 @@ var webVersion = null;
                     connectNext();
                 });
             })();
+        }
+        // --- Anti-AFK Clicker ---
+        if (event.data && event.data.type === 'COR3_ANTI_AFK_TOGGLE') {
+            if (event.data.enabled) {
+                if (!window.__cor3AntiAfkTimer) {
+                    var ANTI_AFK_INTERVAL = 3 * 60 * 1000;
+                    function antiAfkClick() {
+                        var target = document.querySelector('div[data-component-name="DesktopWrapperBorder"]');
+                        if (!target) return;
+                        var rect = target.getBoundingClientRect();
+                        var cx = Math.floor(rect.left + rect.width / 2);
+                        var cy = Math.floor(rect.top + rect.height / 2);
+                        var opts = { bubbles: true, cancelable: true, clientX: cx, clientY: cy, view: window };
+                        target.dispatchEvent(new MouseEvent('mouseenter', opts));
+                        target.dispatchEvent(new MouseEvent('mousemove', opts));
+                        target.dispatchEvent(new MouseEvent('click', opts));
+                        target.dispatchEvent(new MouseEvent('mouseleave', opts));
+                    }
+                    antiAfkClick();
+                    window.__cor3AntiAfkTimer = setInterval(antiAfkClick, ANTI_AFK_INTERVAL);
+                    console.log('[COR3 Helper] Anti-AFK Clicker enabled (3 min interval)');
+                }
+            } else {
+                if (window.__cor3AntiAfkTimer) {
+                    clearInterval(window.__cor3AntiAfkTimer);
+                    window.__cor3AntiAfkTimer = null;
+                    console.log('[COR3 Helper] Anti-AFK Clicker disabled');
+                }
+            }
         }
         // --- DevTools panel: send raw WS message ---
         if (event.data && event.data.type === 'COR3_DEVTOOLS_WS_SEND') {

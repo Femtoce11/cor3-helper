@@ -130,10 +130,7 @@ async function _wsWriteEntry(entry) {
 }
 
 function _sanitizeWsMessage(msg) {
-    var s = String(msg);
-    // Remove redundant backslash escapes (e.g. \" → ", \\ → \)
-    try { s = s.replace(/\\\\/g, '\\').replace(/\\"/g, '"'); } catch (e) {}
-    return s;
+    return String(msg);
 }
 
 async function cor3LogWsMessage(direction, message) {

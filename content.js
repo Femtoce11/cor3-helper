@@ -214,6 +214,9 @@ window.addEventListener('message', (event) => {
         chrome.storage.local.set({ expeditionDecisions: event.data.decisions });
         checkAutoChooseFromContent(event.data.decisions);
     }
+    if (event.data && event.data.type === 'COR3_WS_SPECIALISTS') {
+        chrome.storage.local.set({ specialistsData: event.data.data, specialistsDataUpdatedAt: now });
+    }
     if (event.data && event.data.type === 'COR3_WS_STASH') {
         chrome.storage.local.set({ stashData: event.data.stash, stashDataUpdatedAt: now });
 
@@ -419,10 +422,16 @@ window.addEventListener('message', (event) => {
     }
     // Handle stash full error from collect.all
     if (event.data && event.data.type === 'COR3_WS_STASH_FULL') {
-        console.log('[COR3 Helper] Stash full error detected');
+        autoSendCollectRetries++;
+        console.log('[COR3 Helper] Stash full error detected (attempt', autoSendCollectRetries, '/', MAX_COLLECT_RETRIES, ')');
+        if (autoSendCollectRetries > MAX_COLLECT_RETRIES) {
+            console.log('[COR3 Helper] Max collect retries reached, giving up');
+            autoSendCollectRetries = 0;
+            disableAutoSendDueToStashFull();
+            return;
+        }
         chrome.storage.sync.get('autoSellCheapest', (sellData) => {
             if (sellData.autoSellCheapest) {
-                // Try to auto-sell cheapest items and retry
                 chrome.storage.local.get('stashData', (result) => {
                     const stash = result.stashData;
                     if (stash && stash.items) {
@@ -439,10 +448,12 @@ window.addEventListener('message', (event) => {
                             }, 3000);
                         });
                     } else {
+                        autoSendCollectRetries = 0;
                         disableAutoSendDueToStashFull();
                     }
                 });
             } else {
+                autoSendCollectRetries = 0;
                 disableAutoSendDueToStashFull();
             }
         });
@@ -512,6 +523,7 @@ window.addEventListener('message', (event) => {
     }
     // Auto-send: collected all — proceed to get mercenaries and launch
     if (event.data && event.data.type === 'COR3_WS_COLLECTED_ALL') {
+        autoSendCollectRetries = 0;
         if (autoSendInProgress && autoSendExpeditionId) {
             console.log('[COR3 Helper] Auto-send: All collected, refreshing mercenaries (CORE + USOL)...');
             autoSendExpeditionId = null; // done with old expedition
@@ -522,6 +534,10 @@ window.addEventListener('message', (event) => {
             // Refresh CORE mercs first, then USOL mercs, then select+launch
             var mercDelay = 2500 + Math.floor(Math.random() * 1000);
             setTimeout(() => {
+                if (!autoSendInProgress || (_automationActive && _automationActive.type !== 'auto-send')) {
+                    console.log('[COR3 Helper] Auto-send: merc refresh skipped (no longer active or another automation took over)');
+                    return;
+                }
                 window.postMessage({ type: 'COR3_REQUEST_MERCENARIES' }, '*');
             }, mercDelay);
             // USOL mercs after CORE mercs complete — listen for COR3_CORE_MERCS_DONE
@@ -532,27 +548,46 @@ window.addEventListener('message', (event) => {
     // Auto-send: CORE mercs done, now chain to USOL mercs before selecting
     if (event.data && event.data.type === 'COR3_CORE_MERCS_DONE' && autoSendAwaitingUsolMercs) {
         autoSendAwaitingUsolMercs = false;
+        if (!autoSendInProgress || (_automationActive && _automationActive.type !== 'auto-send')) {
+            console.log('[COR3 Helper] Auto-send: USOL merc refresh skipped (no longer active)');
+        } else {
         console.log('[COR3 Helper] Auto-send: CORE mercs refreshed, now fetching USOL mercs...');
         setTimeout(() => {
+            if (!autoSendInProgress) return;
             window.postMessage({ type: 'COR3_REQUEST_USOL_MERCENARIES' }, '*');
         }, 500);
-        // Listen for USOL mercs done, then trigger selection
+        // Listen for USOL mercs done OR unreachable, then trigger selection
+        var _usolMercHandled = false;
         function onUsolMercsDoneForAutoSend(evt) {
+            if (_usolMercHandled) return;
             if (evt.data && evt.data.type === 'COR3_USOL_MERCS_DONE') {
+                _usolMercHandled = true;
                 window.removeEventListener('message', onUsolMercsDoneForAutoSend);
                 clearTimeout(usolMercsTimeout);
                 console.log('[COR3 Helper] Auto-send: USOL mercs refreshed, proceeding to select merc');
                 autoSendAwaitingMercenaries = true;
                 window.postMessage({ type: 'COR3_CORE_MERCS_DONE' }, '*');
             }
+            if (evt.data && evt.data.type === 'COR3_WS_USOL_MARKET_UNREACHABLE') {
+                _usolMercHandled = true;
+                window.removeEventListener('message', onUsolMercsDoneForAutoSend);
+                clearTimeout(usolMercsTimeout);
+                console.log('[COR3 Helper] Auto-send: USOL market unreachable — proceeding with CORE mercs only');
+                _autoSendUsolSkipped = true;
+                autoSendAwaitingMercenaries = true;
+                window.postMessage({ type: 'COR3_CORE_MERCS_DONE' }, '*');
+            }
         }
         window.addEventListener('message', onUsolMercsDoneForAutoSend);
         var usolMercsTimeout = setTimeout(() => {
+            if (_usolMercHandled) return;
+            _usolMercHandled = true;
             window.removeEventListener('message', onUsolMercsDoneForAutoSend);
             console.log('[COR3 Helper] Auto-send: USOL mercs timeout — proceeding with CORE mercs only');
             autoSendAwaitingMercenaries = true;
             window.postMessage({ type: 'COR3_CORE_MERCS_DONE' }, '*');
         }, 30000);
+        }
     }
     // Auto-send: all merc configures done — now select merc and launch
     if (event.data && event.data.type === 'COR3_CORE_MERCS_DONE' && autoSendAwaitingMercenaries) {
@@ -584,7 +619,7 @@ window.addEventListener('message', (event) => {
                 });
                 let usolMercs = [];
                 const usolData = localData.usolMercenariesData;
-                if (usolData) {
+                if (usolData && !_autoSendUsolSkipped) {
                     let raw = usolData;
                     if (raw && !Array.isArray(raw) && raw.mercenaries) usolMercs = raw.mercenaries;
                     else if (Array.isArray(raw)) usolMercs = raw;
@@ -597,6 +632,8 @@ window.addEventListener('message', (event) => {
                             usolMercs.push(es.mercenary);
                         }
                     });
+                } else if (_autoSendUsolSkipped) {
+                    console.log('[COR3 Helper] Auto-send: USOL mercs skipped (market unreachable)');
                 }
 
                 const allMercs = [...coreMercs, ...usolMercs];
@@ -616,6 +653,11 @@ window.addEventListener('message', (event) => {
 
                     let available = allMercs.filter(m => m.status === 'AVAILABLE' && configs[m.id]);
                     if (ignoreElite) available = available.filter(m => !m._isElite);
+                    // Apply cost limiter filter
+                    if (settings.autoSendMerc.applyMercCostLimiter) {
+                        const maxCost = settings.autoSendMerc.maxMercCost ?? 15000;
+                        available = available.filter(m => (configs[m.id].totalCost || 0) <= maxCost);
+                    }
                     if (available.length > 0) {
                         available.sort((a, b) => {
                             if (usolFirst) {
@@ -634,8 +676,17 @@ window.addEventListener('message', (event) => {
                         });
                         mercId = available[0].id;
                         console.log('[COR3 Helper] Auto-choose merc: selected', available[0].callsign, '(' + available[0]._market + ') cost:', configs[available[0].id].totalCost);
+                    } else {
+                        console.log('[COR3 Helper] Auto-send: no fitting merc available after filtering');
+                        chrome.storage.local.set({ mercWarning: 'No fitting merc available — all mercs filtered out or unavailable.' + (_autoSendUsolSkipped ? ' (USOL market unreachable)' : '') });
+                        _autoSendUsolSkipped = false;
+                        _autoSendMercRetryCount = 0;
+                        autoSendInProgress = false;
+                        _automationFinish('auto-send');
+                        return;
                     }
                 }
+                _autoSendUsolSkipped = false;
                 proceedWithMerc(mercId, allMercs, settings, localData);
             });
         });
@@ -686,23 +737,50 @@ window.addEventListener('message', (event) => {
             setTimeout(() => {
                 chrome.storage.local.set({ lastExpeditionLaunchData: launchConfig });
                 window.postMessage({ type: 'COR3_LAUNCH_EXPEDITION', config: launchConfig }, '*');
+                // Block further auto-send attempts until this expedition completes
+                autoSendExpeditionBlocked = true;
+                chrome.storage.local.set({ autoSendExpeditionBlocked: true });
                 autoSendInProgress = false;
                 _automationFinish('auto-send');
             }, 1500 + Math.floor(Math.random() * 500));
         }
     }
+    // Auto-send: mercenary not available — retry with fresh merc data
+    if (event.data && event.data.type === 'COR3_WS_MERC_NOT_AVAILABLE') {
+        _autoSendMercRetryCount++;
+        if (_autoSendMercRetryCount <= MAX_MERC_RETRIES) {
+            console.log('[COR3 Helper] Auto-send: Mercenary not available — retry ' + _autoSendMercRetryCount + '/' + MAX_MERC_RETRIES + ', refreshing merc data...');
+            autoSendExpeditionBlocked = false;
+            chrome.storage.local.remove('autoSendExpeditionBlocked');
+            autoSendInProgress = true;
+            if (!_automationActive) _automationActive = { type: 'auto-send', startedAt: Date.now() };
+            _broadcastQueueStatus();
+            autoSendAwaitingMercenaries = false;
+            autoSendAwaitingUsolMercs = true;
+            setTimeout(() => {
+                if (!autoSendInProgress) return;
+                window.postMessage({ type: 'COR3_REQUEST_MERCENARIES' }, '*');
+            }, 2000 + Math.floor(Math.random() * 1000));
+        } else {
+            console.log('[COR3 Helper] Auto-send: Mercenary not available after ' + MAX_MERC_RETRIES + ' retries — aborting');
+            chrome.storage.local.set({ mercWarning: 'Mercenary not available after ' + MAX_MERC_RETRIES + ' retries. Merc data may be stale.' });
+            _autoSendMercRetryCount = 0;
+            autoSendInProgress = false;
+            _automationFinish('auto-send');
+        }
+    }
     // Auto-send: expedition launched confirmation
     if (event.data && event.data.type === 'COR3_WS_EXPEDITION_LAUNCHED') {
         console.log('[COR3 Helper] Expedition launched successfully');
+        _autoSendMercRetryCount = 0;
     }
     // Handle expedition launch error
     if (event.data && event.data.type === 'COR3_WS_EXPEDITION_LAUNCH_ERROR') {
         console.log('[COR3 Helper] Expedition launch error:', event.data.error);
         if (event.data.error === 'Maximum 1 active expedition allowed') {
-            // Silently abort — an expedition is already active.
-            // Reset auto-send state so the normal flow re-triggers when the
-            // active expedition completes and fresh expedition data arrives.
-            console.log('[COR3 Helper] Active expedition detected — silently waiting for it to finish');
+            console.log('[COR3 Helper] Active expedition detected — blocking auto-send until it completes');
+            autoSendExpeditionBlocked = true;
+            chrome.storage.local.set({ autoSendExpeditionBlocked: true });
             autoSendInProgress = false;
             _automationFinish('auto-send');
             autoSendExpeditionId = null;
@@ -794,36 +872,56 @@ function checkAutoChooseFromContent(decisions) {
         const mods = result.decisionModifiers;
         if (!mods || !mods.autoChoose) return;
         const noWait = !!mods.noWaitAutoChoose;
-        const lootMod = mods.enabled !== false ? (mods.loot ?? 3) : 1;
-        const riskMod = mods.enabled !== false ? (mods.risk ?? -2) : -1;
-        for (const d of decisions) {
-            if (d.isResolved || !d.decisionDeadline || !Array.isArray(d.decisionOptions)) continue;
-            if (contentAutoChosenDecisions.has(d.messageId)) continue;
-            const dl = new Date(d.decisionDeadline);
-            const remaining = dl - Date.now();
-            if (remaining <= 0) continue;
-            if (!noWait && remaining > 60000) continue;
-            let bestOpt = null;
-            let bestScore = -Infinity;
-            for (const opt of d.decisionOptions) {
-                const score = Math.round((opt.lootModifier * lootMod) + ((opt.riskModifier * riskMod) * (((d.riskScore + Math.abs(opt.riskModifier)) / 10) || 1)));
-                if (score > bestScore) { bestScore = score; bestOpt = opt; }
+        const baseLootMod = mods.enabled !== false ? (mods.loot ?? 3) : 1;
+        const baseRiskMod = mods.enabled !== false ? (mods.risk ?? -2) : -1;
+        const getRidOfVeterans = !!mods.getRidOfVeterans;
+
+        // Load expedition data for veteran check
+        chrome.storage.local.get('expeditionsData', (expResult) => {
+            const expeditions = expResult.expeditionsData || [];
+
+            for (const d of decisions) {
+                if (d.isResolved || !d.decisionDeadline || !Array.isArray(d.decisionOptions)) continue;
+                if (contentAutoChosenDecisions.has(d.messageId)) continue;
+                const dl = new Date(d.decisionDeadline);
+                const remaining = dl - Date.now();
+                if (remaining <= 0) continue;
+                if (!noWait && remaining > 60000) continue;
+
+                // Check veteran override
+                let lootMod = baseLootMod;
+                let riskMod = baseRiskMod;
+                if (getRidOfVeterans && d.expeditionId) {
+                    const exp = expeditions.find(e => e.id === d.expeditionId);
+                    if (exp && exp.mercenary && (exp.mercenary.rank || '').toUpperCase() === 'VETERAN') {
+                        lootMod = 1;
+                        riskMod = 10;
+                    }
+                }
+
+                let bestOpt = null;
+                let bestScore = -Infinity;
+                for (const opt of d.decisionOptions) {
+                    const score = Math.round((opt.lootModifier * lootMod) + ((opt.riskModifier * riskMod) * (((d.riskScore + Math.abs(opt.riskModifier)) / 10) || 1)));
+                    if (score > bestScore) { bestScore = score; bestOpt = opt; }
+                }
+                if (bestOpt) {
+                    contentAutoChosenDecisions.add(d.messageId);
+                    console.log('[COR3 Helper] Auto-choose (content): picking "' + bestOpt.label + '" (score: ' + bestScore + ')');
+                    window.postMessage({
+                        type: 'COR3_RESPOND_DECISION',
+                        expeditionId: d.expeditionId,
+                        messageId: d.messageId,
+                        selectedOption: bestOpt.id
+                    }, '*');
+                }
             }
-            if (bestOpt) {
-                contentAutoChosenDecisions.add(d.messageId);
-                console.log('[COR3 Helper] Auto-choose (content): picking "' + bestOpt.label + '" (score: ' + bestScore + ')');
-                window.postMessage({
-                    type: 'COR3_RESPOND_DECISION',
-                    expeditionId: d.expeditionId,
-                    messageId: d.messageId,
-                    selectedOption: bestOpt.id
-                }, '*');
-            }
-        }
+        });
     });
 }
 
 // --- Auto-Send Mercenary State ---
+let _initialFetchDone = true; // false during initial data fetch after reconnect
 let autoSendInProgress = false;
 let autoSendExpeditionId = null;
 let autoSendAwaitingMercenaries = false;
@@ -832,9 +930,30 @@ let autoSendAwaitingUsolMercs = false;
 let initialMercsReady = false;
 // Flag: deferral listener already registered (prevent duplicate listeners from multiple callers)
 let autoSendDeferredWaiting = false;
+// Flag: blocked due to "Maximum 1 active expedition" — skip launches until current expedition completes
+let autoSendExpeditionBlocked = false;
+let autoSendCollectRetries = 0;
+const MAX_COLLECT_RETRIES = 3;
+let _autoSendUsolSkipped = false;
+let _autoSendMercRetryCount = 0;
+const MAX_MERC_RETRIES = 3;
 
 function checkAutoSendOnExpeditionData(expeditions) {
     if (!expeditions || !Array.isArray(expeditions) || autoSendInProgress) return;
+    if (!_initialFetchDone) {
+        console.log('[COR3 Helper] Auto-send: deferred — initial data fetch still in progress');
+        return;
+    }
+    if (autoSendExpeditionBlocked) {
+        var hasActive = expeditions.some(e => e.status !== 'COMPLETED' && e.status !== 'FAILED');
+        if (hasActive) {
+            console.log('[COR3 Helper] Auto-send: still blocked — active expedition in progress');
+            return;
+        }
+        console.log('[COR3 Helper] Auto-send: active expedition finished — unblocking');
+        autoSendExpeditionBlocked = false;
+        chrome.storage.local.remove('autoSendExpeditionBlocked');
+    }
     if (_automationActive && _automationActive.type !== 'auto-send') {
         if (!_automationQueue.some(q => q.type === 'auto-send')) {
             console.log('[COR3 Helper] Auto-send: queued (waiting for', _automationActive.type, 'to finish)');
@@ -910,6 +1029,10 @@ function checkAutoSendOnExpeditionData(expeditions) {
             autoSendAwaitingUsolMercs = true;
             var mercDelay = 2500 + Math.floor(Math.random() * 1000);
             setTimeout(() => {
+                if (!autoSendInProgress || (_automationActive && _automationActive.type !== 'auto-send')) {
+                    console.log('[COR3 Helper] Auto-send: merc refresh skipped (no longer active or another automation took over)');
+                    return;
+                }
                 window.postMessage({ type: 'COR3_REQUEST_MERCENARIES' }, '*');
             }, mercDelay);
             return;
@@ -1166,7 +1289,7 @@ async function checkAutoRefresh() {
         // window.postMessage which still works. Skip storage-dependent timer checks
         // but keep the interval alive so it resumes if context is restored (page reload).
         if (!isContextValid()) return;
-        if (_seqRefreshRunning || _autoJobsActive) return;
+        if (_seqRefreshRunning || _autoJobsActive || !_initialFetchDone) return;
 
         // Check if ANY enabled market timer hit 0 (with 60s retry cooldown for expired timers)
         let needsRefresh = false;
@@ -1320,8 +1443,18 @@ function stopSimpleDecryptSolver() {
     simpleDecryptSolverInjected = false;
 }
 
+function ensureAntiAfkEnabled() {
+    chrome.storage.sync.get('antiAfkEnabled', (data) => {
+        if (!data.antiAfkEnabled) {
+            chrome.storage.sync.set({ antiAfkEnabled: true });
+            window.postMessage({ type: 'COR3_ANTI_AFK_TOGGLE', enabled: true }, '*');
+            console.log('[COR3 Helper] Anti-AFK Clicker auto-enabled before automation');
+        }
+    });
+}
+
 // Auto-start solvers if they were enabled before page load
-chrome.storage.sync.get(['autoDecryptEnabled', 'autoIceWallEnabled', 'autoSimpleDecryptEnabled'], (data) => {
+chrome.storage.sync.get(['autoDecryptEnabled', 'autoIceWallEnabled', 'autoSimpleDecryptEnabled', 'antiAfkEnabled'], (data) => {
     if (data.autoDecryptEnabled) {
         injectDecryptSolver();
     }
@@ -1330,6 +1463,9 @@ chrome.storage.sync.get(['autoDecryptEnabled', 'autoIceWallEnabled', 'autoSimple
     }
     if (data.autoSimpleDecryptEnabled) {
         injectSimpleDecryptSolver();
+    }
+    if (data.antiAfkEnabled) {
+        window.postMessage({ type: 'COR3_ANTI_AFK_TOGGLE', enabled: true }, '*');
     }
 });
 
@@ -1355,6 +1491,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         sendResponse({ success: true });
     } else if (request.action === "requestStash") {
         window.postMessage({ type: 'COR3_REQUEST_STASH' }, '*');
+        sendResponse({ success: true });
+    } else if (request.action === "requestSpecialists") {
+        window.postMessage({ type: 'COR3_REQUEST_SPECIALISTS' }, '*');
         sendResponse({ success: true });
     } else if (request.action === "requestLoadout") {
         window.postMessage({ type: 'COR3_REQUEST_LOADOUT' }, '*');
@@ -1428,6 +1567,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         sendResponse({ success: true });
     } else if (request.action === "toggleDecryptSolver") {
         if (request.enabled) {
+            ensureAntiAfkEnabled();
             injectDecryptSolver();
         } else {
             stopDecryptSolver();
@@ -1435,6 +1575,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         sendResponse({ success: true });
     } else if (request.action === "toggleIceWallSolver") {
         if (request.enabled) {
+            ensureAntiAfkEnabled();
             injectIceWallSolver();
         } else {
             stopIceWallSolver();
@@ -1442,13 +1583,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         sendResponse({ success: true });
     } else if (request.action === "toggleSimpleDecryptSolver") {
         if (request.enabled) {
+            ensureAntiAfkEnabled();
             injectSimpleDecryptSolver();
         } else {
             stopSimpleDecryptSolver();
         }
         sendResponse({ success: true });
+    } else if (request.action === "toggleAntiAfk") {
+        window.postMessage({ type: 'COR3_ANTI_AFK_TOGGLE', enabled: request.enabled }, '*');
+        sendResponse({ success: true });
     } else if (request.action === "toggleDailyHackSolver") {
         if (request.enabled) {
+            ensureAntiAfkEnabled();
             injectDailyHackSolver();
         } else {
             stopDailyHackSolver();
@@ -1563,6 +1709,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             patchVersion: window.__cor3PatchVersion
         });
     } else if (request.action === "startAutoJobs") {
+        ensureAntiAfkEnabled();
         const jobs = request.jobs;
         const settings = request.settings || {};
         const result = _automationEnqueue('auto-jobs', () => {
@@ -1580,7 +1727,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         _automationFinish('auto-jobs');
         sendResponse({ success: true });
     } else if (request.action === "enableHackSolvers") {
-        // Enable all hack solvers (used by background.js before hack.start)
+        ensureAntiAfkEnabled();
         injectDecryptSolver();
         injectIceWallSolver();
         injectSimpleDecryptSolver();
@@ -1613,18 +1760,32 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         pollClose();
         sendResponse({ success: true });
     } else if (request.action === "dismissFailedJobs") {
-        // Clear failed jobs — routed through automation queue
-        var dismissJobs = request.jobs || []; // [{marketId, jobId}]
+        var dismissJobs = request.jobs || [];
         var dismissMarketKey = request.marketKey || '';
+        var dismissStorageKey = { home: 'marketData', dark: 'darkMarketData', soyuz: 'soyuzMarketData', usol: 'usolMarketData' }[dismissMarketKey] || '';
+        var dismissRefreshType = { home: 'COR3_REFRESH_MARKET', dark: 'COR3_REFRESH_DARK_MARKET', soyuz: 'COR3_REFRESH_SOYUZ_MARKET', usol: 'COR3_REFRESH_USOL_MARKET' }[dismissMarketKey] || '';
         var result = _automationEnqueue('clear-failed-jobs', function () {
             (async function () {
                 try {
                     for (var i = 0; i < dismissJobs.length; i++) {
                         window.postMessage({ type: 'COR3_AUTOJOB_CMD', cmd: 'job.dismiss', data: dismissJobs[i] }, '*');
-                        if (i < dismissJobs.length - 1) await new Promise(function (r) { setTimeout(r, 500); });
+                        if (dismissStorageKey) {
+                            var fresh = await chrome.storage.local.get(dismissStorageKey);
+                            var freshMd = fresh[dismissStorageKey];
+                            if (freshMd && freshMd.recentJobs) {
+                                freshMd.recentJobs = freshMd.recentJobs.filter(function (j) { return j.id !== dismissJobs[i].jobId; });
+                                await chrome.storage.local.set({ [dismissStorageKey]: freshMd });
+                            }
+                        }
+                        await new Promise(function (r) { setTimeout(r, 500); });
                     }
-                    // Brief delay then finish queue slot
-                    await new Promise(function (r) { setTimeout(r, 1000); });
+                    await new Promise(function (r) { setTimeout(r, 2000); });
+                    if (dismissRefreshType) {
+                        _marketRefreshInProgress = true;
+                        _autoUpdateMarketsLastRefresh = Date.now();
+                        setTimeout(function () { _marketRefreshInProgress = false; }, 10000);
+                        window.postMessage({ type: dismissRefreshType }, '*');
+                    }
                 } catch (e) {
                     console.log('[COR3 Helper] dismissFailedJobs error:', e);
                 } finally {
@@ -1642,6 +1803,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         window.postMessage({ type: 'COR3_DEVTOOLS_WS_SEND', message: request.message }, '*');
         sendResponse({ success: true });
     } else if (request.action === "startValuableSearch") {
+        ensureAntiAfkEnabled();
         const result = _automationEnqueue('auto-valuable', () => {
             injectAutoValuableSeller();
             setTimeout(() => {
@@ -1650,6 +1812,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         });
         sendResponse({ success: true, queueResult: result, queueStatus: _automationQueueStatus() });
     } else if (request.action === "startValuableSeller") {
+        ensureAntiAfkEnabled();
         const selServers = request.selectedServers || [];
         const selDownloads = request.selectedDownloads || [];
         const result = _automationEnqueue('auto-valuable', () => {
@@ -1668,8 +1831,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         window.postMessage({ type: 'COR3_VALUABLE_STOP' }, '*');
         _automationFinish('auto-valuable');
         sendResponse({ success: true });
+    } else if (request.action === "forceMaintenanceBatch") {
+        injectAutoValuableSeller();
+        setTimeout(() => {
+            window.postMessage({
+                type: 'COR3_VALUABLE_FORCE_MAINTENANCE_BATCH',
+                servers: request.servers
+            }, '*');
+        }, 500);
+        sendResponse({ success: true });
     } else if (request.action === "startIpSearch") {
         window.postMessage({ type: 'COR3_IP_SEARCH_START' }, '*');
+        sendResponse({ success: true });
+    } else if (request.action === "fetchDailyOps") {
+        window.postMessage({ type: 'COR3_FETCH_DAILY_OPS' }, '*');
         sendResponse({ success: true });
     }
 });
@@ -2030,7 +2205,30 @@ window.addEventListener('message', (event) => {
         // Clear in-progress flags so auto-refresh can restart after WS reconnect
         _marketRefreshInProgress = false;
         _seqRefreshRunning = false;
-        console.log('[COR3 Helper] Token expired — cleared market refresh flags');
+        _initialFetchDone = false;
+        // Abort in-progress auto-send to prevent interleaved WS msgs during reconnect
+        if (autoSendInProgress) {
+            console.log('[COR3 Helper] Token expired — aborting in-progress auto-send');
+            autoSendInProgress = false;
+            autoSendExpeditionId = null;
+            autoSendAwaitingMercenaries = false;
+            autoSendAwaitingUsolMercs = false;
+            autoSendDeferredWaiting = false;
+            _autoSendUsolSkipped = false;
+            _autoSendMercRetryCount = 0;
+            _automationFinish('auto-send');
+        }
+        console.log('[COR3 Helper] Token expired — cleared market refresh flags, gating automations until initial fetch done');
+    }
+    if (event.data && event.data.type === 'COR3_INITIAL_FETCH_DONE') {
+        _initialFetchDone = true;
+        console.log('[COR3 Helper] Initial fetch done — automations unblocked');
+        // Re-check expeditions now that initial data is loaded
+        chrome.storage.local.get('expeditionsData', (result) => {
+            if (result.expeditionsData) {
+                checkAutoSendOnExpeditionData(result.expeditionsData);
+            }
+        });
     }
     if (event.data && event.data.type === 'COR3_AUTOJOB_SAVE_COMPLETED') {
         // Merge completed job results into storage (accumulate across runs within same reset cycle)
@@ -2056,6 +2254,30 @@ window.addEventListener('message', (event) => {
     }
     if (event.data && event.data.type === 'COR3_VALUABLE_DOWNLOADS_UPDATE') {
         chrome.storage.local.set({ valuableDownloadsData: event.data.data });
+    }
+    if (event.data && event.data.type === 'COR3_VALUABLE_MAINTENANCE_UPDATE') {
+        chrome.storage.local.set({ valuableMaintenanceData: event.data.data });
+    }
+    if (event.data && event.data.type === 'COR3_VALUABLE_FORCE_MAINT_BATCH_PROGRESS') {
+        chrome.storage.local.get('forceMaintenanceInProgress', function(res) {
+            var fm = res.forceMaintenanceInProgress;
+            if (fm && fm.batch) {
+                fm.currentServerId = event.data.currentServerId;
+                fm.serverIds = event.data.serverIds;
+                chrome.storage.local.set({ forceMaintenanceInProgress: fm });
+            }
+        });
+    }
+    if (event.data && event.data.type === 'COR3_VALUABLE_FORCE_MAINT_DONE') {
+        var fmDoneData = { done: true };
+        if (event.data.error) {
+            fmDoneData.error = event.data.error;
+            fmDoneData.blockerName = event.data.blockerName || null;
+            fmDoneData.remainingMs = event.data.remainingMs || null;
+            fmDoneData.targetServer = event.data.targetServer || null;
+        }
+        chrome.storage.local.set({ valuableForceMaintenanceDone: fmDoneData });
+        chrome.storage.local.remove('forceMaintenanceInProgress');
     }
     if (event.data && event.data.type === 'COR3_VALUABLE_DONE') {
         chrome.storage.local.set({ valuableSearchRunning: false, valuableSellerRunning: false });

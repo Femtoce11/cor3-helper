@@ -18,6 +18,8 @@
 	}
 	window.__iceWallSolverActive = true;
 	window.__iceWallSolverAbort = false;
+	window.__iceWallGameEnded = false;
+	var gameGeneration = 0;
 
 	// --- Utilities ------------------------------------------------------------
 	const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -386,7 +388,7 @@
 		timeout = timeout || 10000;
 		const start = Date.now();
 		while (Date.now() - start < timeout) {
-			if (window.__iceWallSolverAbort) return false;
+			if (window.__iceWallSolverAbort || window.__iceWallGameEnded) return false;
 			if (!findIceWallApp()) return false;
 			const counts = getRoundCounts();
 			// Game finished — counter reached its total
@@ -407,19 +409,31 @@
 			var settled = false;
 			var debounceTimer = null;
 			var startTime = Date.now();
-			var TIMEOUT_MS = 30000;
+			var TIMEOUT_MS = 45000;
+			var lastRevealed = -1;
+			var lastDiagTime = 0;
+			var observedBoard = null;
+			var observer = null;
 
 			function cleanup() {
 				settled = true;
-				observer.disconnect();
+				if (observer) observer.disconnect();
 				clearInterval(pollInterval);
 				document.removeEventListener('visibilitychange', onVisibilityChange);
 			}
 
-			var diagLogged = false;
+			function reattachObserver() {
+				var board = document.querySelector('[data-component-name="WallBoard"]');
+				if (!board || board === observedBoard) return;
+				if (observer) observer.disconnect();
+				observer = new MutationObserver(scheduledEval);
+				observer.observe(board, { subtree: true, childList: true, attributes: true, characterData: true });
+				observedBoard = board;
+			}
+
 			function tryEval() {
 				if (settled) return;
-				if (window.__iceWallSolverAbort) {
+				if (window.__iceWallSolverAbort || window.__iceWallGameEnded) {
 					cleanup();
 					return resolve(null);
 				}
@@ -428,19 +442,34 @@
 					return resolve(null);
 				}
 				if (Date.now() - startTime > TIMEOUT_MS) {
-					console.log('\uD83D\uDD13 [COR3 Helper] \u26a0\ufe0f waitForUniqueCandidate timed out after ' + (TIMEOUT_MS / 1000) + 's');
+					var finalMap = buildCellMap();
+					var finalRevealed = 0;
+					for (var _fr of finalMap.values()) { if (_fr.fingerprint !== null) finalRevealed++; }
+					var finalPossible = findPossiblePositions(finalMap, targetPattern, invalidPositions);
+					if (finalPossible.length > 0 && finalPossible.length <= 5) {
+						console.log('\uD83D\uDD13 [COR3 Helper] \u26a0\ufe0f waitForUniqueCandidate timed out (' + finalRevealed + '/' + finalMap.size + ' revealed) \u2014 ' + finalPossible.length + ' possible position(s), attempting best guess');
+						cleanup();
+						return resolve(finalMap);
+					}
+					console.log('\uD83D\uDD13 [COR3 Helper] \u26a0\ufe0f waitForUniqueCandidate timed out after ' + (TIMEOUT_MS / 1000) + 's (' + finalRevealed + '/' + finalMap.size + ' revealed)');
 					cleanup();
 					return resolve(null);
 				}
+				reattachObserver();
 				var cellMap = buildCellMap();
 				var candidates = findCandidates(cellMap, targetPattern, invalidPositions);
 
+				var revealed = 0;
+				for (var _e of cellMap.values()) { if (_e.fingerprint !== null) revealed++; }
+				if (revealed !== lastRevealed) {
+					lastRevealed = revealed;
+				}
+
 				if (candidates.length === 0) {
 					var possible = findPossiblePositions(cellMap, targetPattern, invalidPositions);
-					if (!diagLogged && Date.now() - startTime > 5000) {
-						diagLogged = true;
-						var revealed = 0;
-						for (var _e of cellMap.values()) { if (_e.fingerprint !== null) revealed++; }
+					var now = Date.now();
+					if (now - startTime > 5000 && now - lastDiagTime > 5000) {
+						lastDiagTime = now;
 						console.log('\uD83D\uDD13 [COR3 Helper] Diag: 0 candidates, ' + possible.length + ' possible, ' + revealed + '/' + cellMap.size + ' revealed, anchor fp: ' + (targetPattern.anchorFingerprint || 'null').substring(0, 40));
 					}
 					if (possible.length === 1) {
@@ -468,7 +497,7 @@
 
 				console.log(
 					'%c\uD83D\uDD13 [COR3 Helper] ' + candidates.length +
-					' candidates (best: ' + candidates[0].matches + ' matches) \u2014 waiting for more reveals...',
+					' candidates (best: ' + candidates[0].matches + ' matches, ' + revealed + ' revealed) \u2014 waiting for more reveals...',
 					'color: #76C1D1'
 				);
 			}
@@ -476,7 +505,7 @@
 			function scheduledEval() {
 				if (settled) return;
 				clearTimeout(debounceTimer);
-				debounceTimer = setTimeout(tryEval, 80);
+				debounceTimer = setTimeout(tryEval, 60);
 			}
 
 			function onVisibilityChange() {
@@ -488,14 +517,15 @@
 			var board = document.querySelector('[data-component-name="WallBoard"]');
 			if (!board) { resolve(null); return; }
 
-			var observer = new MutationObserver(scheduledEval);
-			observer.observe(board, { subtree: true, childList: true, attributes: true });
+			observer = new MutationObserver(scheduledEval);
+			observer.observe(board, { subtree: true, childList: true, attributes: true, characterData: true });
+			observedBoard = board;
 
 			document.addEventListener('visibilitychange', onVisibilityChange);
 
 			var pollInterval = setInterval(function () {
 				if (settled) { clearInterval(pollInterval); return; }
-				if (window.__iceWallSolverAbort) {
+				if (window.__iceWallSolverAbort || window.__iceWallGameEnded) {
 					cleanup();
 					resolve(null);
 					return;
@@ -506,13 +536,24 @@
 					return;
 				}
 				if (Date.now() - startTime > TIMEOUT_MS) {
-					console.log('\uD83D\uDD13 [COR3 Helper] \u26a0\ufe0f waitForUniqueCandidate poll timeout');
+					var tMap = buildCellMap();
+					var tRevealed = 0;
+					for (var _tr of tMap.values()) { if (_tr.fingerprint !== null) tRevealed++; }
+					var tPossible = findPossiblePositions(tMap, targetPattern, invalidPositions);
+					if (tPossible.length > 0 && tPossible.length <= 5) {
+						console.log('\uD83D\uDD13 [COR3 Helper] \u26a0\ufe0f waitForUniqueCandidate poll timeout (' + tRevealed + '/' + tMap.size + ' revealed) \u2014 ' + tPossible.length + ' possible position(s), attempting best guess');
+						cleanup();
+						resolve(tMap);
+						return;
+					}
+					console.log('\uD83D\uDD13 [COR3 Helper] \u26a0\ufe0f waitForUniqueCandidate poll timeout (' + tRevealed + '/' + tMap.size + ' revealed)');
 					cleanup();
 					resolve(null);
 					return;
 				}
+				reattachObserver();
 				tryEval();
-			}, 300);
+			}, 150);
 
 			scheduledEval();
 		});
@@ -524,6 +565,7 @@
 		timeout = timeout || 1500;
 		const start = Date.now();
 		while (Date.now() - start < timeout) {
+			if (window.__iceWallGameEnded) return true;
 			if (!findIceWallApp()) return true;
 			if (getRoundSignature() !== prevSignature) return true;
 			await sleep(100);
@@ -539,11 +581,11 @@
 		let falsePositiveCount = 0;
 
 		while (true) {
-			if (window.__iceWallSolverAbort) return;
+			if (window.__iceWallSolverAbort || window.__iceWallGameEnded) return;
 			if (!findIceWallApp()) return;
 
 			var cellMap = await waitForUniqueCandidate(targetPattern, invalidPositions);
-			if (!cellMap) return; // game closed
+			if (!cellMap) return; // game closed or ended
 
 			var candidates = findCandidates(cellMap, targetPattern, invalidPositions);
 			var best = null;
@@ -646,7 +688,7 @@
 		}
 
 		while (true) {
-			if (window.__iceWallSolverAbort) return;
+			if (window.__iceWallSolverAbort || window.__iceWallGameEnded) return;
 			if (!findIceWallApp()) break;
 			refreshTotal();
 			if (totalRounds !== null && roundsCompleted >= totalRounds) break;
@@ -680,7 +722,7 @@
 			await runIceWallRound(targetPattern);
 			roundsCompleted++;
 
-			if (window.__iceWallSolverAbort) return;
+			if (window.__iceWallSolverAbort || window.__iceWallGameEnded) return;
 
 			refreshTotal();
 			if (totalRounds !== null && roundsCompleted >= totalRounds) break;
@@ -720,14 +762,20 @@
 
 	window.addEventListener('message', function (event) {
 		if (event.data && event.data.type === 'COR3_ICE_WALL_MINIGAME_START') {
+			// Signal current solver to stop — a new game session is starting
+			window.__iceWallGameEnded = true;
+			gameGeneration++;
 			pendingMinigameData = event.data.data;
+			var sp = pendingMinigameData.meta?.staticParams;
+			var logParts = ['Difficulty:', sp?.difficulty, 'Max Attempts:', sp?.maxAttempts];
+			if (sp?.timerDurationMs != null) logParts.push('Timer:', sp.timerDurationMs + 'ms');
 			console.log(
 				'%c\uD83D\uDD13 [COR3 Helper] ICE Wall minigame started!',
 				'color: #4ec9f3; font-weight: bold',
-				'Difficulty:', pendingMinigameData.meta?.staticParams?.difficulty,
-				'Max Attempts:', pendingMinigameData.meta?.staticParams?.maxAttempts,
-				'Timer:', pendingMinigameData.meta?.staticParams?.timerDurationMs + 'ms'
+				...logParts
 			);
+		} else if (event.data && event.data.type === 'COR3_ICE_WALL_GAME_ENDED') {
+			window.__iceWallGameEnded = true;
 		}
 	});
 
@@ -740,6 +788,9 @@
 		while (!window.__iceWallSolverAbort) {
 			const app = findIceWallApp();
 			if (app) {
+				// Reset game-ended flag for this new game session
+				window.__iceWallGameEnded = false;
+				var currentGen = gameGeneration;
 				console.log(
 					'%c\uD83D\uDD13 [COR3 Helper] ICE Wall game detected in DOM!',
 					'color: #4ec9f3; font-weight: bold'
@@ -749,12 +800,16 @@
 
 				if (window.__iceWallSolverAbort) break;
 
-				// Wait for the game app to be removed from DOM
-				console.log(
-					'%c\u23f3 [COR3 Helper] Waiting for ICE Wall game to close...',
-					'color: #888; font-style: italic'
-				);
-				while (!window.__iceWallSolverAbort && findIceWallApp()) {
+				// Wait for the game app to be removed from DOM OR a new game to start
+				if (findIceWallApp() && !window.__iceWallGameEnded) {
+					console.log(
+						'%c\u23f3 [COR3 Helper] Waiting for ICE Wall game to close...',
+						'color: #888; font-style: italic'
+					);
+				}
+				while (!window.__iceWallSolverAbort && !window.__iceWallGameEnded && findIceWallApp()) {
+					// Also break out if a new game generation started
+					if (gameGeneration !== currentGen) break;
 					await sleep(100);
 				}
 

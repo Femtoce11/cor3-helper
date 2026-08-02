@@ -244,6 +244,7 @@
     }
 
     var MARKET_DISPLAY_NAMES = { home: 'HOME', dark: 'D4RK', soyuz: 'SOYUZ', usol: 'USOL' };
+    var MARKET_SERVER_NAMES = { dark: 'D4RK RM7CE', soyuz: 'SRM7-M', usol: 'URM7-M' };
     var MARKET_ID_TO_NAME = {
         '019d3ea4-85bd-7389-904d-8f7c85841134': 'HOME',
         '019d3ea4-85bd-7389-904d-908ba9194aa0': 'D4RK',
@@ -279,7 +280,8 @@
                 serverName: j.serverName, marketKey: j.marketKey,
                 status: j.status, reward: j.reward || null,
                 error: j.error || null, completedAt: Date.now(),
-                maintenanceEndsAt: j.maintenanceEndsAt || null
+                maintenanceEndsAt: j.maintenanceEndsAt || null,
+                lockExpiresAt: j.lockExpiresAt || null
             };
         });
         if (results.length > 0) {
@@ -360,6 +362,15 @@
             }
             check();
         });
+    }
+
+    function formatMinigameLockError(lockData) {
+        var expiresAt = lockData && lockData.lockExpiresAt;
+        if (!expiresAt) return null;
+        var remaining = new Date(expiresAt).getTime() - Date.now();
+        if (remaining <= 0) return null;
+        var mins = Math.ceil(remaining / 60000);
+        return { message: 'Minigame locked (~' + mins + 'm remaining)', lockExpiresAt: expiresAt, remainingMs: remaining };
     }
 
     async function waitForHackToBeDone() {
@@ -1720,6 +1731,8 @@
                             if (!evt.data) return;
                             if (evt.data.type === 'COR3_AUTOJOB_SAI_HACK_START') {
                                 if (!done) { done = true; safeClearTimeout(timer); window.removeEventListener('message', onMsg); resolve(evt.data); }
+                            } else if (evt.data.type === 'COR3_AUTOJOB_MINIGAME_LOCKED') {
+                                if (!done) { done = true; safeClearTimeout(timer); window.removeEventListener('message', onMsg); resolve({ data: { minigameLocked: true, lockData: evt.data.data }, error: null }); }
                             } else if (evt.data.type === 'COR3_AUTOJOB_MINIGAME_START') {
                                 if (!done) { done = true; safeClearTimeout(timer); window.removeEventListener('message', onMsg); resolve({ data: { minigameStarted: true }, error: null }); }
                             }
@@ -1783,6 +1796,16 @@
                         continue;
                     }
                     throw new Error('Hack failed after ' + MAX_HACK_ATTEMPTS + ' attempts: ' + friendlyError(hackErrMsg));
+                }
+                if (hackResult.data && hackResult.data.minigameLocked) {
+                    var lockInfo = formatMinigameLockError(hackResult.data.lockData);
+                    if (lockInfo) {
+                        log('🔒 Hack minigame locked — ' + lockInfo.message, 'warn');
+                        var lockErr = new Error('minigame-locked: ' + lockInfo.message);
+                        lockErr.lockExpiresAt = lockInfo.lockExpiresAt;
+                        lockErr.remainingMs = lockInfo.remainingMs;
+                        throw lockErr;
+                    }
                 }
                 if (hackResult.data && hackResult.data.autoHacked) {
                     log('Server auto-hacked (no minigame) — skipping solver wait', 'success');
@@ -1982,38 +2005,59 @@
             await stepSetEndpoint(USOL_MARKET_SERVER_ID);
         }
 
-        sendCmd('job.complete', { marketId: job.marketId, jobId: job.jobId });
-        try {
-            var result = await waitForEvent('COR3_AUTOJOB_JOB_COMPLETED', 20000);
-            window.removeEventListener('message', profileHandler);
+        var completeRetries = 0;
+        var MAX_COMPLETE_RETRIES = 2;
+        while (true) {
+            sendCmd('job.complete', { marketId: job.marketId, jobId: job.jobId });
+            try {
+                var result = await waitForEvent('COR3_AUTOJOB_JOB_COMPLETED', 20000);
 
-            if (result.error) {
-                var errMsg = friendlyError(result.error.message, result.error.failedConditions) || 'Unknown completion error';
-                log('Job completion error: ' + errMsg, 'error');
-                throw new Error(errMsg);
+                if (result.error) {
+                    var errMsg = result.error.message || '';
+                    if (errMsg.indexOf('not found') >= 0) {
+                        window.removeEventListener('message', profileHandler);
+                        log('Job not found (stale ID) — skipping this job', 'error');
+                        throw new Error('job-not-found');
+                    }
+                    if (errMsg.indexOf('market-not-reachable') >= 0 && completeRetries < MAX_COMPLETE_RETRIES) {
+                        completeRetries++;
+                        log('Market not reachable during job.complete — re-setting endpoint and retrying (' + completeRetries + '/' + MAX_COMPLETE_RETRIES + ')', 'warn');
+                        await delay(1500);
+                        var marketName = getMarketNameById(job.marketId);
+                        if (marketName === 'D4RK') await stepSetEndpoint(DARK_MARKET_SERVER_ID);
+                        else if (marketName === 'SOYUZ') await stepSetEndpoint(SOYUZ_MARKET_SERVER_ID);
+                        else if (marketName === 'USOL') await stepSetEndpoint(USOL_MARKET_SERVER_ID);
+                        await delay(500);
+                        continue;
+                    }
+                    window.removeEventListener('message', profileHandler);
+                    var friendlyMsg = friendlyError(errMsg, result.error.failedConditions) || 'Unknown completion error';
+                    log('Job completion error: ' + friendlyMsg, 'error');
+                    throw new Error(errMsg);
+                }
+
+                window.removeEventListener('message', profileHandler);
+
+                var grossCredits = earnedCredits || job.rewardCredits || 0;
+                var deposit = job.depositPaid || 0;
+                var netCredits = grossCredits - deposit;
+                var reputation = job.rewardReputation || 0;
+                var renown = earnedRenown || 0;
+                log('Job completed!', 'success');
+
+                return {
+                    credits: netCredits,
+                    reputation: reputation,
+                    renown: renown,
+                    grossCredits: grossCredits,
+                    deposit: deposit
+                };
+            } catch (e) {
+                window.removeEventListener('message', profileHandler);
+                log('Job completion timed out: ' + e.message, 'error');
+                throw e;
             }
-
-            // Server responds with {status:"ok"} — actual rewards come from profile events
-            // Use earned values from profile events, fall back to job's expected rewards
-            var grossCredits = earnedCredits || job.rewardCredits || 0;
-            var deposit = job.depositPaid || 0;
-            var netCredits = grossCredits - deposit;
-            var reputation = job.rewardReputation || 0;
-            var renown = earnedRenown || 0;
-            log('Job completed!', 'success');
-
-            return {
-                credits: netCredits,
-                reputation: reputation,
-                renown: renown,
-                grossCredits: grossCredits,
-                deposit: deposit
-            };
-        } catch (e) {
-            window.removeEventListener('message', profileHandler);
-            log('Job completion timed out: ' + e.message, 'error');
         }
-        return null;
     }
 
     // Step: Discover Downloads folder ID
@@ -2090,6 +2134,15 @@
         return null;
     }
 
+    function jobConditionsRequireDecrypt(job) {
+        if (!job.conditions) return false;
+        for (var i = 0; i < job.conditions.length; i++) {
+            var cond = job.conditions[i];
+            if (cond.type === 'DecryptFile' || cond.type === 'DecryptDownloadedFile') return true;
+        }
+        return false;
+    }
+
     // Helper: Extract file info from job conditions (for already-taken jobs)
     // Looks in conditions.details.files for file ID and name
     function extractFileInfoFromConditions(job) {
@@ -2133,8 +2186,16 @@
 
             if (job.alreadyTaken && job.canComplete) {
                 log('Job already taken and completable — completing now');
-                var earlyReward = await stepCompleteJob(job);
-                if (earlyReward) return earlyReward;
+                try {
+                    var earlyReward = await stepCompleteJob(job);
+                    if (earlyReward) return earlyReward;
+                } catch (earlyErr) {
+                    if (earlyErr.message && earlyErr.message.indexOf('job-conditions-not-met') >= 0) {
+                        log('Early completion failed (conditions not met) — continuing with decrypt steps', 'warn');
+                    } else {
+                        throw earlyErr;
+                    }
+                }
                 log('Completion failed — continuing with remaining steps');
             } else if (job.alreadyTaken) {
                 log('Job already taken but not yet completable — continuing with remaining steps');
@@ -2269,7 +2330,9 @@
                 }
                 function onMinigame(evt) {
                     if (!evt.data || done) return;
-                    if (evt.data.type === 'COR3_AUTOJOB_MINIGAME_START') {
+                    if (evt.data.type === 'COR3_AUTOJOB_MINIGAME_LOCKED') {
+                        done = true; cleanup(); resolve({ locked: evt.data.data });
+                    } else if (evt.data.type === 'COR3_AUTOJOB_MINIGAME_START') {
                         done = true; cleanup(); resolve({ minigame: evt.data });
                     }
                 }
@@ -2277,6 +2340,17 @@
                 window.addEventListener('message', onDesktopFile);
                 window.addEventListener('message', onMinigame);
             });
+
+            if (openFileResult.locked) {
+                var lockInfo = formatMinigameLockError(openFileResult.locked);
+                if (lockInfo) {
+                    log('🔒 Decrypt minigame locked — ' + lockInfo.message, 'warn');
+                    var lockErr = new Error('minigame-locked: ' + lockInfo.message);
+                    lockErr.lockExpiresAt = lockInfo.lockExpiresAt;
+                    lockErr.remainingMs = lockInfo.remainingMs;
+                    throw lockErr;
+                }
+            }
 
             // Handle desktop error (missing-software, insufficient_power, file encrypted)
             if (openFileResult.error) {
@@ -2300,11 +2374,15 @@
                             var rd = false;
                             var rt = safeTimeout(function () { if (!rd) { rd = true; rc(); resolve({ timeout: true }); } }, 12000);
                             function rdf(evt) { if (!evt.data || rd) return; if (evt.data.type === 'COR3_AUTOJOB_DESKTOP_FILE' && evt.data.error) { rd = true; rc(); resolve({ error: evt.data.error }); } }
-                            function rmg(evt) { if (!evt.data || rd) return; if (evt.data.type === 'COR3_AUTOJOB_MINIGAME_START') { rd = true; rc(); resolve({ minigame: evt.data }); } }
+                            function rmg(evt) { if (!evt.data || rd) return; if (evt.data.type === 'COR3_AUTOJOB_MINIGAME_LOCKED') { rd = true; rc(); resolve({ locked: evt.data.data }); } else if (evt.data.type === 'COR3_AUTOJOB_MINIGAME_START') { rd = true; rc(); resolve({ minigame: evt.data }); } }
                             function rc() { safeClearTimeout(rt); window.removeEventListener('message', rdf); window.removeEventListener('message', rmg); }
                             window.addEventListener('message', rdf);
                             window.addEventListener('message', rmg);
                         });
+                        if (retryResult.locked) {
+                            var lk = formatMinigameLockError(retryResult.locked);
+                            if (lk) { log('🔒 Decrypt minigame locked — ' + lk.message, 'warn'); var le = new Error('minigame-locked: ' + lk.message); le.lockExpiresAt = lk.lockExpiresAt; le.remainingMs = lk.remainingMs; throw le; }
+                        }
                         if (retryResult.error) {
                             var retryErrMsg = retryResult.error.message || retryResult.error.kind || JSON.stringify(retryResult.error);
                             throw new Error(friendlyError(retryErrMsg));
@@ -2338,6 +2416,10 @@
                         return null;
                     }
                 } catch (e) {
+                    if (e.message && e.message.indexOf('job-not-found') >= 0) {
+                        log('Job ID is stale — job list outdated, requesting refresh', 'error');
+                        throw new Error('job-not-found-refresh');
+                    }
                     if (e.message && e.message.indexOf('job-conditions-not-met') >= 0 && decryptRetries < MAX_DECRYPT_RETRIES) {
                         // Fall through to retry block below
                     } else {
@@ -2353,9 +2435,30 @@
                     ensureIceWallSolverEnabled();
                     ensureSimpleDecryptSolverEnabled();
                     sendCmd('decrypt.file', { fileId: targetFile.id });
-                    try {
-                        await waitForEvent('COR3_AUTOJOB_MINIGAME_START', 10000);
-                    } catch (e2) {
+                    var retryOpen = await new Promise(function (resolve) {
+                        var rd = false;
+                        var rt = safeTimeout(function () { if (!rd) { rd = true; rcl(); resolve({ timeout: true }); } }, 12000);
+                        function rdf(evt) { if (!evt.data || rd) return; if (evt.data.type === 'COR3_AUTOJOB_DESKTOP_FILE' && evt.data.error) { rd = true; rcl(); resolve({ error: evt.data.error }); } }
+                        function rmg(evt) { if (!evt.data || rd) return; if (evt.data.type === 'COR3_AUTOJOB_MINIGAME_LOCKED') { rd = true; rcl(); resolve({ locked: evt.data.data }); } else if (evt.data.type === 'COR3_AUTOJOB_MINIGAME_START') { rd = true; rcl(); resolve({ minigame: evt.data }); } }
+                        function rcl() { safeClearTimeout(rt); window.removeEventListener('message', rdf); window.removeEventListener('message', rmg); }
+                        window.addEventListener('message', rdf);
+                        window.addEventListener('message', rmg);
+                    });
+                    if (retryOpen.locked) {
+                        var lk2 = formatMinigameLockError(retryOpen.locked);
+                        if (lk2) { log('🔒 Decrypt minigame locked — ' + lk2.message, 'warn'); var le2 = new Error('minigame-locked: ' + lk2.message); le2.lockExpiresAt = lk2.lockExpiresAt; le2.remainingMs = lk2.remainingMs; throw le2; }
+                    }
+                    if (retryOpen.error) {
+                        var retryErrMsg3 = retryOpen.error.message || retryOpen.error.kind || '';
+                        if (retryErrMsg3.indexOf('file-already-decrypted') >= 0 || retryErrMsg3.indexOf('cannot-read-sai-file') >= 0) {
+                            log('File already decrypted on retry — skipping to job completion', 'success');
+                            await delay(1500);
+                            continue;
+                        }
+                        log('Decrypt retry error: ' + retryErrMsg3, 'warn');
+                        await delay(1500);
+                        continue;
+                    } else if (retryOpen.timeout) {
                         log('Minigame start not detected on retry', 'warn');
                     }
                     await waitForHackToBeDone();
@@ -2496,8 +2599,16 @@
 
             if (job.alreadyTaken && job.canComplete) {
                 log('Job already taken and completable — completing now');
-                var earlyReward = await stepCompleteJob(job);
-                if (earlyReward) return earlyReward;
+                try {
+                    var earlyReward = await stepCompleteJob(job);
+                    if (earlyReward) return earlyReward;
+                } catch (earlyErr) {
+                    if (earlyErr.message && earlyErr.message.indexOf('job-conditions-not-met') >= 0) {
+                        log('Early completion failed (conditions not met) — continuing with download/decrypt steps', 'warn');
+                    } else {
+                        throw earlyErr;
+                    }
+                }
                 log('Completion failed — continuing with remaining steps');
             } else if (job.alreadyTaken) {
                 log('Job already taken but not yet completable — continuing with remaining steps');
@@ -2552,11 +2663,27 @@
             }
             await delay(humanDelay());
 
-            // 7. Try to complete — set endpoint to market first
-            var reward = await stepCompleteJob(job);
-            if (reward) return reward;
-
-            log('Job not yet complete — checking if decryption needed');
+            var needsDecrypt = jobConditionsRequireDecrypt(job);
+            if (needsDecrypt) {
+                log('Job conditions require file decryption — proceeding to decrypt flow');
+            } else {
+                var reward = null;
+                try {
+                    reward = await stepCompleteJob(job);
+                } catch (e) {
+                    if (e.message && e.message.indexOf('job-conditions-not-met') >= 0) {
+                        log('Job conditions not met — file likely needs decryption', 'warn');
+                        needsDecrypt = true;
+                    } else {
+                        throw e;
+                    }
+                }
+                if (reward) return reward;
+                if (!needsDecrypt) {
+                    log('Job not yet complete — checking if decryption needed');
+                    needsDecrypt = true;
+                }
+            }
 
             // Re-fetch job info to verify conditions
             var condFile = extractFileInfoFromConditions(job);
@@ -2643,14 +2770,120 @@
             ensureSimpleDecryptSolverEnabled();
             log('Opening file for decryption: ' + encFile.name + ' (id: ' + encFile.id + ')');
             sendCmd('decrypt.file', { fileId: encFile.id });
-            try {
-                await waitForEvent('COR3_AUTOJOB_MINIGAME_START', 10000);
-            } catch (e) { /* solver may handle directly */ }
-            await waitForHackToBeDone();
 
-            reward = await stepCompleteJob(job);
+            var ddOpenResult = await new Promise(function (resolve) {
+                var done = false;
+                var timer = safeTimeout(function () { if (!done) { done = true; ddCleanup(); resolve({ timeout: true }); } }, 12000);
+                function ddOnFile(evt) {
+                    if (!evt.data || done) return;
+                    if (evt.data.type === 'COR3_AUTOJOB_DESKTOP_FILE' && evt.data.error) {
+                        done = true; ddCleanup(); resolve({ error: evt.data.error });
+                    }
+                }
+                function ddOnMini(evt) {
+                    if (!evt.data || done) return;
+                    if (evt.data.type === 'COR3_AUTOJOB_MINIGAME_LOCKED') {
+                        done = true; ddCleanup(); resolve({ locked: evt.data.data });
+                    } else if (evt.data.type === 'COR3_AUTOJOB_MINIGAME_START') {
+                        done = true; ddCleanup(); resolve({ minigame: evt.data });
+                    }
+                }
+                function ddCleanup() { safeClearTimeout(timer); window.removeEventListener('message', ddOnFile); window.removeEventListener('message', ddOnMini); }
+                window.addEventListener('message', ddOnFile);
+                window.addEventListener('message', ddOnMini);
+            });
 
-            return reward;
+            if (ddOpenResult.locked) {
+                var ddLock = formatMinigameLockError(ddOpenResult.locked);
+                if (ddLock) {
+                    log('🔒 Decrypt minigame locked — ' + ddLock.message, 'warn');
+                    var ddLockErr = new Error('minigame-locked: ' + ddLock.message);
+                    ddLockErr.lockExpiresAt = ddLock.lockExpiresAt;
+                    ddLockErr.remainingMs = ddLock.remainingMs;
+                    throw ddLockErr;
+                }
+            }
+
+            var ddAlreadyDecrypted = false;
+            if (ddOpenResult.error) {
+                var ddErrMsg = ddOpenResult.error.message || ddOpenResult.error.kind || JSON.stringify(ddOpenResult.error);
+                var ddIsAlready = ddErrMsg.indexOf('cannot-read-sai-file') >= 0 || ddErrMsg.indexOf('Cannot read SAI file') >= 0 || ddErrMsg.indexOf('file-already-decrypted') >= 0;
+                if (ddIsAlready) {
+                    log('File already decrypted — attempting job completion directly', 'success');
+                    ddAlreadyDecrypted = true;
+                } else {
+                    throw new Error(friendlyError(ddErrMsg));
+                }
+            } else if (ddOpenResult.timeout) {
+                log('Minigame start not detected (solver may handle directly)', 'warn');
+            }
+
+            if (!ddAlreadyDecrypted) {
+                await waitForHackToBeDone();
+            }
+
+            await delay(1500);
+            var ddRetries = 0;
+            var DD_MAX_RETRIES = 6;
+            while (true) {
+                try {
+                    var ddReward = await stepCompleteJob(job);
+                    if (ddReward) return ddReward;
+                    if (ddRetries >= DD_MAX_RETRIES) {
+                        log('No reward after decrypt — max retries reached', 'warn');
+                        return null;
+                    }
+                } catch (e) {
+                    if (e.message && e.message.indexOf('job-not-found') >= 0) {
+                        log('Job ID is stale — job list outdated, requesting refresh', 'error');
+                        throw new Error('job-not-found-refresh');
+                    }
+                    if (e.message && e.message.indexOf('job-conditions-not-met') >= 0 && ddRetries < DD_MAX_RETRIES) {
+                        // Fall through to retry block below
+                    } else {
+                        throw e;
+                    }
+                }
+                if (ddRetries < DD_MAX_RETRIES) {
+                    ddRetries++;
+                    log('Decrypt incomplete — re-opening file to retry decryption (attempt ' + ddRetries + '/' + DD_MAX_RETRIES + ')', 'warn');
+                    await delay(2000);
+                    ensureDecryptSolverEnabled();
+                    ensureIceWallSolverEnabled();
+                    ensureSimpleDecryptSolverEnabled();
+                    sendCmd('decrypt.file', { fileId: encFile.id });
+                    var ddRetryOpen = await new Promise(function (resolve) {
+                        var rd = false;
+                        var rt = safeTimeout(function () { if (!rd) { rd = true; ddRc(); resolve({ timeout: true }); } }, 12000);
+                        function ddRdf(evt) { if (!evt.data || rd) return; if (evt.data.type === 'COR3_AUTOJOB_DESKTOP_FILE' && evt.data.error) { rd = true; ddRc(); resolve({ error: evt.data.error }); } }
+                        function ddRmg(evt) { if (!evt.data || rd) return; if (evt.data.type === 'COR3_AUTOJOB_MINIGAME_LOCKED') { rd = true; ddRc(); resolve({ locked: evt.data.data }); } else if (evt.data.type === 'COR3_AUTOJOB_MINIGAME_START') { rd = true; ddRc(); resolve({ minigame: evt.data }); } }
+                        function ddRc() { safeClearTimeout(rt); window.removeEventListener('message', ddRdf); window.removeEventListener('message', ddRmg); }
+                        window.addEventListener('message', ddRdf);
+                        window.addEventListener('message', ddRmg);
+                    });
+                    if (ddRetryOpen.locked) {
+                        var ddLk = formatMinigameLockError(ddRetryOpen.locked);
+                        if (ddLk) { log('🔒 Decrypt minigame locked — ' + ddLk.message, 'warn'); var ddLe = new Error('minigame-locked: ' + ddLk.message); ddLe.lockExpiresAt = ddLk.lockExpiresAt; ddLe.remainingMs = ddLk.remainingMs; throw ddLe; }
+                    }
+                    if (ddRetryOpen.error) {
+                        var ddRetryErr = ddRetryOpen.error.message || ddRetryOpen.error.kind || '';
+                        if (ddRetryErr.indexOf('file-already-decrypted') >= 0 || ddRetryErr.indexOf('cannot-read-sai-file') >= 0) {
+                            log('File already decrypted on retry — skipping to job completion', 'success');
+                            await delay(1500);
+                            continue;
+                        }
+                        log('Decrypt retry error: ' + ddRetryErr, 'warn');
+                        await delay(1500);
+                        continue;
+                    } else if (ddRetryOpen.timeout) {
+                        log('Minigame start not detected on retry', 'warn');
+                    }
+                    await waitForHackToBeDone();
+                    await delay(1500);
+                    continue;
+                }
+                return null;
+            }
         } finally {
             window.removeEventListener('message', fileUpdateHandler);
         }
@@ -2837,8 +3070,16 @@
 
             if (job.alreadyTaken && job.canComplete) {
                 log('Job already taken and completable — completing now');
-                var earlyReward = await stepCompleteJob(job);
-                if (earlyReward) return earlyReward;
+                try {
+                    var earlyReward = await stepCompleteJob(job);
+                    if (earlyReward) return earlyReward;
+                } catch (earlyErr) {
+                    if (earlyErr.message && earlyErr.message.indexOf('job-conditions-not-met') >= 0) {
+                        log('Early completion failed (conditions not met) — continuing with download/decrypt steps', 'warn');
+                    } else {
+                        throw earlyErr;
+                    }
+                }
                 log('Completion failed — continuing with remaining steps');
             } else if (job.alreadyTaken) {
                 log('Job already taken but not yet completable — continuing with remaining steps');
@@ -2995,7 +3236,9 @@
                 }
                 function onMinigame(evt) {
                     if (!evt.data || done) return;
-                    if (evt.data.type === 'COR3_AUTOJOB_MINIGAME_START') {
+                    if (evt.data.type === 'COR3_AUTOJOB_MINIGAME_LOCKED') {
+                        done = true; cleanup(); resolve({ locked: evt.data.data });
+                    } else if (evt.data.type === 'COR3_AUTOJOB_MINIGAME_START') {
                         done = true; cleanup(); resolve({ minigame: evt.data });
                     }
                 }
@@ -3003,6 +3246,17 @@
                 window.addEventListener('message', onDesktopFile);
                 window.addEventListener('message', onMinigame);
             });
+
+            if (openFileResult2.locked) {
+                var lockInfo2 = formatMinigameLockError(openFileResult2.locked);
+                if (lockInfo2) {
+                    log('🔒 Decrypt minigame locked — ' + lockInfo2.message, 'warn');
+                    var lockErr2 = new Error('minigame-locked: ' + lockInfo2.message);
+                    lockErr2.lockExpiresAt = lockInfo2.lockExpiresAt;
+                    lockErr2.remainingMs = lockInfo2.remainingMs;
+                    throw lockErr2;
+                }
+            }
 
             // Handle desktop error (missing-software, insufficient_power, file encrypted, file-already-decrypted)
             var isAlreadyDecrypted2 = false;
@@ -3027,11 +3281,15 @@
                             var rd2 = false;
                             var rt2 = safeTimeout(function () { if (!rd2) { rd2 = true; rc2(); resolve({ timeout: true }); } }, 12000);
                             function rdf2(evt) { if (!evt.data || rd2) return; if (evt.data.type === 'COR3_AUTOJOB_DESKTOP_FILE' && evt.data.error) { rd2 = true; rc2(); resolve({ error: evt.data.error }); } }
-                            function rmg2(evt) { if (!evt.data || rd2) return; if (evt.data.type === 'COR3_AUTOJOB_MINIGAME_START') { rd2 = true; rc2(); resolve({ minigame: evt.data }); } }
+                            function rmg2(evt) { if (!evt.data || rd2) return; if (evt.data.type === 'COR3_AUTOJOB_MINIGAME_LOCKED') { rd2 = true; rc2(); resolve({ locked: evt.data.data }); } else if (evt.data.type === 'COR3_AUTOJOB_MINIGAME_START') { rd2 = true; rc2(); resolve({ minigame: evt.data }); } }
                             function rc2() { safeClearTimeout(rt2); window.removeEventListener('message', rdf2); window.removeEventListener('message', rmg2); }
                             window.addEventListener('message', rdf2);
                             window.addEventListener('message', rmg2);
                         });
+                        if (retryResult2.locked) {
+                            var lk3 = formatMinigameLockError(retryResult2.locked);
+                            if (lk3) { log('🔒 Decrypt minigame locked — ' + lk3.message, 'warn'); var le3 = new Error('minigame-locked: ' + lk3.message); le3.lockExpiresAt = lk3.lockExpiresAt; le3.remainingMs = lk3.remainingMs; throw le3; }
+                        }
                         if (retryResult2.error) {
                             var retryErrMsg2 = retryResult2.error.message || retryResult2.error.kind || JSON.stringify(retryResult2.error);
                             throw new Error(friendlyError(retryErrMsg2));
@@ -3065,6 +3323,10 @@
                         return null;
                     }
                 } catch (e) {
+                    if (e.message && e.message.indexOf('job-not-found') >= 0) {
+                        log('Job ID is stale — job list outdated, requesting refresh', 'error');
+                        throw new Error('job-not-found-refresh');
+                    }
                     if (e.message && e.message.indexOf('job-conditions-not-met') >= 0 && decryptRetries < MAX_DECRYPT_RETRIES) {
                         // Fall through to retry block below
                     } else {
@@ -3080,9 +3342,30 @@
                     ensureIceWallSolverEnabled();
                     ensureSimpleDecryptSolverEnabled();
                     sendCmd('decrypt.file', { fileId: encFile.id });
-                    try {
-                        await waitForEvent('COR3_AUTOJOB_MINIGAME_START', 10000);
-                    } catch (e2) {
+                    var retryOpen2 = await new Promise(function (resolve) {
+                        var rd2 = false;
+                        var rt2 = safeTimeout(function () { if (!rd2) { rd2 = true; rcl2(); resolve({ timeout: true }); } }, 12000);
+                        function rdf2(evt) { if (!evt.data || rd2) return; if (evt.data.type === 'COR3_AUTOJOB_DESKTOP_FILE' && evt.data.error) { rd2 = true; rcl2(); resolve({ error: evt.data.error }); } }
+                        function rmg2(evt) { if (!evt.data || rd2) return; if (evt.data.type === 'COR3_AUTOJOB_MINIGAME_LOCKED') { rd2 = true; rcl2(); resolve({ locked: evt.data.data }); } else if (evt.data.type === 'COR3_AUTOJOB_MINIGAME_START') { rd2 = true; rcl2(); resolve({ minigame: evt.data }); } }
+                        function rcl2() { safeClearTimeout(rt2); window.removeEventListener('message', rdf2); window.removeEventListener('message', rmg2); }
+                        window.addEventListener('message', rdf2);
+                        window.addEventListener('message', rmg2);
+                    });
+                    if (retryOpen2.locked) {
+                        var lk4 = formatMinigameLockError(retryOpen2.locked);
+                        if (lk4) { log('🔒 Decrypt minigame locked — ' + lk4.message, 'warn'); var le4 = new Error('minigame-locked: ' + lk4.message); le4.lockExpiresAt = lk4.lockExpiresAt; le4.remainingMs = lk4.remainingMs; throw le4; }
+                    }
+                    if (retryOpen2.error) {
+                        var retryErrMsg4 = retryOpen2.error.message || retryOpen2.error.kind || '';
+                        if (retryErrMsg4.indexOf('file-already-decrypted') >= 0 || retryErrMsg4.indexOf('cannot-read-sai-file') >= 0) {
+                            log('File already decrypted on retry — skipping to job completion', 'success');
+                            await delay(1500);
+                            continue;
+                        }
+                        log('Decrypt retry error: ' + retryErrMsg4, 'warn');
+                        await delay(1500);
+                        continue;
+                    } else if (retryOpen2.timeout) {
                         log('Minigame start not detected on retry', 'warn');
                     }
                     await waitForHackToBeDone();
@@ -3377,21 +3660,27 @@
 
     // ---- Main loop ----
     async function processQueue() {
-        if (running) return;
-
-        // Wait if initial page load fetch is still in progress
-        var waitAttempts = 0;
-        while (window.__cor3InitialFetchInProgress && waitAttempts < 3) {
-            waitAttempts++;
-            log('Initial page load in progress — delaying auto-jobs start (attempt ' + waitAttempts + '/3, waiting 10s)...', 'warn');
-            await new Promise(function (r) { setTimeout(r, 10000); });
-        }
-        if (window.__cor3InitialFetchInProgress) {
-            log('⚠️ Initial page load still in progress after 30s — proceeding anyway', 'warn');
+        if (running) {
+            log('Auto Job Solver already running — ignoring duplicate start', 'warn');
+            return;
         }
 
         running = true;
         abortFlag = false;
+
+        try {
+
+        // Wait if initial page load fetch is still in progress
+        var waitAttempts = 0;
+        while (window.__cor3InitialFetchInProgress && waitAttempts < 3 && !abortFlag) {
+            waitAttempts++;
+            log('Initial page load in progress — delaying auto-jobs start (attempt ' + waitAttempts + '/3, waiting 10s)...', 'warn');
+            await new Promise(function (r) { setTimeout(r, 10000); });
+        }
+        if (abortFlag) { signalDone(); return; }
+        if (window.__cor3InitialFetchInProgress) {
+            log('⚠️ Initial page load still in progress after 30s — proceeding anyway', 'warn');
+        }
         tokenExpired = false;
         _lastLoadoutServerType = null;
         _lastEndpointServerId = null;
@@ -3575,6 +3864,30 @@
                 }
             } catch (e) {
                 var errText = friendlyError(e.message);
+                if (e.message && (e.message.includes('job-not-found-refresh') || e.message.includes('job-not-found'))) {
+                    job.status = 'skipped';
+                    job.error = 'Job no longer available (stale ID)';
+                    log('⚠️ Job skipped (stale): ' + job.name + ' — refreshing ' + (job.marketKey || 'market') + ' job list', 'warn');
+                    var staleMarket = job.marketKey;
+                    if (staleMarket) {
+                        for (var sk = i + 1; sk < jobQueue.length; sk++) {
+                            if (jobQueue[sk].marketKey === staleMarket && jobQueue[sk].status === 'pending') {
+                                jobQueue[sk].status = 'skipped';
+                                jobQueue[sk].error = 'Skipped (job list outdated)';
+                                log('⚠️ Skipping stale job: ' + jobQueue[sk].name, 'warn');
+                            }
+                        }
+                    }
+                    updateTracker();
+                    saveCompletedResultsIncremental();
+                    if (job.marketId) {
+                        log('Refreshing market data after stale job detected...');
+                        sendCmd('get.jobs', { marketId: job.marketId });
+                        await delay(2000);
+                    }
+                    _currentJobRef = null;
+                    continue;
+                }
                 if (e.message === 'Aborted' || abortFlag) {
                     job.status = 'skipped';
                     job.error = 'Aborted by user';
@@ -3589,6 +3902,31 @@
                     abortFlag = true;
                     tokenExpired = true;
                     log('⚠️ Job skipped (token expired): ' + job.name + ' — ' + errText, 'warn');
+                } else if (e.message && e.message.includes('minigame-locked')) {
+                    job.status = 'skipped';
+                    job.error = errText;
+                    job.lockExpiresAt = e.lockExpiresAt || null;
+                    log('⚠️ Job skipped (minigame locked): ' + job.name + ' — ' + errText, 'warn');
+                } else if (e.message && e.message.includes('Market not reachable')) {
+                    job.status = 'skipped';
+                    var marketServerName = MARKET_SERVER_NAMES[job.marketKey] || null;
+                    if (marketServerName) {
+                        var mktCheck = await checkPathMaintenance(marketServerName);
+                        if (mktCheck.blocked) {
+                            var mktMins = Math.ceil(mktCheck.remainingMs / 60000);
+                            job.error = 'Market unreachable (' + mktCheck.blockerName + ' in maintenance, ~' + mktMins + 'm remaining)';
+                            job.maintenanceEndsAt = mktCheck.endsAt || null;
+                            log('⚠️ Job skipped (market unreachable): ' + job.name + ' — ' + mktCheck.blockerName + ' in maintenance (~' + mktMins + 'm left)', 'warn');
+                        } else {
+                            job.error = errText;
+                            job.maintenanceEndsAt = null;
+                            log('⚠️ Job skipped (market unreachable): ' + job.name + ' — ' + errText, 'warn');
+                        }
+                    } else {
+                        job.error = errText;
+                        job.maintenanceEndsAt = null;
+                        log('⚠️ Job skipped (market unreachable): ' + job.name + ' — ' + errText, 'warn');
+                    }
                 } else if (e.message && (e.message.includes('maintenance') || e.message.includes('unreachable'))) {
                     job.status = 'skipped';
                     job.error = errText;
@@ -3643,7 +3981,6 @@
         var skippedStr = skippedCount > 0 ? ', ' + skippedCount + ' skipped (maintenance)' : '';
         log('=== Auto Jobs Complete: ' + doneCount + ' done, ' + failedCount + ' failed' + buggedStr + skippedStr + '. Net: 💰' + totalCredits + depositStr + ' ⭐' + totalRep + ' 🏅' + totalRenown + ' ===', 'success');
 
-        // Save completed/failed/bugged job results to storage for debug console persistence
         var completedResults = jobQueue.map(function (j) {
             return {
                 jobId: j.jobId,
@@ -3655,32 +3992,37 @@
                 reward: j.reward || null,
                 error: j.error || null,
                 completedAt: Date.now(),
-                maintenanceEndsAt: j.maintenanceEndsAt || null
+                maintenanceEndsAt: j.maintenanceEndsAt || null,
+                lockExpiresAt: j.lockExpiresAt || null
             };
         });
         window.postMessage({ type: 'COR3_AUTOJOB_SAVE_COMPLETED', jobs: completedResults }, '*');
 
-        // Brief pause to let summary log persist before market refresh logs
-        await delay(500);
-
-        // Refresh all markets sequentially at the end to ensure UI is fully updated
-        log('Refreshing all markets sequentially...');
-        window.postMessage({ type: 'COR3_REFRESH_ALL_MARKETS_SEQ', skipLots: true }, '*');
-        // Wait for completion signal (max 30s)
-        await new Promise(function (resolve) {
-            var timer = safeTimeout(resolve, 30000);
-            function onDone(evt) {
-                if (evt.data && evt.data.type === 'COR3_ALL_MARKETS_REFRESHED') {
-                    window.removeEventListener('message', onDone);
-                    safeClearTimeout(timer);
-                    resolve();
+        if (!abortFlag) {
+            await new Promise(function (r) { setTimeout(r, 500); });
+            log('Refreshing all markets sequentially...');
+            window.postMessage({ type: 'COR3_REFRESH_ALL_MARKETS_SEQ', skipLots: true }, '*');
+            await new Promise(function (resolve) {
+                var timer = setTimeout(resolve, 30000);
+                function onDone(evt) {
+                    if (evt.data && evt.data.type === 'COR3_ALL_MARKETS_REFRESHED') {
+                        window.removeEventListener('message', onDone);
+                        clearTimeout(timer);
+                        resolve();
+                    }
                 }
-            }
-            window.addEventListener('message', onDone);
-        });
-        log('Market refresh complete.');
+                window.addEventListener('message', onDone);
+            });
+            log('Market refresh complete.');
+        }
 
-        signalDone();
+        } catch (queueErr) {
+            if (queueErr && queueErr.message !== 'Aborted') {
+                log('Unexpected error in processQueue: ' + queueErr.message, 'error');
+            }
+        } finally {
+            signalDone();
+        }
     }
 
     // ---- Listen for start/stop commands ----

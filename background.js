@@ -408,10 +408,10 @@ async function scheduleAutoFinishAllBg() {
             if (seenBlockerIds.has(s.blockerId)) continue;
             seenBlockerIds.add(s.blockerId);
             if (s.maintenanceEndsAt) {
-                const diff = new Date(s.maintenanceEndsAt).getTime() - now;
+                const diff = new Date(s.maintenanceEndsAt).getTime() + 3 * 60 * 1000 - now;
                 if (diff > 0 && diff < minWaitMs) {
                     minWaitMs = diff;
-                    scheduledReason = `${s.blockerName} maintenance end`;
+                    scheduledReason = `${s.blockerName} maintenance end (+3m buffer)`;
                 }
             }
         }
@@ -431,12 +431,11 @@ async function scheduleAutoFinishAllBg() {
         for (const sr of skippedFromResults) {
             if (sr.maintenanceEndsAt) {
                 hasEndTimeInfo = true;
-                const diff = new Date(sr.maintenanceEndsAt).getTime() - now;
+                const diff = new Date(sr.maintenanceEndsAt).getTime() + 3 * 60 * 1000 - now;
                 if (diff > 0 && diff < minWaitMs) {
                     minWaitMs = diff;
-                    scheduledReason = `maintenance end (${sr.serverName || 'unknown server'})`;
+                    scheduledReason = `maintenance end (${sr.serverName || 'unknown server'}) (+3m buffer)`;
                 } else if (diff <= 0 && minWaitMs === Infinity) {
-                    // Maintenance should have ended — retry soon
                     minWaitMs = 30 * 1000; // 30 seconds
                     scheduledReason = `maintenance ended (${sr.serverName || 'unknown server'}) — rechecking`;
                 }
@@ -448,6 +447,15 @@ async function scheduleAutoFinishAllBg() {
             minWaitMs = 10 * 60 * 1000; // 10 minutes
             scheduledReason = 'maintenance fallback (no end time known)';
             bgAutoJobLog(`🔄 Auto Finish All: ${skippedFromResults.length} job(s) skipped (maintenance) with unknown end time — waiting 10m`, 'warn');
+        }
+        for (const sr of skippedFromResults) {
+            if (sr.lockExpiresAt) {
+                const diff = new Date(sr.lockExpiresAt).getTime() - now;
+                if (diff > 0 && diff < minWaitMs) {
+                    minWaitMs = diff;
+                    scheduledReason = `minigame lock expires (${sr.serverName || sr.name || 'unknown'})`;
+                }
+            }
         }
     }
 

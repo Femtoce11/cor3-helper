@@ -442,10 +442,15 @@
         return (len / 1024).toFixed(1) + ' KB';
     }
 
+    function stripSioPrefix(msg) {
+        if (!msg || typeof msg !== 'string') return msg;
+        const m = msg.match(/^\d+(?:\/[^,]*,)?(\[.+)$/s);
+        return m ? m[1] : msg;
+    }
+
     function parseEvent(msg) {
-        // Socket.IO v4 format: 42["eventName", ...] or 42/namespace,["eventName", ...]
         if (!msg || typeof msg !== 'string') return { event: '—', payload: null };
-        const match = msg.match(/^42(?:\/[^,]*,)?\["([^"]+)"/);
+        const match = msg.match(/^\d+(?:\/[^,]*,)?\["([^"]+)"/);
         if (match) {
             return { event: match[1], payload: msg };
         }
@@ -459,10 +464,10 @@
     // Extract the parsed JSON data from a Socket.IO 42-frame message
     function parseMsgData(msg) {
         if (!msg || typeof msg !== 'string') return null;
-        const match = msg.match(/^42(?:\/[^,]*,)?(\[.+)$/s);
-        if (!match) return null;
+        const stripped = stripSioPrefix(msg);
+        if (stripped === msg && !msg.startsWith('[')) return null;
         try {
-            const arr = JSON.parse(match[1]);
+            const arr = JSON.parse(stripped);
             if (Array.isArray(arr) && arr.length >= 2) return arr[1];
         } catch (e) { /* silent */ }
         return null;
@@ -501,11 +506,10 @@
 
     function tryPrettyPrint(raw) {
         if (!raw) return '';
-        // Try to extract the JSON array from a Socket.IO frame
-        const match = raw.match(/^42(?:\/[^,]*,)?(\[.+)$/s);
-        if (match) {
+        const stripped = stripSioPrefix(raw);
+        if (stripped !== raw && stripped.startsWith('[')) {
             try {
-                const parsed = JSON.parse(match[1]);
+                const parsed = JSON.parse(stripped);
                 const event = parsed[0];
                 const data = parsed.length > 1 ? parsed.slice(1) : [];
                 let result = 'Event: ' + event + '\n';
@@ -533,9 +537,9 @@
     // --- Tree View Renderer (Chrome Network tab style previews) ---
     function buildTreeView(raw) {
         let data;
-        const match = raw.match(/^42(?:\/[^,]*,)?(\[.+)$/s);
-        if (match) {
-            try { data = JSON.parse(match[1]); } catch (e) { return null; }
+        const stripped = stripSioPrefix(raw);
+        if (stripped !== raw && stripped.startsWith('[')) {
+            try { data = JSON.parse(stripped); } catch (e) { return null; }
         } else if (raw.startsWith('0{')) {
             try { data = JSON.parse(raw.substring(1)); } catch (e) { return null; }
         } else {
@@ -1257,6 +1261,7 @@
     });
     btnClear.addEventListener('click', clearMessages);
     detailClose.addEventListener('click', closeDetail);
+    detailClose.addEventListener('mousedown', (e) => { e.stopPropagation(); });
 
     detailFormatSelect.addEventListener('change', () => {
         detailFormat = detailFormatSelect.value;

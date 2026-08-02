@@ -121,18 +121,17 @@
         var origWarn = console.warn;
         var origError = console.error;
 
+        var _safeApply = (function () {
+            try {
+                return new Function('fn', 'ctx', 'a', 'try{fn.apply(ctx,a)}catch(e){}');
+            } catch (e) {
+                return function (fn, ctx, a) { try { fn.apply(ctx, a); } catch (e) {} };
+            }
+        })();
+
         function intercept(level, origFn) {
-            // For warn/error: call origFn via setTimeout so the extension file
-            // is NOT in the call stack — prevents Chrome from capturing these as
-            // extension errors on the chrome://extensions error page.
-            var detach = level === 'warn' || level === 'error';
             return function () {
-                if (detach) {
-                    var args = Array.prototype.slice.call(arguments);
-                    setTimeout(function () { origFn.apply(console, args); }, 0);
-                } else {
-                    origFn.apply(console, arguments);
-                }
+                _safeApply(origFn, console, arguments);
                 var entry = {
                     timestamp: new Date().toISOString(),
                     level: level,
@@ -171,22 +170,26 @@
         _flushTimer = null;
         if (_writeQueue.length === 0) return;
         var batch = _writeQueue.splice(0);
-        chrome.storage.local.get(STORAGE_KEY, function (data) {
-            var existing = data[STORAGE_KEY] || [];
-            existing = existing.concat(batch);
-            // Purge old
-            var now = Date.now();
-            if (now - _lastPurge > PURGE_INTERVAL) {
-                _lastPurge = now;
-                var cutoff = new Date(now - MAX_AGE).toISOString();
-                while (existing.length > 0 && existing[0].timestamp < cutoff) existing.shift();
-            }
-            // Trim if over max
-            while (existing.length > MAX_ENTRIES) existing.shift();
-            var obj = {};
-            obj[STORAGE_KEY] = existing;
-            chrome.storage.local.set(obj);
-        });
+        try {
+            chrome.storage.local.get(STORAGE_KEY, function (data) {
+                try {
+                    var existing = data[STORAGE_KEY] || [];
+                    existing = existing.concat(batch);
+                    // Purge old
+                    var now = Date.now();
+                    if (now - _lastPurge > PURGE_INTERVAL) {
+                        _lastPurge = now;
+                        var cutoff = new Date(now - MAX_AGE).toISOString();
+                        while (existing.length > 0 && existing[0].timestamp < cutoff) existing.shift();
+                    }
+                    // Trim if over max
+                    while (existing.length > MAX_ENTRIES) existing.shift();
+                    var obj = {};
+                    obj[STORAGE_KEY] = existing;
+                    chrome.storage.local.set(obj);
+                } catch (e) { /* extension context invalidated */ }
+            });
+        } catch (e) { /* extension context invalidated */ }
     }
 
     function scheduleFlush() {
@@ -200,7 +203,7 @@
 
     function intercept(level, origFn) {
         return function () {
-            origFn.apply(console, arguments);
+            try { origFn.apply(console, arguments); } catch (e) { /* DOMException from invalidated context */ }
             var entry = {
                 timestamp: new Date().toISOString(),
                 level: level,

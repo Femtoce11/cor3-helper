@@ -159,10 +159,13 @@
     async function openDailyOpsTab() {
         hlog('Opening Daily Ops tab...');
         // Click the tab bar item that opens daily ops page
-        const tabItem = document.querySelector('[data-component-name="TabBarItem-019a0c41-b17f-7abc-1234-567890abcde2"]');
+        let tabItem = document.querySelector('[data-component-name="TabBarItem-019a0c41-b17f-7abc-1234-567890abcde2"]');
         if (!tabItem) {
-            hlog('Could not find Daily Ops tab bar item (.go3582441102)', 'error');
-            return false;
+            tabItem = document.querySelector('[data-component-name="TabBarItem-019a0c41-b17f-7abc-1234-567890abcde1"]');
+            if (!tabItem) {
+                hlog('Could not find Daily Ops tab bar item (.go3582441102)', 'error');
+                return false;
+            }
         }
         click(tabItem);
         await sleep(800);
@@ -176,6 +179,10 @@
         hlog('Waiting for Start Task button...');
         const dailyOpsBtn = document.querySelector('.game-center-grid button:nth-child(2)');
         if (!dailyOpsBtn) {
+            const startBtnCheck = await waitForEl('[data-component-name="DailyOpsStartButton"]', 8000);
+            if (startBtnCheck) {
+                return true;
+            }
             hlog('Could not find Daily Ops section button (.game-center-grid button:nth-child(2))', 'error');
             return false;
         }

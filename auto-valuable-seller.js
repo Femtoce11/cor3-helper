@@ -183,6 +183,10 @@
         window.postMessage({ type: 'COR3_VALUABLE_DOWNLOADS_UPDATE', data: downloadsData }, '*');
     }
 
+    function updateMaintenanceUI(maintData) {
+        window.postMessage({ type: 'COR3_VALUABLE_MAINTENANCE_UPDATE', data: maintData }, '*');
+    }
+
     function sendCmd(cmd, data) {
         window.postMessage({ type: 'COR3_AUTOJOB_CMD', cmd: cmd, data: data || {} }, '*');
     }
@@ -1669,6 +1673,10 @@
                     dlSource = analysis.source || '—';
                 }
 
+                if (dlTags.length === 0) {
+                    continue;
+                }
+
                 downloadsData.files.push({
                     id: dlFile.id,
                     name: dlFile.name,
@@ -1685,6 +1693,7 @@
             log('Downloads folder: found ' + downloadsData.files.length + ' valuable file(s)', 'success');
         }
 
+        await fetchMaintenanceData();
         log('=== Valuable Search Complete ===', 'success');
         signalDone();
     }
@@ -1876,6 +1885,9 @@
                     });
                     dlSource = analysis.source || '—';
                 }
+                if (dlTags.length === 0) {
+                    continue;
+                }
                 _sellerDownloadsData.files.push({
                     id: dlFile.id,
                     name: dlFile.name,
@@ -1894,6 +1906,9 @@
         // Step 2: Sell items at markets in priority order
         if (running) {
             log('--- Selling valuables at markets ---');
+            var grandTotalCredits = 0;
+            var grandTotalRep = 0;
+            var grandTotalSold = 0;
 
             for (var mi = 0; mi < MARKET_SELL_ORDER.length; mi++) {
                 if (!running) break;
@@ -1925,7 +1940,9 @@
                     var type = item.itemType || 'file';
                     return id ? { itemType: type, itemId: id } : null;
                 }).filter(Boolean);
-                log(market.name + ': found ' + items.length + ' sellable item(s) (💰' + sellableResult.totalPrice + ' ⭐' + sellableResult.totalRepGain + ')');
+                var marketCredits = sellableResult.totalPrice;
+                var marketRep = sellableResult.totalRepGain;
+                log(market.name + ': found ' + items.length + ' sellable item(s) (💰' + marketCredits + ' ⭐' + marketRep + ')');
 
                 if (items.length > 0) {
                     await delay(humanDelay());
@@ -1956,6 +1973,9 @@
                     });
                     if (sold > 0) {
                         log(market.name + ': sold ' + sold + '/' + items.length + ' item(s) ✓', 'success');
+                        grandTotalCredits += marketCredits;
+                        grandTotalRep += marketRep;
+                        grandTotalSold += sold;
                     } else {
                         log(market.name + ': sell failed', 'error');
                     }
@@ -1964,8 +1984,183 @@
             }
         }
 
+        if (grandTotalSold > 0) {
+            log('=== Total: ' + grandTotalSold + ' item(s) sold — 💰' + grandTotalCredits + ' credits, ⭐' + grandTotalRep + ' reputation ===', 'success');
+        }
+        await fetchMaintenanceData();
         log('=== Valuable Seller Complete ===', 'success');
         signalDone();
+    }
+
+    // ===== MAINTENANCE TRACKER =====
+    async function fetchMaintenanceData() {
+        log('Fetching maintenance data...');
+        _cachedMapData = null;
+        sendCmd('get.map', {});
+        try {
+            var mapData = await waitForEvent('COR3_WS_NETWORK_MAP', 10000);
+            _cachedMapData = mapData;
+            if (!mapData || !mapData.servers) return;
+            var maintServers = [];
+            for (var sid in mapData.servers) {
+                var srv = mapData.servers[sid];
+                if (srv.timeUntilMaintenance || srv.maintenanceEndsAt) {
+                    maintServers.push({
+                        id: sid,
+                        serverName: srv.serverName,
+                        timeUntilMaintenance: srv.timeUntilMaintenance || null,
+                        maintenanceEndsAt: srv.maintenanceEndsAt || null
+                    });
+                }
+            }
+            maintServers.sort(function (a, b) {
+                var aInMaint = a.maintenanceEndsAt ? 0 : 1;
+                var bInMaint = b.maintenanceEndsAt ? 0 : 1;
+                if (aInMaint !== bInMaint) return aInMaint - bInMaint;
+                var tA = a.timeUntilMaintenance || a.maintenanceEndsAt || '';
+                var tB = b.timeUntilMaintenance || b.maintenanceEndsAt || '';
+                return tA < tB ? -1 : tA > tB ? 1 : 0;
+            });
+            log('Maintenance: ' + maintServers.length + ' server(s) with upcoming/active maintenance');
+            updateMaintenanceUI({ servers: maintServers });
+        } catch (e) {
+            log('Maintenance data fetch timeout', 'warn');
+        }
+    }
+
+    var _forceMaintenanceRunning = false;
+
+    function getServerPathLength(serverId) {
+        for (var sName in SERVER_PATH_MAP) {
+            var path = SERVER_PATH_MAP[sName];
+            var last = path[path.length - 1];
+            if (last.id === serverId) return path.length;
+        }
+        return 0;
+    }
+
+    async function forceMaintenanceBatch(servers) {
+        if (_forceMaintenanceRunning) {
+            log('Force maintenance already in progress', 'warn');
+            return;
+        }
+        _forceMaintenanceRunning = true;
+        running = true;
+
+        servers.sort(function (a, b) { return getServerPathLength(b.id) - getServerPathLength(a.id); });
+        var serverIds = servers.map(function (s) { return s.id; });
+        log('\ud83d\udd27 Batch force maintenance: ' + servers.length + ' server(s) — order: ' + servers.map(function (s) { return s.name; }).join(', '));
+
+        var completed = 0;
+        var failed = [];
+
+        for (var i = 0; i < servers.length; i++) {
+            var srv = servers[i];
+            window.postMessage({ type: 'COR3_VALUABLE_FORCE_MAINT_BATCH_PROGRESS', currentServerId: srv.id, serverIds: serverIds }, '*');
+
+            log('\ud83d\udd27 Batch [' + (i + 1) + '/' + servers.length + ']: ' + srv.name + ' — equipping search software...');
+
+            try {
+                var searchPower = await ensureSearchOnlyLoadout(srv.id);
+                if (!searchPower) {
+                    log('\ud83d\udd27 Batch [' + (i + 1) + '/' + servers.length + ']: could not equip search software for ' + srv.name, 'error');
+                    failed.push(srv.name);
+                    if (i < servers.length - 1) await delay(2000);
+                    continue;
+                }
+
+                log('\ud83d\udd27 Batch [' + (i + 1) + '/' + servers.length + ']: ' + srv.name + ' — sending search-valuable requests...');
+                var MAX_ATTEMPTS = 50;
+                var maintStarted = false;
+
+                for (var j = 0; j < MAX_ATTEMPTS; j++) {
+                    if (!running) { log('Batch force maintenance stopped', 'warn'); break; }
+                    sendCmd('file.search-valuable', { serverId: srv.id });
+                    var searchResult = await new Promise(function (resolve) {
+                        var done = false;
+                        var timer = setTimeout(function () {
+                            if (done) return;
+                            done = true;
+                            window.removeEventListener('message', onMsg);
+                            resolve('timeout');
+                        }, 15000);
+                        function onMsg(evt) {
+                            if (done) return;
+                            if (evt.data && evt.data.type === 'COR3_WS_MAINTENANCE_STARTED') {
+                                done = true; clearTimeout(timer);
+                                window.removeEventListener('message', onMsg);
+                                resolve('maintenance');
+                            } else if (evt.data && evt.data.type === 'COR3_VALUABLE_FILE_SEARCH') {
+                                done = true; clearTimeout(timer);
+                                window.removeEventListener('message', onMsg);
+                                var errMsg = evt.data.error && evt.data.error.message;
+                                if (errMsg === 'sai-access-denied') {
+                                    resolve('access-denied');
+                                } else {
+                                    resolve('ok');
+                                }
+                            }
+                        }
+                        window.addEventListener('message', onMsg);
+                    });
+                    if (searchResult === 'maintenance') { maintStarted = true; break; }
+                    if (searchResult === 'access-denied') {
+                        _cachedMapData = null;
+                        sendCmd('get.map', {});
+                        try {
+                            var mapCheck = await waitForEvent('COR3_WS_NETWORK_MAP', 10000);
+                            _cachedMapData = mapCheck;
+                            if (mapCheck && mapCheck.servers && mapCheck.servers[srv.id] && mapCheck.servers[srv.id].maintenanceEndsAt) {
+                                log('\ud83d\udd27 Batch [' + (i + 1) + '/' + servers.length + ']: ' + srv.name + ' — confirmed in maintenance', 'success');
+                                maintStarted = true;
+                                break;
+                            }
+                            var reachOk = await setEndpoint(srv.id);
+                            if (!reachOk) {
+                                var pathBlock = await checkPathMaintenance(getServerName(srv.id));
+                                if (pathBlock.blocked) {
+                                    var bMins = Math.ceil(pathBlock.remainingMs / 60000);
+                                    log('\ud83d\udd27 Batch [' + (i + 1) + '/' + servers.length + ']: cannot reach ' + srv.name + ' — ' + pathBlock.blockerName + ' in maintenance (~' + bMins + 'm)', 'error');
+                                    failed.push(srv.name + ' (blocked by ' + pathBlock.blockerName + ')');
+                                    break;
+                                }
+                                log('\ud83d\udd27 Batch [' + (i + 1) + '/' + servers.length + ']: cannot reach ' + srv.name + ' — path-through failed', 'error');
+                                failed.push(srv.name + ' (unreachable)');
+                                break;
+                            }
+                            await delay(humanDelay());
+                        } catch (e) {
+                            log('\ud83d\udd27 Batch: map check failed for ' + srv.name + ' — retrying...', 'warn');
+                        }
+                        continue;
+                    }
+                    await delay(humanDelay());
+                }
+
+                if (maintStarted) {
+                    completed++;
+                    log('\ud83d\udd27 Batch [' + (i + 1) + '/' + servers.length + ']: ' + srv.name + ' — maintenance started!', 'success');
+                } else if (running) {
+                    log('\ud83d\udd27 Batch [' + (i + 1) + '/' + servers.length + ']: ' + srv.name + ' — did not trigger after ' + MAX_ATTEMPTS + ' attempts', 'warn');
+                    failed.push(srv.name + ' (max attempts)');
+                }
+            } catch (e) {
+                log('\ud83d\udd27 Batch [' + (i + 1) + '/' + servers.length + ']: ' + srv.name + ' — error: ' + e.message, 'error');
+                failed.push(srv.name + ' (error)');
+            }
+
+            if (!running) break;
+            if (i < servers.length - 1) await delay(2000);
+        }
+
+        log('\ud83d\udd27 Batch force maintenance complete: ' + completed + '/' + servers.length + ' succeeded' + (failed.length > 0 ? ' — failed: ' + failed.join(', ') : ''), completed === servers.length ? 'success' : 'warn');
+
+        await delay(1500);
+        await fetchMaintenanceData();
+
+        _forceMaintenanceRunning = false;
+        running = false;
+        window.postMessage({ type: 'COR3_VALUABLE_FORCE_MAINT_DONE', success: failed.length === 0 }, '*');
     }
 
     // ===== MESSAGE LISTENER =====
@@ -2004,6 +2199,13 @@
             if (running) {
                 log('Stopping...', 'warn');
                 running = false;
+            }
+        }
+
+        if (event.data && event.data.type === 'COR3_VALUABLE_FORCE_MAINTENANCE_BATCH') {
+            var fmServers = event.data.servers;
+            if (fmServers && fmServers.length > 0) {
+                forceMaintenanceBatch(fmServers);
             }
         }
     });

@@ -36,9 +36,11 @@
             --text-muted: rgba(107, 120, 136, 1);
             --text-dim: rgba(107, 120, 136, 0.6);
             --accent: rgba(118, 193, 209, 1);
-            --accent-purple: rgba(145, 205, 218, 1);
+            --accent-purple: rgb(180, 0, 180);
+            --accent-light-cyan: rgba(145, 205, 218, 1);
             --accent-cyan: rgba(118, 193, 209, 1);
             --accent-green: rgba(74, 222, 128, 1);
+            --accent-gray: rgb(128, 128, 128);
             --accent-orange: rgba(240, 163, 56, 1);
             --accent-yellow: rgba(255, 200, 87, 1);
             --accent-red: rgba(254, 73, 73, 1);
@@ -65,8 +67,10 @@
             --text-dim: #475569;
             --accent: #38bdf8;
             --accent-purple: #a78bfa;
+            --accent-light-cyan: #91cdda;
             --accent-cyan: #67e8f9;
             --accent-green: #34d399;
+            --accent-gray: #808080;
             --accent-orange: #fb923c;
             --accent-yellow: #fbbf24;
             --accent-red: #f87171;
@@ -88,8 +92,10 @@
             --text-dim: #f56363;
             --accent: #ff3c3c;
             --accent-purple: #f281ff;
+            --accent-light-cyan: #91cdda;
             --accent-cyan: #66d9ef;
             --accent-green: #f1a25f;
+            --accent-gray: #808080;
             --accent-orange: #fd971f;
             --accent-yellow: #e6db74;
             --accent-red: #f92672;
@@ -111,8 +117,10 @@
             --text-dim: #5e5477;
             --accent: #c084fc;
             --accent-purple: #a855f7;
+            --accent-light-cyan: #91cdda;
             --accent-cyan: #7dd3fc;
             --accent-green: #4ade80;
+            --accent-gray: #808080;
             --accent-orange: #fb923c;
             --accent-yellow: #facc15;
             --accent-red: #fb7185;
@@ -134,8 +142,10 @@
             --text-dim: #556050;
             --accent: #84cc16;
             --accent-purple: #a78bfa;
+            --accent-light-cyan: #91cdda;
             --accent-cyan: #5eead4;
             --accent-green: #22c55e;
+            --accent-gray: #808080;
             --accent-orange: #f59e0b;
             --accent-yellow: #eab308;
             --accent-red: #ef4444;
@@ -157,8 +167,10 @@
             --text-dim: #e78bcb;
             --accent: #ff2d95;
             --accent-purple: #bf5af2;
+            --accent-light-cyan: #91cdda;
             --accent-cyan: #00f0ff;
             --accent-green: #39ff14;
+            --accent-gray: #808080;
             --accent-orange: #ff6e27;
             --accent-yellow: #ffe600;
             --accent-red: #ff1744;
@@ -180,8 +192,10 @@
             --text-dim: #4a6a7d;
             --accent: #00b4d8;
             --accent-purple: #7b68ee;
+            --accent-light-cyan: #91cdda;
             --accent-cyan: #48cae4;
             --accent-green: #2dd4bf;
+            --accent-gray: #808080;
             --accent-orange: #ffa94d;
             --accent-yellow: #ffd43b;
             --accent-red: #ff6b6b;
@@ -203,8 +217,10 @@
             --text-dim: #6a5840;
             --accent: #f59e0b;
             --accent-purple: #d4a0ff;
+            --accent-light-cyan: #91cdda;
             --accent-cyan: #7dd3fc;
             --accent-green: #a3e635;
+            --accent-gray: #808080;
             --accent-orange: #fb923c;
             --accent-yellow: #facc15;
             --accent-red: #ef4444;
@@ -226,8 +242,10 @@
             --text-dim: #506878;
             --accent: #7dd3fc;
             --accent-purple: #c4b5fd;
+            --accent-light-cyan: #91cdda;
             --accent-cyan: #a5f3fc;
             --accent-green: #86efac;
+            --accent-gray: #808080;
             --accent-orange: #fdba74;
             --accent-yellow: #fde68a;
             --accent-red: #fca5a5;
@@ -249,8 +267,10 @@
             --text-dim: #6272a4;
             --accent: #61dafb;
             --accent-purple: #bd93f9;
+            --accent-light-cyan: #91cdda;
             --accent-cyan: #8be9fd;
             --accent-green: #50fa7b;
+            --accent-gray: #808080;
             --accent-orange: #ffb86c;
             --accent-yellow: #f1fa8c;
             --accent-red: #ff5555;
@@ -360,7 +380,7 @@
         .section-title {
             font-size: 14px;
             margin-bottom: 8px;
-            color: var(--accent-purple);
+            color: var(--accent-light-cyan);
         }
         .alarm-section-title {
             font-size: 14px;
@@ -368,7 +388,7 @@
             align-items: center;
             justify-content: space-between;
             margin-bottom: 8px;
-            color: var(--accent-purple);
+            color: var(--accent-light-cyan);
         }
         .daily-section-symbol {
             display: flex;
@@ -382,7 +402,7 @@
             align-items: center;
             justify-content: space-between;
             margin-bottom: 8px;
-            color: var(--accent-purple);
+            color: var(--accent-light-cyan);
         }
         select, input {
             width: 100%;
@@ -490,8 +510,9 @@
             flex: 1;
         }
         .option-stats {
-            display: flex;
-            gap: 12px;
+            display: grid;
+            justify-items: center;
+            gap: 2px;
             font-size: 11px;
         }
         .stat-risk {
@@ -524,9 +545,8 @@
         }
         .option-score {
             font-size: 10px;
-            color: var(--accent-purple);
+            color: var(--accent-light-cyan);
             font-weight: bold;
-            margin-left: 6px;
             white-space: nowrap;
         }
         .no-decisions {
@@ -590,7 +610,7 @@
             justify-content: space-between;
             gap: 6px;
             font-size: 10px;
-            color: var(--accent-green);
+            color: var(--text-muted);
             margin-bottom: 6px;
         }
         .auto-choose-row input[type="checkbox"] {
@@ -651,7 +671,7 @@
         .merc-status { font-size: 10px; font-weight: bold; padding: 2px 6px; border-radius: 3px; display: inline-block; }
         .merc-status.available { background: var(--accent-green); color: var(--bg-primary); }
         .merc-status.resting { background: var(--accent-orange); color: var(--bg-primary); }
-        .merc-status.contracted { background: var(--accent-purple); color: var(--bg-primary); }
+        .merc-status.contracted { background: var(--accent-light-cyan); color: var(--bg-primary); }
         .merc-rest-timer { font-size: 10px; color: var(--accent-orange); margin-left: 6px; }
 
         /* Archived expedition cards */
@@ -670,7 +690,38 @@
         .outcome-fail { background: var(--accent-red); color: var(--bg-primary); }
         .outcome-death { background: #ff0000; color: var(--bg-primary); }
         .archived-exp-info { font-size: 10px; color: var(--text-muted); line-height: 1.5; }
-        .container-items { margin-top: 6px; }
+        .container-items { margin-top: 3px; margin-bottom: 3px; }
+
+        /* Specialist timer info */
+        .specialist-timer-row {
+            font-size: 11px;
+            color: var(--text-dim);
+            line-height: 1.6;
+        }
+        .specialist-timer-row .specialist-timer {
+            color: var(--accent-orange);
+            font-family: monospace;
+        }
+        .specialist-timer-row .specialist-grace {
+            color: #e06666;
+            font-family: monospace;
+        }
+        .rented-tag {
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            padding: 0 4px;
+            font-family: 'Roboto Mono', monospace;
+            font-size: 13px;
+            line-height: 20px;
+            white-space: nowrap;
+            border-radius: 4px;
+            border: 1px solid var(--accent-orange);
+            color: var(--accent-orange);
+            background-color: color-mix(in srgb, var(--accent-orange) 20%, transparent);
+        }
 
         /* Inventory items */
         .space-badge {
@@ -755,7 +806,7 @@
             border-radius: 3px;
         }
         .badge-craft { background: var(--accent-green); color: var(--bg-primary); }
-        .badge-use { background: var(--accent-purple); color: var(--bg-primary); }
+        .badge-use { background: var(--accent-light-cyan); color: var(--bg-primary); }
         .badge-no { background: var(--border); color: var(--text-dim); }
         .tier-common { border-left: 3px solid #a0a0a0; }
         .tier-rare { border-left: 3px solid var(--accent-cyan); }
@@ -820,6 +871,16 @@
         }
 
         /* Auto Decrypt Hacking toggle */
+        .auto-decrypt-title {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 4px 2px;
+            margin-bottom: 8px;
+            font-size: 12px;
+            font-weight: 800;
+            color: var(--accent-orange);
+        }
         .auto-decrypt-row {
             display: flex;
             align-items: center;
@@ -832,14 +893,14 @@
             font-size: 12px;
         }
         .auto-decrypt-row .decrypt-label {
-            color: var(--accent-green);
+            color: var(--accent-cyan);
             font-weight: bold;
             display: flex;
             align-items: center;
             gap: 6px;
         }
         .auto-decrypt-row .decrypt-status {
-            font-size: 10px;
+            font-size: 9px;
             color: var(--text-dim);
             font-style: italic;
         }
@@ -896,6 +957,10 @@
         .expandable-body.open {
             display: block;
         }
+        .expandable-body.openExtended {
+            display: block;
+            margin-bottom: 6px;
+        }
         .detail-row {
             font-size: 11px;
             color: var(--text-muted);
@@ -915,13 +980,13 @@
             clear: both;
         }
         .market-rep-fill {
-            background: var(--accent-purple);
+            background: var(--accent-light-cyan);
             height: 100%;
             border-radius: 4px;
         }
         .market-category-title {
             font-size: 12px;
-            color: var(--accent-purple);
+            color: var(---accent-light-cyan);
             margin: 8px 0 4px 0;
             font-weight: bold;
         }
@@ -936,12 +1001,11 @@
             align-items: flex-start;
         }
         .market-item-card img {
-            margin-top: 6px;
             width: 40px;
             height: 40px;
             border-radius: 6px;
-            object-fit: contain;
             background: var(--bg-primary);
+            object-fit: contain;
             flex-shrink: 0;
         }
         .market-item-info {
@@ -1120,7 +1184,7 @@
         }
         .alarm-form {
             background: var(--section-bg);
-            border: 1px solid var(--accent-purple);
+            border: 1px solid var(--accent-light-cyan);
             border-radius: 6px;
             padding: 8px;
             margin-top: 6px;
@@ -1128,7 +1192,7 @@
         .alarm-form-title {
             font-size: 11px;
             font-weight: bold;
-            color: var(--accent-purple);
+            color: var(--accent-light-cyan);
             margin-bottom: 6px;
         }
         .no-alarms {
@@ -1144,7 +1208,7 @@
             padding: 2px 5px !important;
         }
         .pin-btn.pinned {
-            background: var(--accent-purple) !important;
+            background: var(--accent-light-cyan) !important;
             color: var(--bg-primary) !important;
         }
 
@@ -1363,14 +1427,14 @@
         .merc-faction img { width: 12px; height: 12px; border-radius: 50%; }
         /* Archived expedition cards */
         .archived-exp-card { background: var(--bg-card); border-radius: 8px; padding: 8px 10px; margin-bottom: 6px; border: 1px solid var(--border); }
-        .archived-exp-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+        .archived-exp-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
         .archived-exp-merc { font-size: 12px; font-weight: bold; color: var(--accent-cyan); }
         .outcome-tag { font-size: 9px; padding: 2px 6px; border-radius: 3px; font-weight: bold; }
         .outcome-full { background: var(--accent-green); color: var(--bg-primary); }
         .outcome-partial { background: var(--accent-orange); color: var(--bg-primary); }
         .outcome-fail { background: var(--accent-red); color: var(--bg-primary); }
         .outcome-death { background: #ff0000; color: var(--bg-primary); }
-        .archived-exp-info { font-size: 10px; color: var(--text-muted); margin-bottom: 4px; }
+        .archived-exp-info { font-size: 10px; color: var(--text-muted); margin-bottom: 3px; }
         .expedition-card {
             background: var(--bg-card);
             border-radius: 8px;
@@ -1828,9 +1892,9 @@
             height: 40px;
             border-radius: 4px;
             object-fit: contain;
+            background: var(--bg-primary);
             flex-shrink: 0;
         }
-        .loadout-sw-img.zoom { transform: scale(2); }
         .loadout-sw-name { font-size: 11px; font-weight: bold; color: #fff; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .loadout-sw-install-btn {
             height: 15px;
@@ -2278,7 +2342,7 @@
             padding: 2px 0;
         }
         .debug-job-status.open { background: var(--border); color: var(--text-muted); }
-        .debug-job-status.in-progress { background: var(--accent-purple); color: var(--bg-primary); }
+        .debug-job-status.in-progress { background: var(--accent-light-cyan); color: var(--bg-primary); }
         .debug-job-status.pending { background: var(--accent-yellow); color: var(--bg-primary); }
         .debug-job-status.running { background: var(--accent-cyan); color: var(--bg-primary); }
         .debug-job-status.done { background: var(--accent-green); color: var(--bg-primary); }
@@ -2338,6 +2402,7 @@
             margin-bottom: 2px;
         }
         .valuable-tab {
+            display: grid;
             flex: 1;
             padding: 6px 10px;
             font-size: 11px;
@@ -2495,7 +2560,7 @@
             white-space: nowrap;
         }
         .valuable-status.open { background: var(--border); color: var(--text-muted); }
-        .valuable-status.in-progress { background: var(--accent-purple); color: var(--bg-primary); }
+        .valuable-status.in-progress { background: var(--accent-light-cyan); color: var(--bg-primary); }
         .valuable-status.partially-downloaded { background: var(--accent-yellow); color: var(--bg-primary); }
         .valuable-status.downloaded { background: var(--accent-cyan); color: var(--bg-primary); }
         .valuable-status.done { background: var(--accent-green); color: var(--bg-primary); }
@@ -2524,6 +2589,60 @@
             color: var(--text-dim) !important;
             cursor: not-allowed;
             transform: none !important;
+        }
+        .maint-row {
+            display: grid;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 0;
+            font-size: 11px;
+            color: var(--text-secondary);
+            border-bottom: 1px solid var(--border);
+            justify-content: space-between;
+            grid-template-columns: 0.7fr auto 0.95fr 0fr;
+        }
+        .maint-row:last-child { border-bottom: none; }
+        .maint-row .maint-name { flex: 1; font-weight: bold; }
+        .maint-row .maint-timer { color: var(--text-dim); font-family: monospace; align-self: center; }
+        .maint-row .maint-status {
+            font-size: 9px;
+            padding: 1px 5px;
+            border-radius: 3px;
+            font-weight: bold;
+            white-space: nowrap;
+        }
+        .maint-status.upcoming { background: var(--accent-yellow); color: var(--bg-primary); justify-self: end; width: 80px; text-align: center; }
+        .maint-status.in-maintenance { background: var(--accent-red); color: var(--bg-primary); justify-self: end; width: 80px; text-align: center; }
+        .maint-row .maint-checkbox { width: 13px; height: 14px; margin: 0; cursor: pointer; accent-color: var(--accent-orange); flex-shrink: 0; justify-self: end; }
+        .maint-force-selected-row {
+            display: flex;
+            justify-content: flex-end;
+            padding: 5px 0 2px;
+            margin-top: 2px;
+        }
+        .maint-force-selected-btn {
+            font-size: 10px;
+            padding: 3px 12px;
+            border: 1px solid var(--accent-yellow);
+            border-radius: 3px;
+            background: transparent;
+            color: var(--accent-yellow);
+            cursor: pointer;
+            font-weight: bold;
+            transition: background 0.2s, color 0.2s;
+        }
+        .maint-force-selected-btn:hover { background: var(--accent-yellow); color: var(--bg-primary); }
+        .maint-force-selected-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            background: transparent !important;
+            color: var(--accent-orange) !important;
+            border-color: var(--accent-gray);
+        }
+        .maint-force-selected-btn.in-progress {
+            border-color: var(--accent-orange);
+            color: var(--accent-orange);
+            cursor: default;
         }
     </style>
 </head>
@@ -2573,9 +2692,16 @@
             <span class="daily-section-symbol">֎</span>
             <span class="daily-section-title">Automation/QoL Toggles</span>
         </div>
+        <!-- Hack Automation Toggles -->
+        <div class="auto-decrypt-title">
+            <span>Hack Automation Toggles</span>
+        </div>
         <!-- Auto Decrypt Hacking -->
         <div class="auto-decrypt-row">
-            <span class="decrypt-label">&#x1F513; Auto Decrypt Hacking</span>
+            <div style="display:flex;gap:6px;">
+                <span class="decrypt-label" style="margin-bottom: 2px;">&#x1F513;</span>
+                <span class="decrypt-label">Auto Decrypt Hacking</span>
+            </div>
             <div style="display:flex;align-items:center;gap:8px;">
                 <span class="decrypt-status" id="decryptStatus">Off</span>
                 <label class="alarm-toggle-switch">
@@ -2587,7 +2713,10 @@
         <div id="dailyHackInfo" style="display:none;font-size:10px;color:var(--accent-cyan);margin-top:6px;"></div>
         <!-- Auto ICE Wall Hacking -->
         <div class="auto-decrypt-row" style="margin-top:8px;">
-            <span class="decrypt-label">&#x1F513; Auto ICE Wall Hacking</span>
+            <div style="display:flex;gap:6px;">
+                <span class="decrypt-label" style="margin-bottom: 2px;">&#x1F513;</span>
+                <span class="decrypt-label">Auto ICE Wall Hacking</span>
+            </div>
             <div style="display:flex;align-items:center;gap:8px;">
                 <span class="decrypt-status" id="iceWallStatus">Off</span>
                 <label class="alarm-toggle-switch">
@@ -2597,23 +2726,29 @@
             </div>
         </div>
         <div id="iceWallSolverStatusLine" style="display:none;font-size:10px;margin-top:6px;padding:6px 8px;background:var(--bg-card);border-radius:6px;border:1px solid var(--border);color:var(--accent-cyan);"></div>
-        <!-- Auto Simple Decrypt Hacking -->
-        <div class="auto-decrypt-row" style="margin-top:8px;">
-            <span class="decrypt-label">&#x1F513; Auto Simple Decrypt Hacking</span>
-            <div style="display:flex;align-items:center;gap:8px;">
-                <span class="decrypt-status" id="simpleDecryptStatus">Off</span>
-                <label class="alarm-toggle-switch">
-                    <input type="checkbox" id="autoSimpleDecryptToggle">
-                    <span class="slider-track"></span>
-                </label>
-            </div>
-        </div>
-        <div id="simpleDecryptSolverStatusLine" style="display:none;font-size:10px;margin-top:6px;padding:6px 8px;background:var(--bg-card);border-radius:6px;border:1px solid var(--border);color:var(--accent-cyan);"></div>
         <!-- Show More / Show Less -->
         <div id="togglesExtra" style="display:none;">
+            <!-- Auto Simple Decrypt Hacking -->
+            <div class="auto-decrypt-row" style="margin-top:8px;">
+                <div style="display:flex;gap:6px;">
+                    <span class="decrypt-label" style="margin-bottom: 2px;">&#x1F513;</span>
+                    <span class="decrypt-label">Auto Simple Decrypt Hacking</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <span class="decrypt-status" id="simpleDecryptStatus">Off</span>
+                    <label class="alarm-toggle-switch">
+                        <input type="checkbox" id="autoSimpleDecryptToggle">
+                        <span class="slider-track"></span>
+                    </label>
+                </div>
+            </div>
+            <div id="simpleDecryptSolverStatusLine" style="display:none;font-size:10px;margin-top:6px;padding:6px 8px;background:var(--bg-card);border-radius:6px;border:1px solid var(--border);color:var(--accent-cyan);"></div>
             <!-- Auto Daily Hacking -->
             <div class="auto-decrypt-row" style="margin-top:8px;">
-                <span class="decrypt-label">&#x1F513; Auto Daily Hacking</span>
+                <div style="display:flex;gap:6px;">
+                    <span class="decrypt-label" style="margin-bottom: 2px;">&#x1F513;</span>
+                    <span class="decrypt-label">Auto Daily Hacking</span>
+                </div>
                 <div style="display:flex;align-items:center;gap:8px;">
                     <span class="decrypt-status" id="dailyHackStatus">Off</span>
                     <label class="alarm-toggle-switch">
@@ -2622,7 +2757,11 @@
                     </label>
                 </div>
             </div>
-            <div id="dailyHackLog" style="display:none;font-size:10px;margin-top:6px;padding:6px 8px;background:var(--bg-card);border-radius:6px;border:1px solid var(--border);color:var(--accent-cyan);"></div>
+            <div id="dailyHackLog" style="display:none;font-size:10px;margin-top:6px;margin-bottom:6px;padding:6px 8px;background:var(--bg-card);border-radius:6px;border:1px solid var(--border);color:var(--accent-cyan);"></div>
+            <!-- QoL Toggles -->
+            <div class="auto-decrypt-title">
+                <span>Objective Automation Toggles</span>
+            </div>
             <!-- Auto Job Solver Toggle -->
             <div class="auto-decrypt-row" style="margin-top:8px;">
                 <span class="decrypt-label">🤖 Auto Job Solver UI</span>
@@ -2647,11 +2786,44 @@
             </div>
             <!-- Auto Update Markets -->
             <div class="auto-decrypt-row" style="margin-top:8px;">
-                <span class="decrypt-label">📊 Auto Update Markets</span>
+                <div style="display:flex;gap:4px;">
+                    <span class="decrypt-label" style="margin-bottom: 2px;">📊</span>
+                    <span class="decrypt-label">Auto Update Markets</span>
+                </div>
                 <div style="display:flex;align-items:center;gap:8px;">
                     <span class="decrypt-status" id="autoUpdateMarketsStatus">Off</span>
                     <label class="alarm-toggle-switch">
                         <input type="checkbox" id="autoUpdateMarketsToggle">
+                        <span class="slider-track"></span>
+                    </label>
+                </div>
+            </div>
+            <!-- Secret Connection/Server Finder -->
+            <div class="auto-decrypt-row" style="margin-top:8px;">
+                <span class="decrypt-label">🔍 Secret Link/Server Finder</span>
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <span class="decrypt-status" id="secretFinderStatus">Off</span>
+                    <label class="alarm-toggle-switch">
+                        <input type="checkbox" id="secretFinderToggle">
+                        <span class="slider-track"></span>
+                    </label>
+                </div>
+            </div>
+            <div id="secretFinderLog" style="display:none;font-size:10px;margin-top:6px;margin-bottom:6px;padding:6px 8px;background:var(--bg-card);border-radius:6px;border:1px solid var(--border);color:var(--accent-cyan);max-height:120px;overflow-y:auto;"></div>
+            <!-- QoL Toggles -->
+            <div class="auto-decrypt-title">
+                <span>QoL Toggles</span>
+            </div>
+            <!-- Anti-AFK Clicker -->
+            <div class="auto-decrypt-row" style="margin-top:8px;">
+                <div style="display:flex;gap:6px;padding-left:2px;">
+                    <span class="decrypt-label" style="margin-bottom: 1px;">🖱️</span>
+                    <span class="decrypt-label">Anti-AFK Clicker</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <span class="decrypt-status" id="antiAfkStatus">Off</span>
+                    <label class="alarm-toggle-switch">
+                        <input type="checkbox" id="antiAfkToggle">
                         <span class="slider-track"></span>
                     </label>
                 </div>
@@ -2700,18 +2872,6 @@
                     </label>
                 </div>
             </div>
-            <!-- Secret Connection/Server Finder -->
-            <div class="auto-decrypt-row" style="margin-top:8px;">
-                <span class="decrypt-label">🔍 Secret Link/Server Finder</span>
-                <div style="display:flex;align-items:center;gap:8px;">
-                    <span class="decrypt-status" id="secretFinderStatus">Off</span>
-                    <label class="alarm-toggle-switch">
-                        <input type="checkbox" id="secretFinderToggle">
-                        <span class="slider-track"></span>
-                    </label>
-                </div>
-            </div>
-            <div id="secretFinderLog" style="display:none;font-size:10px;margin-top:6px;padding:6px 8px;background:var(--bg-card);border-radius:6px;border:1px solid var(--border);color:var(--accent-cyan);max-height:120px;overflow-y:auto;"></div>
         </div>
         <div style="text-align:center;margin-top:8px;">
             <button id="togglesShowMoreBtn" style="background:none;border:1px solid var(--border);color:var(--text-secondary);font-size:10px;padding:3px 12px;border-radius:6px;cursor:pointer;">Show More ▼</button>
@@ -2798,8 +2958,18 @@
         </div>
         <!-- Tabs -->
         <div class="valuable-tabs">
-            <button class="valuable-tab active" data-vtab="servers" id="valuableTabServers">📡 Servers With Valuables</button>
-            <button class="valuable-tab" data-vtab="downloads" id="valuableTabDownloads">📁 Downloads Folder</button>
+            <button class="valuable-tab active" data-vtab="servers" id="valuableTabServers">
+                <span>📡</span>
+                <span>Servers</span>
+            </button>
+            <button class="valuable-tab" data-vtab="downloads" id="valuableTabDownloads">
+                <span>📁</span>
+                <span>Downloads</span>
+            </button>
+            <button class="valuable-tab" data-vtab="maintenance" id="valuableTabMaintenance">
+                <span>🔧</span>
+                <span>Maintenance</span>
+            </button>
         </div>
         <!-- Servers With Valuables -->
         <div class="valuable-tab-content active" id="valuableContentServers">
@@ -2808,6 +2978,10 @@
         <!-- Downloads Folder -->
         <div class="valuable-tab-content" id="valuableContentDownloads">
             <div class="auto-jobs-no-jobs">No download data yet. Click "Start Valuable Search" to scan.</div>
+        </div>
+        <!-- Maintenance Tracker -->
+        <div class="valuable-tab-content" id="valuableContentMaintenance">
+            <div class="auto-jobs-no-jobs">Run "Start Valuable Search" to see the maintenance status of servers.</div>
         </div>
         <!-- Start Valuable Seller Button -->
         <button class="valuable-btn start" id="valuableSellerBtn">▶ Start Valuable Seller</button>
@@ -2956,14 +3130,14 @@
         <div class="last-updated" id="decisionLastUpdated"></div>
         <div class="expandable-body" id="decisionsSectionBody">
             <!-- Modifier controls -->
-            <div id="modifierDisplay" style="font-size:10px;margin-bottom:6px;">
-                <span style="color:var(--text-muted);">Loot: <strong id="modLootDisplay">3</strong> · Risk: <strong id="modRiskDisplay">-2</strong></span>
+            <div id="modifierDisplay" style="font-size:10px;margin-bottom:6px;margin-top:2px;">
+                <span style="color:var(--text-muted);">Loot: <strong id="modLootDisplay">1</strong> · Risk: <strong id="modRiskDisplay">-5</strong></span>
                 <span id="modDefaultsNote" style="color:var(--accent-orange);font-size:9px;margin-left:6px;display:none;">(defaults)</span>
-                <button id="editModifiersBtn" class="refresh-btn-small" style="margin-left:8px;font-size:9px;padding:2px 6px;" title="Edit modifiers">✏️</button>
+                <button id="editModifiersBtn" class="refresh-btn-small" style="margin-left:8px;font-size:9px;padding:2px 6px;vertical-align:1px;" title="Edit modifiers">✏️</button>
             </div>
-            <div id="modifierEditRow" style="display:none;font-size:10px;margin-bottom:6px;">
-                <label>Loot × <input type="number" id="lootModifier" min="0" max="9" value="3" style="width:36px;"></label>
-                <label style="margin-left:8px;">Risk × <input type="number" id="riskModifier" min="-9" max="0" value="-2" style="width:36px;"></label>
+            <div id="modifierEditRow" style="display:none;font-size:10px;margin-bottom:6px;margin-top:2px;">
+                <label>Loot × <input type="number" id="lootModifier" min="0" max="9" value="1" style="width:36px;"></label>
+                <label style="margin-left:8px;">Risk × <input type="number" id="riskModifier" min="-9" max="0" value="-5" style="width:36px;"></label>
                 <button id="saveModifiersBtn" class="refresh-btn-small" style="margin-left:8px;font-size:9px;padding:2px 6px;">💾 Save</button>
                 <button id="cancelModifiersBtn" class="refresh-btn-small" style="margin-left:4px;font-size:9px;padding:2px 6px;">Cancel</button>
             </div>
@@ -2971,6 +3145,13 @@
                 <span style="font-size:10px;">Apply modifiers to scores</span>
                 <label class="alarm-toggle-switch" style="margin-right:6px;">
                     <input type="checkbox" id="modifiersEnabledToggle" checked>
+                    <span class="slider-track"></span>
+                </label>
+            </div>
+            <div class="auto-choose-row">
+                <span style="font-size:10px;">Get rid of Veterans (🎖️)</span>
+                <label class="alarm-toggle-switch" style="margin-right:6px;">
+                    <input type="checkbox" id="getRidOfVeteransToggle">
                     <span class="slider-track"></span>
                 </label>
             </div>
@@ -3007,6 +3188,7 @@
         </div>
         <div class="last-updated" id="inventoryLastUpdated"></div>
         <div class="expandable-body" id="inventorySectionBody">
+            <div id="specialistTimerInfo" style="display:none;"></div>
             <div id="inventoryContainer"><div class="no-decisions">Loading inventory...</div></div>
             <div class="loadout-hw-info-overlay" id="inventoryInfoOverlay"></div>
             <div class="loadout-hw-info-popup" id="inventoryInfoPopup"></div>
@@ -3022,7 +3204,25 @@
         </div>
         <div class="last-updated" id="mercenariesLastUpdated"></div>
         <div class="expandable-body" id="mercenariesSectionBody">
-            <div class="auto-choose-row" style="margin-top:4px;">
+            <div id="mercCostDisplay" style="font-size:10px;margin-bottom:6px;margin-top:2px;">
+                <span style="color:var(--text-muted);">Maximum merc cost limit: <strong id="mercCostDisplayValue">15000</strong></span>
+                <button id="editMercCostBtn" class="refresh-btn-small" style="margin-left:8px;font-size:9px;padding:2px 6px;vertical-align:1px;" title="Edit max cost">✏️</button>
+            </div>
+            <div id="mercCostEditRow" style="display:none;font-size:10px;margin-bottom:6px;margin-top:2px;">
+                <label>Max cost: <input type="number" id="maxMercCostInput" min="0" max="999999" value="15000" style="width:70px;"></label>
+                <button id="saveMercCostBtn" class="refresh-btn-small" style="margin-left:8px;font-size:9px;padding:2px 6px;">💾 Save</button>
+                <button id="cancelMercCostBtn" class="refresh-btn-small" style="margin-left:4px;font-size:9px;padding:2px 6px;">Cancel</button>
+            </div>
+            <div class="auto-choose-row">
+                <span style="font-size:10px;">Apply merc cost limiter</span>
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <label class="alarm-toggle-switch">
+                        <input type="checkbox" id="applyMercCostLimiterToggle">
+                        <span class="slider-track"></span>
+                    </label>
+                </div>
+            </div>
+            <div class="auto-choose-row">
                 <span style="font-size:10px;">Auto-send selected mercenary after expedition ends</span>
                 <div style="display:flex;align-items:center;gap:8px;">
                     <label class="alarm-toggle-switch">
@@ -3031,7 +3231,7 @@
                     </label>
                 </div>
             </div>
-            <div class="auto-choose-row" style="margin-top:2px;">
+            <div class="auto-choose-row">
                 <span style="font-size:10px;">Auto-choose cheapest available mercenary</span>
                 <div style="display:flex;align-items:center;gap:8px;">
                     <label class="alarm-toggle-switch">
@@ -3040,7 +3240,7 @@
                     </label>
                 </div>
             </div>
-            <div class="auto-choose-row" style="margin-top:2px;">
+            <div class="auto-choose-row">
                 <span style="font-size:10px;">Auto-choose USOL first</span>
                 <div style="display:flex;align-items:center;gap:8px;">
                     <label class="alarm-toggle-switch">
@@ -3049,7 +3249,7 @@
                     </label>
                 </div>
             </div>
-            <div class="auto-choose-row" style="margin-top:2px;">
+            <div class="auto-choose-row">
                 <span style="font-size:10px;">Ignore elite mercenary</span>
                 <div style="display:flex;align-items:center;gap:8px;">
                     <label class="alarm-toggle-switch">
@@ -3058,7 +3258,7 @@
                     </label>
                 </div>
             </div>
-            <div class="auto-choose-row" style="margin-top:2px;">
+            <div class="auto-choose-row">
                 <span style="font-size:10px;">Auto-sell cheapest items when stash is full</span>
                 <div style="display:flex;align-items:center;gap:8px;">
                     <label class="alarm-toggle-switch">
@@ -3070,8 +3270,7 @@
             <div id="mercenaryConfigRow" style="display:none;font-size:10px;color:var(--text-dim);margin-bottom:6px;">
                 Selected: <span id="selectedMercenaryName" style="color:var(--accent-cyan);font-weight:bold;">None</span>
             </div>
-            <div id="mercStashWarning" style="display:none;background:rgba(255,160,0,0.15);border:1px solid var(--accent-orange);border-radius:6px;padding:6px 10px;margin-bottom:6px;font-size:10px;color:var(--accent-orange);">
-                ⚠️ Stash is full — auto-send mercenary disabled. Clear stash and re-enable auto-send to resume.
+            <div id="mercWarning" style="display:none;background:rgba(255,160,0,0.15);border:1px solid var(--accent-orange);border-radius:6px;padding:6px 10px;margin-bottom:6px;font-size:10px;color:var(--accent-orange);">
             </div>
             <div id="mercenariesContainer"><div class="no-decisions">Loading mercenaries...</div></div>
         </div>

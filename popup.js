@@ -1,5 +1,10 @@
 // popup.js
 
+// PNG Zoom List
+const zoomList = {"Lyapun AA8":2.1, "A/Bver 410":2.1, "RE-nova v3.0":2.1, "D-Badger v2.2":2.1, "Porter-triX lr8":2.1,
+                  "H0pp3R ced/p 03":1.8, "Screener Pro r10":1.8, "5CRYPt0L 0J":2.3, "OmniFlow 12.35X":2.575, "8Pro Series 1870":2.5,
+                  "I-Partner C16-10":2.6};
+
 // --- Theme Selection ---
 const themeToggleBtn = document.getElementById('themeToggleBtn');
 const themeDropdown = document.getElementById('themeDropdown');
@@ -78,13 +83,13 @@ async function applyHelperMode(isHelper, mode) {
                 value = isHelper ? disabledValue : (oldValues[key] ?? disabledValue);
                 chrome.storage.sync.set({ [key]: value });
             } else if (key === 'autoSendMerc') {
-                disabledValue = {"autoChooseMerc":false,"autoChooseUsolFirst":false,"ignoreEliteMerc":false,"disabledReason":null,"enabled":false,"mercenaryId":"","mercenaryName":""};
+                disabledValue = {"autoChooseMerc":false,"autoChooseUsolFirst":false,"ignoreEliteMerc":false,"applyMercCostLimiter":false,"maxMercCost":15000,"disabledReason":null,"enabled":false,"mercenaryId":"","mercenaryName":""};
                 value = isHelper ? disabledValue : (oldValues[key] ?? disabledValue);
                 chrome.storage.sync.set({ [key]: value });
             } else if (key === 'decisionModifiers') {
-                let loot = oldValues[key] ? (oldValues[key]).loot : 3;
-                let risk = oldValues[key] ? (oldValues[key]).risk : -2;
-                disabledValue = {"autoChoose":false,"enabled":false,"loot":loot,"noWaitAutoChoose":false,"risk":risk};
+                let loot = oldValues[key] ? (oldValues[key]).loot : 1;
+                let risk = oldValues[key] ? (oldValues[key]).risk : -5;
+                disabledValue = {"autoChoose":false,"enabled":false,"getRidOfVeterans":false,"loot":loot,"noWaitAutoChoose":false,"risk":risk};
                 value = isHelper ? disabledValue : (oldValues[key] ?? disabledValue);
                 chrome.storage.sync.set({ [key]: value });
             } else {
@@ -140,11 +145,15 @@ async function applyHelperMode(isHelper, mode) {
 
         (document.getElementById('autoChooseCheckbox')).checked = !!toggles.decisionModifiers.autoChoose ?? false;
         (document.getElementById('noWaitAutoChooseCheckbox')).checked = !!toggles.decisionModifiers.noWaitAutoChoose ?? false;
+        (document.getElementById('getRidOfVeteransToggle')).checked = !!toggles.decisionModifiers.getRidOfVeterans ?? false;
 
         (document.getElementById('autoSendMercenaryToggle')).checked = !!toggles.autoSendMerc.enabled ?? false;
         (document.getElementById('autoChooseMercToggle')).checked = !!toggles.autoSendMerc.autoChooseMerc ?? false;
         (document.getElementById('autoChooseUsolFirstToggle')).checked = !!toggles.autoSendMerc.autoChooseUsolFirst ?? false;
         (document.getElementById('ignoreEliteMercToggle')).checked = !!toggles.autoSendMerc.ignoreEliteMerc ?? false;
+        (document.getElementById('applyMercCostLimiterToggle')).checked = !!toggles.autoSendMerc.applyMercCostLimiter ?? false;
+        (document.getElementById('maxMercCostInput')).value = toggles.autoSendMerc.maxMercCost ?? 15000;
+        (document.getElementById('mercCostDisplayValue')).textContent = toggles.autoSendMerc.maxMercCost ?? 15000;
         (document.getElementById('autoSellCheapestToggle')).checked = !!toggles.autoSellCheapest ?? false;
 
     }
@@ -165,9 +174,13 @@ async function applyHelperMode(isHelper, mode) {
 
     // Auto Decisions and Auto Mercs
 
-    ['noWaitAutoChooseCheckbox', 'autoChooseCheckbox', 'autoSellCheapestToggle', 'autoChooseMercToggle', 'autoChooseUsolFirstToggle', 'ignoreEliteMercToggle', 'autoSendMercenaryToggle'].forEach(key => {
+    ['noWaitAutoChooseCheckbox', 'autoChooseCheckbox', 'autoSellCheapestToggle', 'autoChooseMercToggle', 'autoChooseUsolFirstToggle', 'ignoreEliteMercToggle', 'applyMercCostLimiterToggle', 'getRidOfVeteransToggle', 'autoSendMercenaryToggle'].forEach(key => {
         ((document.getElementById(key)).closest('.auto-choose-row')).style.display = isHelper ? 'none' : 'flex';
     });
+
+    // Hide merc cost display/edit rows in helper mode
+    if (document.getElementById('mercCostDisplay')) document.getElementById('mercCostDisplay').style.display = isHelper ? 'none' : '';
+    if (document.getElementById('mercCostEditRow')) document.getElementById('mercCostEditRow').style.display = 'none';
 
     (document.getElementById('mercenariesContainer')).querySelectorAll('.merc-card').forEach(c => c.classList.remove('selected'));
 
@@ -825,10 +838,10 @@ function renderExpeditionInfo(expeditions) {
     });
 }
 
-// Get modifier values (defaults: loot=3, risk=-2)
+// Get modifier values (defaults: loot=1, risk=-5)
 let modifiersEnabled = true;
-let savedLootMod = 3;
-let savedRiskMod = -2;
+let savedLootMod = 1;
+let savedRiskMod = -5;
 
 function getLootModifier() {
     return modifiersEnabled ? savedLootMod : 1;
@@ -836,10 +849,23 @@ function getLootModifier() {
 function getRiskModifier() {
     return modifiersEnabled ? savedRiskMod : -1;
 }
-function calcOptionScore(opt, expeditionRiskScore) {
-    const lootMod = getLootModifier();
-    const riskMod = getRiskModifier();
+function calcOptionScore(opt, expeditionRiskScore, veteranOverride) {
+    const lootMod = veteranOverride ? 1 : getLootModifier();
+    const riskMod = veteranOverride ? 10 : getRiskModifier();
     return Math.round((opt.lootModifier * lootMod) + ((opt.riskModifier * riskMod) * (((expeditionRiskScore + Math.abs(opt.riskModifier)) / 10) || 1))) ;
+}
+let _cachedExpeditionsForVeteranCheck = null;
+chrome.storage.local.get('expeditionsData', (data) => { _cachedExpeditionsForVeteranCheck = data.expeditionsData || null; });
+chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && changes.expeditionsData) _cachedExpeditionsForVeteranCheck = changes.expeditionsData.newValue || null;
+});
+function isVeteranExpedition(expeditionId) {
+    if (!getRidOfVeteransToggle || !getRidOfVeteransToggle.checked) return false;
+    if (!_cachedExpeditionsForVeteranCheck || !expeditionId) return false;
+    const exps = Array.isArray(_cachedExpeditionsForVeteranCheck) ? _cachedExpeditionsForVeteranCheck : (_cachedExpeditionsForVeteranCheck.expeditions || []);
+    const exp = exps.find(e => e.id === expeditionId);
+    if (exp && exp.mercenary && (exp.mercenary.rank || '').toUpperCase() === 'VETERAN') return true;
+    return false;
 }
 function updateModifierDisplayValues() {
     const lootDisp = document.getElementById('modLootDisplay');
@@ -847,7 +873,7 @@ function updateModifierDisplayValues() {
     const defaultsNote = document.getElementById('modDefaultsNote');
     if (lootDisp) lootDisp.textContent = savedLootMod;
     if (riskDisp) riskDisp.textContent = savedRiskMod;
-    if (defaultsNote) defaultsNote.style.display = (savedLootMod === 3 && savedRiskMod === -2) ? '' : 'none';
+    if (defaultsNote) defaultsNote.style.display = (savedLootMod === 1 && savedRiskMod === -5) ? '' : 'none';
 }
 
 function renderDecisions(decisions) {
@@ -915,16 +941,17 @@ function renderDecisions(decisions) {
                 const clickClass = canClick ? ' clickable' : '';
                 const riskSign = opt.riskModifier > 0 ? '+' : '';
                 const lootSign = opt.lootModifier > 0 ? '+' : '';
-                const score = calcOptionScore(opt, d.isResolved ? baseRisk : d.riskScore);
-                const scoreHtml = `<span class="option-score">Score: ${score >= 0 ? '+' : ''}${score}</span>`;
+                const vetOverride = isVeteranExpedition(d.expeditionId);
+                const score = calcOptionScore(opt, d.isResolved ? baseRisk : d.riskScore, vetOverride);
+                const scoreHtml = `<span class="option-score">${vetOverride ? '🎖️ ' : ''}Score: ${score >= 0 ? '+' : ''}${score}</span>`;
                 const selectedLabel = isSelected ? (isDefault ? " (⏳Expired⏳)" : ' ✓') : '';
                 optionsHtml += `
                     <div class="option-row${selectedClass}${clickClass}" data-opt-id="${opt.id}" data-exp-id="${d.expeditionId}" data-msg-id="${d.messageId}">
                         <span class="option-label">${opt.label}${selectedLabel}</span>
                         <span class="option-stats">
-                            ${scoreHtml}
                             <span class="stat-risk">Risk: ${riskSign}${opt.riskModifier}</span>
                             <span class="stat-loot">Loot: ${lootSign}${opt.lootModifier}</span>
+                            ${scoreHtml}
                         </span>
                     </div>`;
             }
@@ -1008,10 +1035,11 @@ async function checkAutoChoose(decisions) {
         if (!noWait && remaining > 60000) continue; // wait until < 1 minute remaining
 
         // Pick highest score
+        const vetOverride = isVeteranExpedition(d.expeditionId);
         let bestOpt = null;
         let bestScore = -Infinity;
         for (const opt of d.decisionOptions) {
-            const score = calcOptionScore(opt, d.riskScore);
+            const score = calcOptionScore(opt, d.riskScore, vetOverride);
             if (score > bestScore) {
                 bestScore = score;
                 bestOpt = opt;
@@ -1041,8 +1069,7 @@ async function loadExpeditions() {
     renderDecisions(expeditionDecisions || []);
     updateExpeditionAlarmOptions(expeditionsData || []);
     refreshAllTimestamps();
-    // check auto-choose
-    checkAutoChoose(expeditionDecisions || []);
+    // Auto-choose is handled by content.js (checkAutoChooseFromContent) to avoid duplicate respond.event calls
 
     // Refresh expedition error display every 30 seconds
     setInterval(() => {
@@ -1101,7 +1128,8 @@ saveModifiersBtn.addEventListener('click', () => {
             risk: savedRiskMod,
             enabled: modifiersEnabled,
             autoChoose: autoChooseCheckbox.checked,
-            noWaitAutoChoose: noWaitAutoChooseCheckbox ? noWaitAutoChooseCheckbox.checked : false
+            noWaitAutoChoose: noWaitAutoChooseCheckbox ? noWaitAutoChooseCheckbox.checked : false,
+            getRidOfVeterans: getRidOfVeteransToggle ? getRidOfVeteransToggle.checked : false
         }
     });
     reRenderDecisions();
@@ -1120,7 +1148,8 @@ modifiersEnabledToggle.addEventListener('change', () => {
             risk: savedRiskMod,
             enabled: modifiersEnabled,
             autoChoose: autoChooseCheckbox.checked,
-            noWaitAutoChoose: noWaitAutoChooseCheckbox ? noWaitAutoChooseCheckbox.checked : false
+            noWaitAutoChoose: noWaitAutoChooseCheckbox ? noWaitAutoChooseCheckbox.checked : false,
+            getRidOfVeterans: getRidOfVeteransToggle ? getRidOfVeteransToggle.checked : false
         }
     });
     reRenderDecisions();
@@ -1135,16 +1164,12 @@ autoChooseCheckbox.addEventListener('change', () => {
             risk: savedRiskMod,
             enabled: modifiersEnabled,
             autoChoose: autoChooseCheckbox.checked,
-            noWaitAutoChoose: noWaitAutoChooseCheckbox ? noWaitAutoChooseCheckbox.checked : false
+            noWaitAutoChoose: noWaitAutoChooseCheckbox ? noWaitAutoChooseCheckbox.checked : false,
+            getRidOfVeterans: getRidOfVeteransToggle ? getRidOfVeteransToggle.checked : false
         }
     });
-    // Re-render decisions to update clickability and run auto-choose
+    // Re-render decisions to update clickability
     reRenderDecisions();
-    if (autoChooseCheckbox.checked) {
-        chrome.storage.local.get('expeditionDecisions', (result) => {
-            checkAutoChoose(result.expeditionDecisions || []);
-        });
-    }
 });
 
 if (noWaitAutoChooseCheckbox) {
@@ -1155,7 +1180,8 @@ if (noWaitAutoChooseCheckbox) {
                 risk: savedRiskMod,
                 enabled: modifiersEnabled,
                 autoChoose: autoChooseCheckbox.checked,
-                noWaitAutoChoose: noWaitAutoChooseCheckbox.checked
+                noWaitAutoChoose: noWaitAutoChooseCheckbox.checked,
+                getRidOfVeterans: getRidOfVeteransToggle ? getRidOfVeteransToggle.checked : false
             }
         });
         // Re-run auto-choose immediately if enabled
@@ -1170,11 +1196,12 @@ if (noWaitAutoChooseCheckbox) {
 // Load saved modifier settings
 chrome.storage.sync.get('decisionModifiers', (data) => {
     if (data.decisionModifiers) {
-        savedLootMod = data.decisionModifiers.loot ?? 3;
-        savedRiskMod = data.decisionModifiers.risk ?? -2;
+        savedLootMod = data.decisionModifiers.loot ?? 1;
+        savedRiskMod = data.decisionModifiers.risk ?? -5;
         modifiersEnabled = data.decisionModifiers.enabled !== false;
         autoChooseCheckbox.checked = !!data.decisionModifiers.autoChoose;
         if (noWaitAutoChooseCheckbox) noWaitAutoChooseCheckbox.checked = !!data.decisionModifiers.noWaitAutoChoose;
+        if (getRidOfVeteransToggle) getRidOfVeteransToggle.checked = !!data.decisionModifiers.getRidOfVeterans;
         if (noWaitRow) noWaitRow.style.display = autoChooseCheckbox.checked ? '' : 'none';
     }
     modifiersEnabledToggle.checked = modifiersEnabled;
@@ -1238,16 +1265,23 @@ inventorySectionToggle.addEventListener('click', async () => {
 
 refreshInventoryBtn.addEventListener('click', () => requestAndLoadInventory());
 
+const specialistTimerInfo = document.getElementById('specialistTimerInfo');
+let _specialistTimerInterval = null;
+
 async function requestAndLoadInventory() {
     inventoryContainer.innerHTML = '<div class="no-decisions">Requesting inventory from server...</div>';
     spaceInfo.textContent = '-- / --';
     try {
         const tab = await getCor3Tab();
-        if (tab) await chrome.tabs.sendMessage(tab.id, { action: "requestStash" });
+        if (tab) {
+            await chrome.tabs.sendMessage(tab.id, { action: "requestStash" });
+            await chrome.tabs.sendMessage(tab.id, { action: "requestSpecialists" });
+        }
     } catch (e) { /* not reachable */ }
     // Wait for WS response (leave + rejoin with human delays), then load from storage
     setTimeout(() => {
         loadInventory();
+        loadSpecialistTimers();
         refreshAllTimestamps();
     }, 2500);
 }
@@ -1257,8 +1291,82 @@ async function loadInventory() {
     renderInventory(stashData);
 }
 
+async function loadSpecialistTimers() {
+    try {
+        const { specialistsData } = await chrome.storage.local.get('specialistsData');
+        renderSpecialistTimers(specialistsData);
+    } catch (e) {
+        specialistTimerInfo.style.display = 'none';
+    }
+}
+
+function renderSpecialistTimers(data) {
+    if (_specialistTimerInterval) { clearInterval(_specialistTimerInterval); _specialistTimerInterval = null; }
+    specialistTimerInfo.style.display = 'none';
+    specialistTimerInfo.innerHTML = '';
+
+    if (!data || !data.specialists || !Array.isArray(data.specialists)) return;
+
+    let activeTemp = null;
+    for (const specialist of data.specialists) {
+        if (!specialist.temporary || !Array.isArray(specialist.temporary)) continue;
+        for (const temp of specialist.temporary) {
+            if (temp.owned && temp.expiresAt) {
+                activeTemp = temp;
+                break;
+            }
+        }
+        if (activeTemp) break;
+    }
+
+    if (!activeTemp || !activeTemp.expiresAt) return;
+
+    const expiresAt = new Date(activeTemp.expiresAt).getTime();
+    const gracePeriodEndAt = activeTemp.gracePeriodEndAt ? new Date(activeTemp.gracePeriodEndAt).getTime() : null;
+    const bonusSlots = activeTemp.bonusSlots || '?';
+
+    function formatCountdown(ms) {
+        if (ms <= 0) return 'EXPIRED';
+        var d = Math.floor(ms / 86400000);
+        var h = Math.floor((ms % 86400000) / 3600000);
+        var m = Math.floor((ms % 3600000) / 60000);
+        var s = Math.floor((ms % 60000) / 1000);
+        var parts = [];
+        if (d > 0) parts.push(d + 'd');
+        parts.push(h + 'h');
+        parts.push(m + 'm');
+        parts.push(s + 's');
+        return parts.join(' ');
+    }
+
+    function updateTimers() {
+        var now = Date.now();
+        var expiryRemaining = expiresAt - now;
+        var graceRemaining = gracePeriodEndAt ? gracePeriodEndAt - now : null;
+        var html = '<div class="item-card tier-quest">';
+        html += '<img src="https://cdn.cor3.gg/corie/characters/avatars/veran_avatar.png" alt="Specialist" loading="lazy">';
+        html += '<div class="item-details">';
+        html += '<div class="item-name" style="margin-bottom: 6px;">Stash Expansion Service</div>';
+        html += '<div class="item-badges"><span class="rented-tag">Rented: ' + bonusSlots + '</span></div>';
+        html += '<div class="specialist-timer-row">Expires in: <span class="specialist-timer">' + formatCountdown(expiryRemaining) + '</span></div>';
+        if (graceRemaining !== null) {
+            html += '<div class="specialist-timer-row">Grace period ends: <span class="specialist-grace">' + formatCountdown(graceRemaining) + '</span></div>';
+        }
+        html += '</div></div>';
+        specialistTimerInfo.innerHTML = html;
+        specialistTimerInfo.style.display = '';
+        if (expiryRemaining <= 0 && (graceRemaining === null || graceRemaining <= 0)) {
+            if (_specialistTimerInterval) { clearInterval(_specialistTimerInterval); _specialistTimerInterval = null; }
+        }
+    }
+
+    updateTimers();
+    _specialistTimerInterval = setInterval(updateTimers, 1000);
+}
+
 // Load cached inventory on popup open
 loadInventory();
+loadSpecialistTimers();
 
 function renderInventory(data) {
     inventoryContainer.innerHTML = '';
@@ -1639,7 +1747,12 @@ function showMarketInfoPopup(lot) {
 
     let h = '<div class="info-title">' + INFO_SVG + ' ' + itemName.toUpperCase() + '</div>';
     h += '<div class="info-desc">';
-    if (det.image) h += '<img src="' + det.image + '" alt="">';
+    const matchedSbstr = itemName ? Object.keys(zoomList).find(substring => itemName.includes(substring)) : "";
+    let zoomMarketImg = '';
+    if (matchedSbstr) {
+        zoomMarketImg = `style="transform:scale(${zoomList[matchedSbstr]});object-fit:contain;"`;
+    }
+    if (det.image) h += `<div style="overflow:clip;"><img ${zoomMarketImg} src="${det.image}" alt=""></div>`;
     h += '<span>' + (det.description || 'No description available.') + '</span>';
     h += '</div>';
     h += '<div class="info-specs">';
@@ -1770,7 +1883,12 @@ function renderMarketInto(container, data, labelPrefix, idPrefix) {
                 const isAccess = cat === 'ACCESS';
                 const isBought = lot.availableCount === 0;
                 const boughtTag = isBought && !isAccess ? '<span class="market-item-bought">BOUGHT</span>' : '';
-                const imgHtml = det.image ? `<img src="${det.image}" alt="${det.name || ''}" loading="lazy">` : '';
+                const matchedSubstring = det.name ? Object.keys(zoomList).find(substring => det.name.includes(substring)) : "";
+                let zoomLotImg = '';
+                if (matchedSubstring) {
+                    zoomLotImg = `style="transform:scale(${zoomList[matchedSubstring]});object-fit:contain;"`;
+                }
+                const imgHtml = det.image ? `<div style="overflow:hidden;border-radius:6px;width:40px;height:40px;margin-top:6px;"><img src="${det.image}" alt="${det.name || ''}" loading="lazy" ${zoomLotImg}></div>` : '';
 
                 let itemName;
                 if (isAccess) {
@@ -2961,11 +3079,24 @@ chrome.storage.onChanged.addListener((changes, area) => {
         loadInventory();
         refreshAllTimestamps();
     }
+    if (changes.specialistsData) {
+        loadSpecialistTimers();
+    }
     if (changes.archivedExpeditionsData) {
         loadArchivedExpeditions();
     }
     if (changes.mercenariesData || changes.usolMercenariesData || changes.mercConfigData) {
         loadMercenaries();
+    }
+    if (changes.mercWarning) {
+        const warning = changes.mercWarning.newValue;
+        if (warning && mercWarning) {
+            mercWarning.textContent = '⚠️ ' + warning;
+            mercWarning.style.borderColor = 'var(--accent-orange)';
+            mercWarning.style.color = 'var(--accent-orange)';
+            mercWarning.style.background = 'rgba(255,160,0,0.15)';
+            mercWarning.style.display = '';
+        }
     }
     // Live-update market data (handles initial load, background refreshes, error states)
     if (changes.marketData) {
@@ -3006,7 +3137,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'sync') return;
     if (changes.autoSendMerc && changes.autoSendMerc.newValue) {
         const settings = changes.autoSendMerc.newValue;
-        updateMercStashWarning(settings);
+        updateMercWarning(settings);
         // Sync toggle state if content script disabled auto-send
         if (autoSendMercenaryToggle) {
             autoSendMercenaryToggle.checked = !!settings.enabled;
@@ -3155,6 +3286,34 @@ chrome.storage.local.get('simpleDecryptSolverStatus', (data) => {
     renderSimpleDecryptSolverStatus(data.simpleDecryptSolverStatus);
 });
 
+// --- Anti-AFK Clicker ---
+const antiAfkToggle = document.getElementById('antiAfkToggle');
+const antiAfkStatus = document.getElementById('antiAfkStatus');
+
+function updateAntiAfkStatusLabel(enabled) {
+    antiAfkStatus.textContent = enabled ? 'Active' : 'Off';
+    antiAfkStatus.style.color = enabled ? 'var(--accent-green)' : 'var(--text-dim)';
+}
+
+chrome.storage.sync.get('antiAfkEnabled', (data) => {
+    const enabled = !!data.antiAfkEnabled;
+    antiAfkToggle.checked = enabled;
+    updateAntiAfkStatusLabel(enabled);
+});
+
+antiAfkToggle.addEventListener('change', async () => {
+    const enabled = antiAfkToggle.checked;
+    await chrome.storage.sync.set({ antiAfkEnabled: enabled });
+    updateAntiAfkStatusLabel(enabled);
+    const tab = await getCor3Tab();
+    if (tab) {
+        chrome.tabs.sendMessage(tab.id, {
+            action: "toggleAntiAfk",
+            enabled: enabled
+        }).catch(() => {});
+    }
+});
+
 // --- Auto Daily Hacking ---
 const autoDailyHackToggle = document.getElementById('autoDailyHackToggle');
 const dailyHackStatus = document.getElementById('dailyHackStatus');
@@ -3185,7 +3344,33 @@ autoDailyHackToggle.addEventListener('change', async () => {
     updateDailyHackStatusLabel(enabled);
 
     if (enabled) {
-        // Check if daily is already claimed — if yes, don't trigger automation
+        // Refresh daily ops data before checking claimed status (stale data may say "claimed" after timer reset)
+        if (dailyHackLogEl) {
+            dailyHackLogEl.textContent = 'Refreshing daily ops data...';
+            dailyHackLogEl.style.display = '';
+        }
+        try {
+            const tab = await getCor3Tab();
+            if (tab) {
+                await chrome.tabs.sendMessage(tab.id, { action: "fetchDailyOps" });
+                // Wait for fresh data to arrive in storage (up to 5s)
+                await new Promise((resolve) => {
+                    const startTime = Date.now();
+                    const listener = (changes, area) => {
+                        if (area === 'local' && changes.dailyOpsData) {
+                            chrome.storage.onChanged.removeListener(listener);
+                            resolve();
+                        }
+                    };
+                    chrome.storage.onChanged.addListener(listener);
+                    setTimeout(() => {
+                        chrome.storage.onChanged.removeListener(listener);
+                        resolve();
+                    }, 5000);
+                });
+            }
+        } catch (e) { /* proceed with cached data if refresh fails */ }
+
         const { dailyOpsData } = await chrome.storage.local.get('dailyOpsData');
         if (dailyOpsData && dailyOpsData.hasClaimedToday) {
             if (dailyHackLogEl) {
@@ -3240,6 +3425,11 @@ chrome.storage.onChanged.addListener((changes, area) => {
         const enabled = !!changes.autoSimpleDecryptEnabled.newValue;
         autoSimpleDecryptToggle.checked = enabled;
         updateSimpleDecryptStatusLabel(enabled);
+    }
+    if (area === 'sync' && changes.antiAfkEnabled) {
+        const enabled = !!changes.antiAfkEnabled.newValue;
+        antiAfkToggle.checked = enabled;
+        updateAntiAfkStatusLabel(enabled);
     }
     // Live update Simple Decrypt solver status
     if (area === 'local' && changes.simpleDecryptSolverStatus) {
@@ -3452,6 +3642,7 @@ function renderArchivedExpeditions(data) {
         const card = document.createElement('div');
         card.className = 'archived-exp-card';
 
+        const factionDisplay = (exp.mercenary && exp.mercenary.faction) ? ((exp.mercenary.faction.name || '').replace('factions.', '').replace(/([A-Z])/g, ' $1').trim().split(" ")[0].toUpperCase()) : 'UNEMPLOYED';
         const mercName = exp.mercenary ? exp.mercenary.callsign : 'Unknown';
         const outcome = (exp.outcome || exp.status || 'COMPLETED').toUpperCase();
         let outcomeClass = 'outcome-full';
@@ -3464,7 +3655,16 @@ function renderArchivedExpeditions(data) {
         html += `<span class="outcome-tag ${outcomeClass}">${outcome}</span>`;
         html += `</div>`;
         html += `<div class="archived-exp-info">`;
-        html += `📍 ${exp.locationName || '--'} / ${exp.zoneName || '--'}`;
+        //html += `<div class="merc-faction">`;
+        html += `Faction: <b>${factionDisplay}</b>`;
+        html += `<br>`;
+        if ((exp.locationName && exp.zoneName) && (exp.locationName.length + exp.zoneName.length) > 30) {
+            html += `📍 ${exp.locationName || '--'} /`;
+            html += `<br>`;
+            html +=  `${exp.zoneName || '--'}`;
+        } else {
+            html += `📍 ${exp.locationName || '--'} / ${exp.zoneName || '--'}`;
+        }
         if (exp.objectiveName) html += ` — ${exp.objectiveName}`;
         html += `<br>`;
         if (exp.totalCost !== undefined) html += `💰 Cost: ${exp.totalCost.toLocaleString()} · `;
@@ -3492,6 +3692,15 @@ function renderArchivedExpeditions(data) {
             }
             html += `</div></div>`;
         }
+        if (exp.completedAt) {
+            const agoMs = Date.now() - new Date(exp.completedAt).getTime();
+            let agoText = '';
+            if (agoMs < 60000) agoText = 'just now';
+            else if (agoMs < 3600000) agoText = Math.floor(agoMs / 60000) + 'm ago';
+            else if (agoMs < 86400000) { const h = Math.floor(agoMs / 3600000); const m = Math.floor((agoMs % 3600000) / 60000); agoText = h + 'h' + (m > 0 ? ' ' + m + 'm' : '') + ' ago'; }
+            else { const d = Math.floor(agoMs / 86400000); const h = Math.floor((agoMs % 86400000) / 3600000); agoText = d + 'd' + (h > 0 ? ' ' + h + 'h' : '') + ' ago'; }
+            html += `<span style="font-size:9px;color:var(--text-dim);display:flex;flex-direction:row-reverse;">🕐 Completed ${agoText}</span>`;
+        }
 
         card.innerHTML = html;
         archivedExpContainer.appendChild(card);
@@ -3502,7 +3711,7 @@ function renderArchivedExpeditions(data) {
             hdr.classList.toggle('open');
             const targetId = hdr.getAttribute('data-expand');
             const body = document.getElementById(targetId);
-            if (body) body.classList.toggle('open');
+            if (body) body.classList.toggle('openExtended');
         });
     });
 }
@@ -3605,7 +3814,12 @@ function showHwInfoPopup(item) {
     const overlay = document.getElementById('hwInfoOverlay');
     let h = '<div class="info-title">' + LOADOUT_INFO_SVG + ' ' + (item.name || '').toUpperCase() + '</div>';
     h += '<div class="info-desc">';
-    if (item.image) h += '<img src="' + item.image + '" alt="">';
+    const matchedSubstr = item.name ? Object.keys(zoomList).find(substring => item.name.includes(substring)) : "";
+    let zoomHWImg = '';
+    if (matchedSubstr) {
+        zoomHWImg = `style="transform:scale(${zoomList[matchedSubstr]});object-fit:contain;"`;
+    }
+    if (item.image) h += `<div style="overflow:clip;"><img ${zoomHWImg} src="${item.image}" alt=""></div>`;
     h += '<span>' + (item.description || 'No description available.') + '</span>';
     h += '</div>';
     h += '<div class="info-specs">';
@@ -3837,17 +4051,17 @@ function renderLoadoutSoftware(data) {
         const pwInfo = softwarePower.find(p => p.moduleId === sw.id);
         const specs = sw.specs || [];
         const consuming = sw.consuming || {};
-        const zoomList = ["Lyapun", "A/Bver", "RE-nova", "D-Badger", "Porter-triX", "H0pp3R", "Screener"];
 
         html += '<div class="loadout-sw-card' + (sw.installed ? ' installed' : '') + '">';
         html += '<div class="loadout-sw-header">';
         html += '<div class="loadout-sw-row">';
-        if (zoomList.some(substring => (sw.name).includes(substring))) {
-            html += '<img class="loadout-sw-img zoom"'
-        } else {
-            html += '<img class="loadout-sw-img"'
+        html += '<div style="overflow:hidden;border-radius:4px;width:40px;height:40px;">';
+        html += '<img class="loadout-sw-img"'
+        const matchedSubstring = Object.keys(zoomList).find(substring => sw.name.includes(substring));
+        if (matchedSubstring) {
+            html += `style="transform:scale(${zoomList[matchedSubstring]});"`;
         }
-        html += ' src="' + (sw.image || '') + '" alt="' + (sw.name || '') + '">';
+        html += ' src="' + (sw.image || '') + '" alt="' + (sw.name || '') + '"></div>';
         html += '<div class="loadout-sw-name">' + (sw.name || 'Unknown') + '</div>';
         html += '</div>';
         if (sw.installed) {
@@ -4110,29 +4324,38 @@ const autoSendMercenaryToggle = document.getElementById('autoSendMercenaryToggle
 const autoChooseMercToggle = document.getElementById('autoChooseMercToggle');
 const autoChooseUsolFirstToggle = document.getElementById('autoChooseUsolFirstToggle');
 const ignoreEliteMercToggle = document.getElementById('ignoreEliteMercToggle');
+const applyMercCostLimiterToggle = document.getElementById('applyMercCostLimiterToggle');
+const maxMercCostInput = document.getElementById('maxMercCostInput');
+const mercCostDisplay = document.getElementById('mercCostDisplay');
+const mercCostDisplayValue = document.getElementById('mercCostDisplayValue');
+const mercCostEditRow = document.getElementById('mercCostEditRow');
+const editMercCostBtn = document.getElementById('editMercCostBtn');
+const saveMercCostBtn = document.getElementById('saveMercCostBtn');
+const cancelMercCostBtn = document.getElementById('cancelMercCostBtn');
+const getRidOfVeteransToggle = document.getElementById('getRidOfVeteransToggle');
 const mercenaryConfigRow = document.getElementById('mercenaryConfigRow');
 const selectedMercenaryName = document.getElementById('selectedMercenaryName');
-const mercStashWarning = document.getElementById('mercStashWarning');
+const mercWarning = document.getElementById('mercWarning');
 
 let selectedMercenaryId = null;
 let mercRestTimers = {};
 
-function updateMercStashWarning(settings) {
-    if (!mercStashWarning) return;
+function updateMercWarning(settings) {
+    if (!mercWarning) return;
     if (settings && settings.disabledReason === 'stash_full' && !settings.enabled) {
-        mercStashWarning.textContent = '⚠️ Stash is full — auto-send mercenary disabled. Clear stash and re-enable auto-send to resume.';
-        mercStashWarning.style.borderColor = 'var(--accent-orange)';
-        mercStashWarning.style.color = 'var(--accent-orange)';
-        mercStashWarning.style.background = 'rgba(255,160,0,0.15)';
-        mercStashWarning.style.display = '';
+        mercWarning.textContent = '⚠️ Stash is full — auto-send mercenary disabled. Clear stash and re-enable auto-send to resume.';
+        mercWarning.style.borderColor = 'var(--accent-orange)';
+        mercWarning.style.color = 'var(--accent-orange)';
+        mercWarning.style.background = 'rgba(255,160,0,0.15)';
+        mercWarning.style.display = '';
     } else if (settings && settings.disabledReason === 'insufficient_credits' && !settings.enabled) {
-        mercStashWarning.textContent = '⚠️ Insufficient credits — auto-send mercenary disabled. Earn more credits and re-enable auto-send to resume.';
-        mercStashWarning.style.borderColor = 'var(--accent-red, #ff4444)';
-        mercStashWarning.style.color = 'var(--accent-red, #ff4444)';
-        mercStashWarning.style.background = 'rgba(255,68,68,0.15)';
-        mercStashWarning.style.display = '';
+        mercWarning.textContent = '⚠️ Insufficient credits — auto-send mercenary disabled. Earn more credits and re-enable auto-send to resume.';
+        mercWarning.style.borderColor = 'var(--accent-red, #ff4444)';
+        mercWarning.style.color = 'var(--accent-red, #ff4444)';
+        mercWarning.style.background = 'rgba(255,68,68,0.15)';
+        mercWarning.style.display = '';
     } else {
-        mercStashWarning.style.display = 'none';
+        mercWarning.style.display = 'none';
     }
 }
 
@@ -4168,12 +4391,24 @@ chrome.storage.sync.get('autoSendMerc', (data) => {
         if (autoChooseMercToggle) autoChooseMercToggle.checked = !!data.autoSendMerc.autoChooseMerc;
         if (autoChooseUsolFirstToggle) autoChooseUsolFirstToggle.checked = !!data.autoSendMerc.autoChooseUsolFirst;
         if (ignoreEliteMercToggle) ignoreEliteMercToggle.checked = !!data.autoSendMerc.ignoreEliteMerc;
+        if (applyMercCostLimiterToggle) applyMercCostLimiterToggle.checked = !!data.autoSendMerc.applyMercCostLimiter;
+        if (maxMercCostInput) maxMercCostInput.value = data.autoSendMerc.maxMercCost ?? 15000;
+        if (mercCostDisplayValue) mercCostDisplayValue.textContent = data.autoSendMerc.maxMercCost ?? 15000;
         selectedMercenaryId = data.autoSendMerc.mercenaryId || null;
         if (selectedMercenaryId && mercenaryConfigRow) {
             mercenaryConfigRow.style.display = '';
             if (selectedMercenaryName) selectedMercenaryName.textContent = data.autoSendMerc.mercenaryName || selectedMercenaryId;
         }
-        updateMercStashWarning(data.autoSendMerc);
+        updateMercWarning(data.autoSendMerc);
+    }
+});
+chrome.storage.local.get('mercWarning', (data) => {
+    if (data.mercWarning && mercWarning) {
+        mercWarning.textContent = '⚠️ ' + data.mercWarning;
+        mercWarning.style.borderColor = 'var(--accent-orange)';
+        mercWarning.style.color = 'var(--accent-orange)';
+        mercWarning.style.background = 'rgba(255,160,0,0.15)';
+        mercWarning.style.display = '';
     }
 });
 
@@ -4190,6 +4425,8 @@ function saveAutoSendMercSettings() {
                     autoChooseMerc: autoChooseMercToggle ? autoChooseMercToggle.checked : false,
                     autoChooseUsolFirst: autoChooseUsolFirstToggle ? autoChooseUsolFirstToggle.checked : false,
                     ignoreEliteMerc: ignoreEliteMercToggle ? ignoreEliteMercToggle.checked : false,
+                    applyMercCostLimiter: applyMercCostLimiterToggle ? applyMercCostLimiterToggle.checked : false,
+                    maxMercCost: maxMercCostInput ? parseInt(maxMercCostInput.value, 10) || 15000 : 15000,
                     mercenaryId: selectedMercenaryId,
                     mercenaryName: selectedMercenaryName ? selectedMercenaryName.textContent : '',
                     // Clear disabledReason only when user re-enables; otherwise preserve it
@@ -4202,10 +4439,10 @@ function saveAutoSendMercSettings() {
 
 autoSendMercenaryToggle.addEventListener('change', () => {
     saveAutoSendMercSettings();
-    // If user re-enables, clear stash warning and expedition errors
+    // If user re-enables, clear warnings and expedition errors
     if (autoSendMercenaryToggle.checked) {
-        updateMercStashWarning(null); // hide warning
-        chrome.storage.local.remove('expeditionLaunchError');
+        updateMercWarning(null); // hide warning
+        chrome.storage.local.remove(['expeditionLaunchError', 'mercWarning']);
         loadExpeditions();
     }
 });
@@ -4227,6 +4464,51 @@ if (ignoreEliteMercToggle) {
     ignoreEliteMercToggle.addEventListener('change', () => {
         saveAutoSendMercSettings();
         loadMercenaries();
+    });
+}
+if (applyMercCostLimiterToggle) {
+    applyMercCostLimiterToggle.addEventListener('change', () => {
+        saveAutoSendMercSettings();
+        loadMercenaries();
+    });
+}
+if (editMercCostBtn) {
+    editMercCostBtn.addEventListener('click', () => {
+        if (maxMercCostInput) maxMercCostInput.value = mercCostDisplayValue ? mercCostDisplayValue.textContent : 15000;
+        if (mercCostEditRow) mercCostEditRow.style.display = '';
+        if (mercCostDisplay) mercCostDisplay.style.display = 'none';
+    });
+}
+if (saveMercCostBtn) {
+    saveMercCostBtn.addEventListener('click', () => {
+        const newVal = maxMercCostInput ? parseInt(maxMercCostInput.value, 10) || 15000 : 15000;
+        if (mercCostDisplayValue) mercCostDisplayValue.textContent = newVal;
+        if (maxMercCostInput) maxMercCostInput.value = newVal;
+        if (mercCostEditRow) mercCostEditRow.style.display = 'none';
+        if (mercCostDisplay) mercCostDisplay.style.display = '';
+        saveAutoSendMercSettings();
+        loadMercenaries();
+    });
+}
+if (cancelMercCostBtn) {
+    cancelMercCostBtn.addEventListener('click', () => {
+        if (mercCostEditRow) mercCostEditRow.style.display = 'none';
+        if (mercCostDisplay) mercCostDisplay.style.display = '';
+    });
+}
+if (getRidOfVeteransToggle) {
+    getRidOfVeteransToggle.addEventListener('change', () => {
+        chrome.storage.sync.set({
+            decisionModifiers: {
+                loot: savedLootMod,
+                risk: savedRiskMod,
+                enabled: modifiersEnabled,
+                autoChoose: autoChooseCheckbox.checked,
+                noWaitAutoChoose: noWaitAutoChooseCheckbox ? noWaitAutoChooseCheckbox.checked : false,
+                getRidOfVeterans: getRidOfVeteransToggle.checked
+            }
+        });
+        reRenderDecisions();
     });
 }
 
@@ -4342,7 +4624,7 @@ function buildMercCard(merc, isElite) {
     card.innerHTML = html;
 
     card.addEventListener('click', () => {
-        if ((autoChooseMercToggle && autoChooseMercToggle.checked) || (autoSendMercenaryToggle && !autoSendMercenaryToggle.checked)) return;
+        if ((autoChooseMercToggle && autoChooseMercToggle.checked)) return;
         selectedMercenaryId = merc.id;
         if (selectedMercenaryName) selectedMercenaryName.textContent = merc.callsign || merc.name || merc.id;
         if (mercenaryConfigRow) mercenaryConfigRow.style.display = '';
@@ -4381,8 +4663,11 @@ function renderMercenaries(coreData, usolData) {
     if (autoChooseMercToggle && autoChooseMercToggle.checked) {
         const ignoreElite = ignoreEliteMercToggle && ignoreEliteMercToggle.checked;
         const usolFirst = autoChooseUsolFirstToggle && autoChooseUsolFirstToggle.checked;
+        const costLimiterOn = applyMercCostLimiterToggle && applyMercCostLimiterToggle.checked;
+        const maxCost = maxMercCostInput ? parseInt(maxMercCostInput.value, 10) || 15000 : 15000;
         let available = allMercs.filter(m => m.status === 'AVAILABLE' && m._expeditionConfig);
         if (ignoreElite) available = available.filter(m => !m._isElite);
+        if (costLimiterOn) available = available.filter(m => (m._expeditionConfig.totalCost || 0) <= maxCost);
         if (available.length > 0) {
             available.sort((a, b) => {
                 if (usolFirst) {
@@ -5550,40 +5835,24 @@ async function dismissFailedJobsForMarket(marketKey, btn) {
         return;
     }
 
-    // If queued, show delayed state and poll until done
     if (resp && (resp.queueResult === 'queued' || resp.queueResult === 'already-running')) {
         const activeType = resp.queueStatus && resp.queueStatus.active ? resp.queueStatus.active : 'another automation';
         const friendlyNames = { 'auto-jobs': 'Auto Job Solver', 'auto-valuable': 'Auto Valuable Seller', 'auto-update-markets': 'Auto Update Markets', 'auto-send': 'Auto Send Mercenary', 'clear-failed-jobs': 'Clear Failed Jobs' };
         const activeName = friendlyNames[activeType] || activeType;
         if (btn) {
-            btn.textContent = '⏳';
             btn.title = 'Delayed — waiting for "' + activeName + '" to finish';
             btn.style.cursor = 'help';
         }
-        // Poll until clear-failed-jobs is no longer queued or active
-        while (true) {
-            await new Promise(r => setTimeout(r, 10000));
-            const qs = await chrome.storage.local.get('automationQueueStatus');
-            const status = qs.automationQueueStatus || {};
-            if (status.active !== 'clear-failed-jobs' && !(status.queued || []).includes('clear-failed-jobs')) break;
-        }
     }
 
-    // Remove dismissed jobs from local storage
-    for (const job of failedJobs) {
-        const fresh = await chrome.storage.local.get(storageKey);
-        const freshMd = fresh[storageKey];
-        if (freshMd && freshMd.recentJobs) {
-            freshMd.recentJobs = freshMd.recentJobs.filter(j => j.id !== job.id);
-            await chrome.storage.local.set({ [storageKey]: freshMd });
-        }
+    while (true) {
+        await new Promise(r => setTimeout(r, 1500));
+        const qs = await chrome.storage.local.get('automationQueueStatus');
+        const status = qs.automationQueueStatus || {};
+        if (status.active !== 'clear-failed-jobs' && !(status.queued || []).includes('clear-failed-jobs')) break;
     }
 
     addAutoJobLog(`🧹 Dismissed ${failedJobs.length} failed job(s) from ${marketKey} market`, 'info');
-    const refreshActions = { home: 'refreshMarket', dark: 'refreshDarkMarket', soyuz: 'refreshSoyuzMarket', usol: 'refreshUsolMarket' };
-    setTimeout(async () => {
-        try { await chrome.tabs.sendMessage(tab.id, { action: refreshActions[marketKey] }); } catch (e) {}
-    }, 1000);
 }
 ['home', 'dark', 'soyuz', 'usol'].forEach(key => {
     const btnId = { home: 'cleanupCoreMarketBtn', dark: 'cleanupDarkMarketBtn', soyuz: 'cleanupSoyuzMarketBtn', usol: 'cleanupUsolMarketBtn' }[key];
@@ -5997,8 +6266,10 @@ const valuableStatus = document.getElementById('autoValuableSellerStatus');
 const valuableSection = document.getElementById('autoValuableSellerSection');
 const valuableTabServers = document.getElementById('valuableTabServers');
 const valuableTabDownloads = document.getElementById('valuableTabDownloads');
+const valuableTabMaintenance = document.getElementById('valuableTabMaintenance');
 const valuableContentServers = document.getElementById('valuableContentServers');
 const valuableContentDownloads = document.getElementById('valuableContentDownloads');
+const valuableContentMaintenance = document.getElementById('valuableContentMaintenance');
 const valuableSellerBtn = document.getElementById('valuableSellerBtn');
 const valuableSearchBtn = document.getElementById('valuableSearchBtn');
 const valuableDebugToggle = document.getElementById('valuableDebugToggle');
@@ -6036,18 +6307,22 @@ valuableToggle.addEventListener('change', async () => {
 function switchValuableTab(tab) {
     valuableTabServers.classList.toggle('active', tab === 'servers');
     valuableTabDownloads.classList.toggle('active', tab === 'downloads');
+    valuableTabMaintenance.classList.toggle('active', tab === 'maintenance');
     valuableContentServers.classList.toggle('active', tab === 'servers');
     valuableContentDownloads.classList.toggle('active', tab === 'downloads');
+    valuableContentMaintenance.classList.toggle('active', tab === 'maintenance');
 }
 
 valuableTabServers.addEventListener('click', () => switchValuableTab('servers'));
 valuableTabDownloads.addEventListener('click', () => switchValuableTab('downloads'));
+valuableTabMaintenance.addEventListener('click', () => switchValuableTab('maintenance'));
 
 // Render tabs from storage data
 async function renderValuableTabs() {
-    const data = await chrome.storage.local.get(['valuableServersData', 'valuableDownloadsData']);
+    const data = await chrome.storage.local.get(['valuableServersData', 'valuableDownloadsData', 'valuableMaintenanceData']);
     renderValuableServers(data.valuableServersData);
     renderValuableDownloads(data.valuableDownloadsData);
+    renderValuableMaintenance(data.valuableMaintenanceData);
 }
 
 function renderValuableServers(data) {
@@ -6275,6 +6550,175 @@ function renderValuableDownloads(data) {
     updateSelectAllState(selectAllCb, checkboxes);
 }
 
+let _maintTimerInterval = null;
+
+function renderValuableMaintenance(data) {
+    valuableContentMaintenance.innerHTML = '';
+    if (_maintTimerInterval) { clearInterval(_maintTimerInterval); _maintTimerInterval = null; }
+
+    if (!data || !data.servers || data.servers.length === 0) {
+        valuableContentMaintenance.innerHTML = '<div class="auto-jobs-no-jobs">Run "Start Valuable Search" to see the maintenance status of servers.</div>';
+        return;
+    }
+
+    const timerEls = [];
+    let hasUpcoming = false;
+
+    for (const srv of data.servers) {
+        const row = document.createElement('div');
+        row.className = 'maint-row';
+        const isUpcoming = srv.timeUntilMaintenance && !srv.maintenanceEndsAt;
+
+        const nameEl = document.createElement('span');
+        nameEl.className = 'maint-name';
+        nameEl.textContent = srv.serverName;
+
+        const timerEl = document.createElement('span');
+        timerEl.className = 'maint-timer';
+        timerEl.dataset.target = srv.maintenanceEndsAt || srv.timeUntilMaintenance || '';
+        timerEls.push(timerEl);
+
+        const statusEl = document.createElement('span');
+        statusEl.className = 'maint-status';
+        statusEl.dataset.serverId = srv.id;
+        if (srv.maintenanceEndsAt) {
+            statusEl.classList.add('in-maintenance');
+            statusEl.textContent = 'IN MAINTENANCE';
+        } else {
+            statusEl.classList.add('upcoming');
+            statusEl.textContent = 'UPCOMING';
+        }
+
+        row.appendChild(nameEl);
+        row.appendChild(timerEl);
+        row.appendChild(statusEl);
+
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.className = 'maint-checkbox';
+        cb.dataset.serverId = srv.id;
+        cb.dataset.serverName = srv.serverName;
+        if (isUpcoming) {
+            hasUpcoming = true;
+            cb.disabled = false;
+        } else {
+            cb.disabled = true;
+        }
+        row.appendChild(cb);
+
+        valuableContentMaintenance.appendChild(row);
+    }
+
+    if (hasUpcoming) {
+        const bottomRow = document.createElement('div');
+        bottomRow.className = 'maint-force-selected-row';
+        const batchBtn = document.createElement('button');
+        batchBtn.className = 'maint-force-selected-btn';
+        batchBtn.id = 'maintForceSelectedBtn';
+        batchBtn.textContent = 'Force selected!';
+        batchBtn.title = 'Force maintenance on all checked servers (furthest first)';
+        batchBtn.addEventListener('click', () => handleForceMaintenanceBatch());
+        bottomRow.appendChild(batchBtn);
+        valuableContentMaintenance.appendChild(bottomRow);
+    }
+
+    function updateTimers() {
+        for (const el of timerEls) {
+            const target = el.dataset.target;
+            if (!target) { el.textContent = '—'; continue; }
+            const diff = new Date(target).getTime() - Date.now();
+            if (diff <= 0) { el.textContent = 'now'; continue; }
+            const h = Math.floor(diff / 3600000);
+            const m = Math.floor((diff % 3600000) / 60000);
+            const s = Math.floor((diff % 60000) / 1000);
+            el.textContent = (h > 0 ? h + 'h ' : '') + m + 'm ' + s + 's';
+        }
+    }
+    updateTimers();
+    _maintTimerInterval = setInterval(updateTimers, 1000);
+
+    chrome.storage.local.get('forceMaintenanceInProgress', (fmState) => {
+        const fm = fmState.forceMaintenanceInProgress;
+        const allCbs = valuableContentMaintenance.querySelectorAll('.maint-checkbox');
+        const batchBtn = document.getElementById('maintForceSelectedBtn');
+        if (fm && fm.batch) {
+            allCbs.forEach(cb => { cb.disabled = true; });
+            if (batchBtn) { batchBtn.disabled = true; batchBtn.classList.add('in-progress'); batchBtn.textContent = 'In-progress...'; }
+            const batchIds = fm.serverIds || [];
+            const currentId = fm.currentServerId || null;
+            batchIds.forEach(sid => {
+                const statusEl = valuableContentMaintenance.querySelector(`.maint-status[data-server-id="${sid}"]`);
+                if (statusEl && !statusEl.classList.contains('in-maintenance')) {
+                    statusEl.classList.remove('upcoming');
+                    statusEl.classList.add('in-progress');
+                    statusEl.style.background = sid === currentId ? 'var(--accent-orange)' : 'var(--accent-light-cyan)';
+                    statusEl.style.color = 'var(--bg-primary)';
+                    statusEl.style.textAlign = 'center';
+                    statusEl.style.justifySelf = 'end';
+                    statusEl.style.width = '80px';
+                    statusEl.textContent = sid === currentId ? 'FORCING...' : 'QUEUED';
+                }
+            });
+        }
+    });
+}
+
+async function handleForceMaintenanceBatch() {
+    const fmCheck = await chrome.storage.local.get('forceMaintenanceInProgress');
+    if (fmCheck.forceMaintenanceInProgress && fmCheck.forceMaintenanceInProgress.batch) {
+        addValuableLog('🔧 Force maintenance already running', 'warn');
+        return;
+    }
+
+    const checkedCbs = valuableContentMaintenance.querySelectorAll('.maint-checkbox:checked');
+    if (checkedCbs.length === 0) {
+        addValuableLog('🔧 No servers selected for batch force maintenance', 'warn');
+        return;
+    }
+
+    const selected = [];
+    checkedCbs.forEach(cb => { selected.push({ id: cb.dataset.serverId, name: cb.dataset.serverName }); });
+    const serverIds = selected.map(s => s.id);
+
+    const allCbs = valuableContentMaintenance.querySelectorAll('.maint-checkbox');
+    const batchBtn = document.getElementById('maintForceSelectedBtn');
+    allCbs.forEach(cb => { cb.disabled = true; });
+    if (batchBtn) { batchBtn.disabled = true; batchBtn.classList.add('in-progress'); batchBtn.textContent = 'In-progress...'; }
+
+    serverIds.forEach(sid => {
+        const statusEl = valuableContentMaintenance.querySelector(`.maint-status[data-server-id="${sid}"]`);
+        if (statusEl && !statusEl.classList.contains('in-maintenance')) {
+            statusEl.classList.remove('upcoming');
+            statusEl.classList.add('in-progress');
+            statusEl.style.background = 'var(--accent-light-cyan)';
+            statusEl.style.color = 'var(--bg-primary)';
+            statusEl.style.textAlign = 'center';
+            statusEl.style.justifySelf = 'end';
+            statusEl.style.width = '80px';
+            statusEl.textContent = 'QUEUED';
+        }
+    });
+
+    await chrome.storage.local.set({ forceMaintenanceInProgress: { batch: true, serverIds, servers: selected, startedAt: Date.now() } });
+
+    addValuableLog(`🔧 Batch force maintenance: ${selected.length} server(s) selected — starting...`, 'info');
+
+    try {
+        const tab = await getCor3Tab();
+        if (tab) {
+            await chrome.tabs.sendMessage(tab.id, {
+                action: 'forceMaintenanceBatch',
+                servers: selected
+            });
+        }
+    } catch (e) {
+        addValuableLog(`🔧 Batch force maintenance failed: ${e.message}`, 'error');
+        allCbs.forEach(cb => { cb.disabled = false; });
+        if (batchBtn) { batchBtn.disabled = false; batchBtn.classList.remove('in-progress'); batchBtn.textContent = 'Force selected!'; }
+        await chrome.storage.local.remove('forceMaintenanceInProgress');
+    }
+}
+
 async function updateValuableServerSelection() {
     const cbs = valuableContentServers.querySelectorAll('input[type="checkbox"][data-server-id]');
     const selected = [];
@@ -6428,6 +6872,33 @@ chrome.storage.onChanged.addListener((changes, area) => {
     }
     if (changes.valuableDownloadsData) {
         renderValuableDownloads(changes.valuableDownloadsData.newValue);
+    }
+    if (changes.valuableMaintenanceData) {
+        renderValuableMaintenance(changes.valuableMaintenanceData.newValue);
+    }
+    if (changes.forceMaintenanceInProgress && changes.forceMaintenanceInProgress.newValue) {
+        const fm = changes.forceMaintenanceInProgress.newValue;
+        if (fm.batch && fm.currentServerId) {
+            const batchIds = fm.serverIds || [];
+            batchIds.forEach(sid => {
+                const statusEl = valuableContentMaintenance.querySelector(`.maint-status[data-server-id="${sid}"]`);
+                if (statusEl && !statusEl.classList.contains('in-maintenance')) {
+                    statusEl.style.background = sid === fm.currentServerId ? 'var(--accent-orange)' : 'var(--accent-light-cyan)';
+                    statusEl.style.color = 'var(--bg-primary)';
+                    statusEl.style.textAlign = 'center';
+                    statusEl.style.justifySelf = 'end';
+                    statusEl.style.width = '80px';
+                    statusEl.textContent = sid === fm.currentServerId ? 'FORCING...' : 'QUEUED';
+                }
+            });
+        }
+    }
+    if (changes.valuableForceMaintenanceDone) {
+        chrome.storage.local.remove('forceMaintenanceInProgress');
+        const allCbs = valuableContentMaintenance.querySelectorAll('.maint-checkbox');
+        const batchBtn = document.getElementById('maintForceSelectedBtn');
+        allCbs.forEach(cb => { cb.disabled = false; cb.checked = false; });
+        if (batchBtn) { batchBtn.disabled = false; batchBtn.classList.remove('in-progress'); batchBtn.textContent = 'Force selected!'; }
     }
     if (changes.valuableSearchRunning) {
         valuableSearchRunning = !!changes.valuableSearchRunning.newValue;
