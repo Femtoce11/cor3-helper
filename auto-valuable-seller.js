@@ -2140,6 +2140,8 @@
                 if (maintStarted) {
                     completed++;
                     log('\ud83d\udd27 Batch [' + (i + 1) + '/' + servers.length + ']: ' + srv.name + ' — maintenance started!', 'success');
+                    // Notify popup to update this server's status tag to IN MAINTENANCE immediately
+                    window.postMessage({ type: 'COR3_VALUABLE_FORCE_MAINT_SERVER_DONE', serverId: srv.id, serverName: srv.name }, '*');
                 } else if (running) {
                     log('\ud83d\udd27 Batch [' + (i + 1) + '/' + servers.length + ']: ' + srv.name + ' — did not trigger after ' + MAX_ATTEMPTS + ' attempts', 'warn');
                     failed.push(srv.name + ' (max attempts)');

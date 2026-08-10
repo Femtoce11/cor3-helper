@@ -722,6 +722,68 @@
             color: var(--accent-orange);
             background-color: color-mix(in srgb, var(--accent-orange) 20%, transparent);
         }
+        .rented-tag.grace {
+            border-color: #e06666;
+            color: #e06666;
+            background-color: color-mix(in srgb, #e06666 20%, transparent);
+        }
+        .stash-grace-box {
+            border-radius: 8px;
+            overflow: hidden;
+            margin-top: 6px;
+        }
+        .stash-grace-header {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 6px 8px;
+            font-family: 'Roboto Mono', monospace;
+            font-weight: 700;
+            font-size: 13px;
+            line-height: 100%;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            border-radius: 8px 8px 0 0;
+            color: #e06666;
+            background: rgba(224, 102, 102, 0.2);
+            border: 1px solid #e06666;
+        }
+        .stash-grace-body {
+            display: flex;
+            flex-direction: column;
+            border: 1px solid var(--border);
+            border-top: none;
+            border-radius: 0 0 8px 8px;
+        }
+        .stash-grace-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 5px 10px;
+            font-size: 13px;
+            color: var(--text-dim);
+        }
+        .stash-grace-row + .stash-grace-row {
+            border-top: 1px solid var(--border);
+        }
+        .stash-grace-row .grace-value {
+            color: #e06666;
+            font-family: monospace;
+        }
+        .stash-extend-btn {
+            background: var(--accent-orange);
+            color: var(--bg-primary);
+            border: none;
+            border-radius: 6px;
+            padding: 6px 14px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 8px;
+            align-self: flex-end;
+        }
+        .stash-extend-btn:hover { opacity: 0.85; }
+        .stash-extend-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
         /* Inventory items */
         .space-badge {
@@ -1682,7 +1744,8 @@
         .loadout-hw-replace-list {
             display: none;
             margin-top: 4px;
-            border: 1px solid rgba(96, 108, 124, 0.5);
+            margin-bottom: 6px;
+            border: 2px solid var(--accent-light-cyan);
             border-radius: 4px;
             padding: 6px;
             background: rgba(21, 28, 34, 0.8);

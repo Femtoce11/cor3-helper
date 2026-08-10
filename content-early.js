@@ -1735,10 +1735,16 @@ var webVersion = null;
         return true;
     };
 
-    // --- Specialists WS send function ---
+    // --- Specialists WS send functions ---
     window.__cor3RequestSpecialists = function () {
         console.log('[COR3 Helper] Requesting specialists data');
         var msg = '42["event",{"event":{"name":"specialists","action":"get.state"},"data":{}}]';
+        wsSend(msg);
+        return true;
+    };
+    window.__cor3PurchaseSpecialist = function (specialistType, kind, level, priceId) {
+        console.log('[COR3 Helper] Purchasing specialist service:', specialistType, kind, level, priceId);
+        var msg = '42["event",{"event":{"name":"specialists","action":"purchase"},"data":{"specialistType":"' + specialistType + '","kind":"' + kind + '","level":' + level + ',"priceId":"' + priceId + '"}}]';
         wsSend(msg);
         return true;
     };
@@ -3198,6 +3204,9 @@ var webVersion = null;
         }
         if (event.data && event.data.type === 'COR3_REQUEST_SPECIALISTS') {
             window.__cor3RequestSpecialists();
+        }
+        if (event.data && event.data.type === 'COR3_PURCHASE_SPECIALIST') {
+            window.__cor3PurchaseSpecialist(event.data.specialistType, event.data.kind, event.data.level, event.data.priceId);
         }
         if (event.data && event.data.type === 'COR3_REQUEST_LOADOUT') {
             window.__cor3RequestLoadout();

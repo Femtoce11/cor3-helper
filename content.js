@@ -1495,6 +1495,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     } else if (request.action === "requestSpecialists") {
         window.postMessage({ type: 'COR3_REQUEST_SPECIALISTS' }, '*');
         sendResponse({ success: true });
+    } else if (request.action === "purchaseSpecialist") {
+        window.postMessage({ type: 'COR3_PURCHASE_SPECIALIST', specialistType: request.specialistType, kind: request.kind, level: request.level, priceId: request.priceId }, '*');
+        sendResponse({ success: true });
     } else if (request.action === "requestLoadout") {
         window.postMessage({ type: 'COR3_REQUEST_LOADOUT' }, '*');
         sendResponse({ success: true });
@@ -2267,6 +2270,9 @@ window.addEventListener('message', (event) => {
                 chrome.storage.local.set({ forceMaintenanceInProgress: fm });
             }
         });
+    }
+    if (event.data && event.data.type === 'COR3_VALUABLE_FORCE_MAINT_SERVER_DONE') {
+        chrome.storage.local.set({ valuableForceMaintenanceServerDone: { serverId: event.data.serverId, serverName: event.data.serverName, ts: Date.now() } });
     }
     if (event.data && event.data.type === 'COR3_VALUABLE_FORCE_MAINT_DONE') {
         var fmDoneData = { done: true };

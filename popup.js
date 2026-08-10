@@ -1308,11 +1308,13 @@ function renderSpecialistTimers(data) {
     if (!data || !data.specialists || !Array.isArray(data.specialists)) return;
 
     let activeTemp = null;
+    let activeSpecialist = null;
     for (const specialist of data.specialists) {
         if (!specialist.temporary || !Array.isArray(specialist.temporary)) continue;
         for (const temp of specialist.temporary) {
             if (temp.owned && temp.expiresAt) {
                 activeTemp = temp;
+                activeSpecialist = specialist;
                 break;
             }
         }
@@ -1324,6 +1326,35 @@ function renderSpecialistTimers(data) {
     const expiresAt = new Date(activeTemp.expiresAt).getTime();
     const gracePeriodEndAt = activeTemp.gracePeriodEndAt ? new Date(activeTemp.gracePeriodEndAt).getTime() : null;
     const bonusSlots = activeTemp.bonusSlots || '?';
+    const isInGrace = activeTemp.status === 'IN_GRACE';
+
+    // Find the extend price (credits-only option from the same temp entry)
+    let extendPriceId = null;
+    let extendCredits = null;
+    if (activeTemp.prices && activeTemp.prices.length > 0) {
+        // Prefer credits-only price (no items required)
+        var creditsOnly = activeTemp.prices.find(function (p) { return !p.items || p.items.length === 0; });
+        var priceEntry = creditsOnly || activeTemp.prices[0];
+        extendPriceId = priceEntry.id;
+        extendCredits = priceEntry.credits;
+    }
+
+    var itemsToLose = 0;
+    if (isInGrace) {
+        try {
+            chrome.storage.local.get('stashData', function (result) {
+                var stash = result.stashData;
+                if (!stash) return;
+                var baseCapacity = (stash.maxCapacity || 0) - (bonusSlots || 0);
+                if (baseCapacity < 0) baseCapacity = 0;
+                var used = stash.currentUsage || (stash.items ? stash.items.length : 0);
+                var overflow = used - baseCapacity;
+                if (overflow < 0) overflow = 0;
+                var el = specialistTimerInfo.querySelector('.stash-grace-items-to-lose');
+                if (el) el.textContent = overflow;
+            });
+        } catch (e) { /* ignore */ }
+    }
 
     function formatCountdown(ms) {
         if (ms <= 0) return 'EXPIRED';
@@ -1347,14 +1378,62 @@ function renderSpecialistTimers(data) {
         html += '<img src="https://cdn.cor3.gg/corie/characters/avatars/veran_avatar.png" alt="Specialist" loading="lazy">';
         html += '<div class="item-details">';
         html += '<div class="item-name" style="margin-bottom: 6px;">Stash Expansion Service</div>';
-        html += '<div class="item-badges"><span class="rented-tag">Rented: ' + bonusSlots + '</span></div>';
-        html += '<div class="specialist-timer-row">Expires in: <span class="specialist-timer">' + formatCountdown(expiryRemaining) + '</span></div>';
-        if (graceRemaining !== null) {
-            html += '<div class="specialist-timer-row">Grace period ends: <span class="specialist-grace">' + formatCountdown(graceRemaining) + '</span></div>';
+        html += '<div class="item-badges"><span class="rented-tag' + (isInGrace ? ' grace' : '') + '">Rented: ' + bonusSlots + '</span></div>';
+
+        if (isInGrace) {
+            html += '<div class="stash-grace-box">';
+            html += '<div class="stash-grace-header">THE RENT HAS ENDED</div>';
+            html += '<div class="stash-grace-body">';
+            html += '<div class="stash-grace-row"><span>Items to lose</span><span class="grace-value stash-grace-items-to-lose">0</span></div>';
+            html += '<div class="stash-grace-row"><span>Expired slots</span><span class="grace-value">' + bonusSlots + '</span></div>';
+            html += '<div class="stash-grace-row"><span>Left time</span><span class="grace-value">' + formatCountdown(graceRemaining || 0) + '</span></div>';
+            html += '</div></div>';
+            if (extendPriceId) {
+                html += '<div style="display:flex;justify-content:flex-end;margin-top:4px;">';
+                html += '<button class="stash-extend-btn" id="stashExtendBtn">Extend (\ud83d\udcb0' + (extendCredits || '?').toLocaleString() + ')</button>';
+                html += '</div>';
+            }
+            html += '</div></div>';
+        } else {
+            html += '<div class="specialist-timer-row">Expires in: <span class="specialist-timer">' + formatCountdown(expiryRemaining) + '</span></div>';
+            if (graceRemaining !== null) {
+                html += '<div class="specialist-timer-row">Grace period ends: <span class="specialist-grace">' + formatCountdown(graceRemaining) + '</span></div>';
+            }
+            html += '</div></div>';
         }
-        html += '</div></div>';
+
         specialistTimerInfo.innerHTML = html;
         specialistTimerInfo.style.display = '';
+
+        // Attach extend button handler
+        var extBtn = document.getElementById('stashExtendBtn');
+        if (extBtn && extendPriceId) {
+            extBtn.addEventListener('click', function () {
+                extBtn.disabled = true;
+                extBtn.textContent = 'Extending...';
+                getCor3Tab().then(function (tab) {
+                    if (!tab) { extBtn.disabled = false; extBtn.textContent = 'Extend (💰' + (extendCredits || '?').toLocaleString() + ')'; return; }
+                    chrome.tabs.sendMessage(tab.id, {
+                        action: 'purchaseSpecialist',
+                        specialistType: activeSpecialist.specialistType || 'ENGINEER',
+                        kind: activeTemp.kind || 'TEMPORARY',
+                        level: activeTemp.level,
+                        priceId: extendPriceId
+                    }).then(function () {
+                        extBtn.textContent = 'Sent! Refreshing...';
+                        // Refresh specialist data after purchase
+                        setTimeout(function () {
+                            chrome.tabs.sendMessage(tab.id, { action: 'requestSpecialists' });
+                        }, 2000);
+                        setTimeout(function () { loadSpecialistTimers(); }, 4000);
+                    }).catch(function () {
+                        extBtn.disabled = false;
+                        extBtn.textContent = 'Extend (💰' + (extendCredits || '?').toLocaleString() + ')';
+                    });
+                });
+            });
+        }
+
         if (expiryRemaining <= 0 && (graceRemaining === null || graceRemaining <= 0)) {
             if (_specialistTimerInterval) { clearInterval(_specialistTimerInterval); _specialistTimerInterval = null; }
         }
@@ -6891,6 +6970,20 @@ chrome.storage.onChanged.addListener((changes, area) => {
                     statusEl.textContent = sid === fm.currentServerId ? 'FORCING...' : 'QUEUED';
                 }
             });
+        }
+    }
+    if (changes.valuableForceMaintenanceServerDone && changes.valuableForceMaintenanceServerDone.newValue) {
+        const sd = changes.valuableForceMaintenanceServerDone.newValue;
+        const statusEl = valuableContentMaintenance.querySelector(`.maint-status[data-server-id="${sd.serverId}"]`);
+        if (statusEl) {
+            statusEl.classList.remove('upcoming', 'in-progress');
+            statusEl.classList.add('in-maintenance');
+            statusEl.style.background = '';
+            statusEl.style.color = '';
+            statusEl.style.textAlign = '';
+            statusEl.style.justifySelf = '';
+            statusEl.style.width = '';
+            statusEl.textContent = 'IN MAINTENANCE';
         }
     }
     if (changes.valuableForceMaintenanceDone) {

@@ -3932,6 +3932,21 @@
                     job.error = errText;
                     job.maintenanceEndsAt = null;
                     log('⚠️ Job skipped (unreachable): ' + job.name + ' — ' + errText, 'warn');
+                } else if (e.message && (e.message.includes('internal-error') || e.message.includes('Internal server error'))) {
+                    job.status = 'pending';
+                    job.error = null;
+                    log('⚠️ Internal server error on job: ' + job.name + ' — delaying entire process for 5 minutes before retrying...', 'warn');
+                    updateTracker();
+                    for (var waitMin = 5; waitMin > 0 && !abortFlag; waitMin--) {
+                        log('⏳ Waiting ' + waitMin + ' minute(s) before resuming...', 'info');
+                        await delay(60000);
+                    }
+                    if (!abortFlag) {
+                        log('Resuming after internal server error delay — retrying job: ' + job.name);
+                        i--; // retry the same job
+                    }
+                    _currentJobRef = null;
+                    continue;
                 } else if (e.message && (e.message.includes('Timeout') || e.message.includes('timed out') || e.message.includes('timeout'))) {
                     job.status = 'skipped';
                     job.error = errText + ' (will retry next run)';
