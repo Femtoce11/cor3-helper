@@ -127,8 +127,28 @@ export function setupMessageListener() {
             window.postMessage({ type: 'COR3_LEAVE_STASH' }, '*');
             sendResponse({ success: true });
         } else if (request.action === "sellItem") {
-            window.postMessage({ type: 'COR3_SELL_ITEM', itemId: request.itemId, quantity: request.quantity || 1 }, '*');
+            window.postMessage({ type: 'COR3_SELL_ITEM', itemId: request.itemId, quantity: request.quantity || 1, skipStashRefresh: !!request.skipStashRefresh }, '*');
             sendResponse({ success: true });
+        } else if (request.action === "batchSellItems") {
+            // Drive batch through the proven single-sell path, skipping per-sell stash
+            // refresh; one explicit stash refresh is requested afterwards by the popup.
+            const items = request.items || [];
+            console.log('[COR3 Helper] batchSellItems requested, n=', Array.isArray(items) ? items.length : 0);
+            if (!Array.isArray(items) || items.length === 0) {
+                sendResponse({ success: true, count: 0 });
+                return;
+            }
+            let bi = 0;
+            (function sellNextOne() {
+                if (bi >= items.length) {
+                    sendResponse({ success: true, count: items.length });
+                    return;
+                }
+                const it = items[bi++];
+                window.postMessage({ type: 'COR3_SELL_ITEM', itemId: it.itemId, quantity: it.quantity || 1, skipStashRefresh: true }, '*');
+                setTimeout(sellNextOne, 800 + Math.floor(Math.random() * 200));
+            })();
+            return true; // async sendResponse when the batch finishes
         } else if (request.action === "keepWorkerAlive") {
             window.postMessage({ type: 'COR3_KEEP_ALIVE' }, '*');
             sendResponse({ success: true });

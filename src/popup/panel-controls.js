@@ -61,29 +61,13 @@ const sidePanelBtn = document.getElementById('sidePanelBtn');
 
     let marketsSection = null;
     for (const s of allSections) {
+        if (s.style.display === 'none') continue; // hidden by Info Panel toggle
         if (s.querySelector('#marketContainer')) { marketsSection = s; break; }
     }
     if (marketsSection) {
+        // Keep all four markets grouped under one "Markets" card (each market is collapsible)
         wrappedEls.add(marketsSection);
-        const mTitle = marketsSection.querySelector(':scope > .section-title');
-        const subSections = marketsSection.querySelectorAll(':scope > .sub-section');
-        const overlays = [
-            marketsSection.querySelector('#marketInfoOverlay'),
-            marketsSection.querySelector('#marketInfoPopup')
-        ].filter(Boolean);
-
-        if (subSections.length > 0) {
-            const firstGroup = [mTitle, subSections[0]].filter(Boolean);
-            if (subSections.length === 1) firstGroup.push(...overlays);
-            addCard(firstGroup);
-            for (let mi = 1; mi < subSections.length; mi++) {
-                const group = [subSections[mi]];
-                if (mi === subSections.length - 1) group.push(...overlays);
-                addCard(group);
-            }
-        } else {
-            addCard([marketsSection]);
-        }
+        addCard([marketsSection]);
     }
 
     let expeditionsSection = null;
@@ -94,34 +78,18 @@ const sidePanelBtn = document.getElementById('sidePanelBtn');
         }
     }
     if (expeditionsSection) {
+        // Keep Expeditions (title + mode tabs + A/B layer panels) as ONE card
         wrappedEls.add(expeditionsSection);
-        const expChildren = Array.from(expeditionsSection.children);
-        const splitPoints = [
-            { id: 'personalDroneSectionToggle', label: 'Personal Drone' },
-            { id: 'decisionsSectionToggle', label: 'Decisions' },
-            { id: 'inventorySectionToggle', label: 'Inventory' },
-            { id: 'mercenariesSectionToggle', label: 'Mercenaries' },
-            { id: 'archivedExpSectionToggle', label: 'Archived' }
-        ];
-        const splitIndices = [];
-        for (const sp of splitPoints) {
-            const idx = expChildren.findIndex(el =>
-                el.nodeType === 1 && (el.id === sp.id || el.querySelector('#' + sp.id))
-            );
-            if (idx >= 0) splitIndices.push(idx);
-        }
-        splitIndices.sort((a, b) => a - b);
+        addCard([expeditionsSection]);
+    }
 
-        if (splitIndices.length > 0) {
-            addCard(expChildren.slice(0, splitIndices[0]));
-            for (let si = 0; si < splitIndices.length; si++) {
-                const start = splitIndices[si];
-                const end = si + 1 < splitIndices.length ? splitIndices[si + 1] : expChildren.length;
-                addCard(expChildren.slice(start, end));
-            }
-        } else {
-            addCard([expeditionsSection]);
-        }
+    let inventorySection = null;
+    for (const s of allSections) {
+        if (s.id === 'inventoryPanelSection') { inventorySection = s; break; }
+    }
+    if (inventorySection) {
+        wrappedEls.add(inventorySection);
+        addCard([inventorySection]);
     }
 
     let loadoutSection = null;
@@ -132,22 +100,9 @@ const sidePanelBtn = document.getElementById('sidePanelBtn');
         }
     }
     if (loadoutSection) {
+        // Keep Loadout with its three sub-blocks (Hardwares / Softwares / System Overview) as ONE card
         wrappedEls.add(loadoutSection);
-        const ldChildren = Array.from(loadoutSection.children);
-        const swToggleIdx = ldChildren.findIndex(el => el.querySelector('#loadoutSwToggle') || el.id === 'loadoutSwToggle');
-        const ovToggleIdx = ldChildren.findIndex(el => el.querySelector('#loadoutOverviewToggle') || el.id === 'loadoutOverviewToggle');
-        const ldSplits = [swToggleIdx, ovToggleIdx].filter(i => i >= 0).sort((a, b) => a - b);
-
-        if (ldSplits.length > 0) {
-            addCard(ldChildren.slice(0, ldSplits[0]));
-            for (let li = 0; li < ldSplits.length; li++) {
-                const start = ldSplits[li];
-                const end = li + 1 < ldSplits.length ? ldSplits[li + 1] : ldChildren.length;
-                addCard(ldChildren.slice(start, end));
-            }
-        } else {
-            addCard([loadoutSection]);
-        }
+        addCard([loadoutSection]);
     }
 
     for (const s of allSections) {
@@ -166,9 +121,7 @@ const sidePanelBtn = document.getElementById('sidePanelBtn');
     if (st) versionEls.push(st);
     addCard(versionEls);
 
-    if (marketsSection) marketsSection.remove();
-    if (expeditionsSection) expeditionsSection.remove();
-    if (loadoutSection) loadoutSection.remove();
+    // Markets, Expeditions, Inventory and Loadout were moved whole into cards above.
 
     const remaining = Array.from(mainView.children).filter(
         el => !wrappedEls.has(el) && el !== headerRow && !el.classList.contains('theme-dropdown') && el !== grid

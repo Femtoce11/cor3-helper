@@ -50,6 +50,8 @@
             <span class="daily-section-symbol">֎</span>
             <span class="daily-section-title">Automation/QoL Toggles</span>
         </div>
+        <!-- Collapsible body: fully hidden until the button below is pressed -->
+        <div id="togglesBody" style="display:none;">
         <!-- Hack Automation Toggles -->
         <div class="auto-decrypt-title">
             <span>Hack Automation Toggles</span>
@@ -84,8 +86,6 @@
             </div>
         </div>
         <div id="iceWallSolverStatusLine" style="display:none;font-size:10px;margin-top:6px;padding:6px 8px;background:var(--bg-card);border-radius:6px;border:1px solid var(--border);color:var(--accent-cyan);"></div>
-        <!-- Show More / Show Less -->
-        <div id="togglesExtra" style="display:none;">
             <!-- Auto Simple Decrypt Hacking -->
             <div class="auto-decrypt-row" style="margin-top:8px;">
                 <div style="display:flex;gap:6px;">
@@ -205,9 +205,27 @@
                     </label>
                 </div>
             </div>
+            <!-- Info Panel Visibility (information panels, not automation) -->
+            <div class="auto-decrypt-title" style="margin-top:8px;">
+                <span>Info Panel Toggles</span>
+            </div>
+            <div class="auto-decrypt-row" style="margin-top:8px;">
+                <span class="decrypt-label">📅 Daily Ops</span>
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <span class="decrypt-status" id="dailyOpsPanelStatus">On</span>
+                    <label class="alarm-toggle-switch"><input type="checkbox" id="dailyOpsPanelToggle" checked><span class="slider-track"></span></label>
+                </div>
+            </div>
+            <div class="auto-decrypt-row" style="margin-top:8px;">
+                <span class="decrypt-label">🏪 Markets</span>
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <span class="decrypt-status" id="marketsPanelStatus">On</span>
+                    <label class="alarm-toggle-switch"><input type="checkbox" id="marketsPanelToggle" checked><span class="slider-track"></span></label>
+                </div>
+            </div>
         </div>
-        <div style="text-align:center;margin-top:8px;">
-            <button id="togglesShowMoreBtn" style="background:none;border:1px solid var(--border);color:var(--text-secondary);font-size:10px;padding:3px 12px;border-radius:6px;cursor:pointer;">Show More ▼</button>
+        <div style="text-align:center;margin:10px 0 2px;">
+            <button id="togglesShowMoreBtn" style="width:100%;background:var(--btn-bg);border:1px solid var(--border);color:var(--text-secondary);font-size:12px;font-weight:600;padding:8px 12px;border-radius:8px;cursor:pointer;">Show toggles ▾</button>
         </div>
     </div>
 
@@ -332,7 +350,7 @@
     </div>
 
     <!-- Daily Ops -->
-    <div class="section">
+    <div class="section" id="dailyOpsPanelSection">
         <div class="daily-section-title">
             <div>
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" data-sentry-element="Icon" data-sentry-component="getTabBarIcon" data-sentry-source-file="get-tab-bar-icon.tsx" style="vertical-align: -3px;">
@@ -352,55 +370,75 @@
     </div>
 
     <!-- Markets -->
-    <div class="section">
+    <div class="section" id="marketsPanelSection">
         <div class="section-title">🏪 Markets</div>
         <div class="sub-section">
             <div class="market-sub-header">
-                <span class="market-sub-label" id="coreMarketLabel">Market-1</span>
+                <div class="expandable-header open" id="coreMarketToggle" style="flex:1;">
+                    <span class="expand-arrow-sub">▶</span>
+                    <span class="market-sub-label" id="coreMarketLabel">Market-1</span>
+                </div>
                 <div style="display:flex;gap:4px;">
                     <button id="cleanupCoreMarketBtn" class="refresh-btn-small" title="Clear failed jobs - this button will disappear once cleanup is complete" style="display:none;">🧹</button>
                     <button id="refreshMarketBtn" class="refresh-btn-small" title="Refresh Market">🔄</button>
                     <button id="pinCoreMarketBtn" class="refresh-btn-small pin-btn" title="Pin Market Timer">📌</button>
                 </div>
             </div>
+            <div class="expandable-body open" id="coreMarketBody">
             <div class="last-updated" id="coreMarketLastUpdated"></div>
             <div id="marketContainer"><div class="no-decisions">No market data cached yet.</div></div>
+            </div>
         </div>
         <div class="sub-section">
             <div class="market-sub-header">
-                <span class="market-sub-label" id="darkMarketLabel">Market-2</span>
+                <div class="expandable-header" id="darkMarketToggle" style="flex:1;">
+                    <span class="expand-arrow-sub">▶</span>
+                    <span class="market-sub-label" id="darkMarketLabel">Market-2</span>
+                </div>
                 <div style="display:flex;gap:4px;">
                     <button id="cleanupDarkMarketBtn" class="refresh-btn-small" title="Clear failed jobs - this button will disappear once cleanup is complete" style="display:none;">🧹</button>
                     <button id="refreshDarkMarketBtn" class="refresh-btn-small" title="Refresh Market">🔄</button>
                     <button id="pinDarkMarketBtn" class="refresh-btn-small pin-btn" title="Pin Market Timer">📌</button>
                 </div>
             </div>
+            <div class="expandable-body" id="darkMarketBody">
             <div class="last-updated" id="darkMarketLastUpdated"></div>
             <div id="darkMarketContainer"><div class="no-decisions">No market data cached yet.</div></div>
+            </div>
         </div>
         <div class="sub-section">
             <div class="market-sub-header">
-                <span class="market-sub-label" id="soyuzMarketLabel">Market-3</span>
+                <div class="expandable-header" id="soyuzMarketToggle" style="flex:1;">
+                    <span class="expand-arrow-sub">▶</span>
+                    <span class="market-sub-label" id="soyuzMarketLabel">Market-3</span>
+                </div>
                 <div style="display:flex;gap:4px;">
                     <button id="cleanupSoyuzMarketBtn" class="refresh-btn-small" title="Clear failed jobs - this button will disappear once cleanup is complete" style="display:none;">🧹</button>
                     <button id="refreshSoyuzMarketBtn" class="refresh-btn-small" title="Refresh Market">🔄</button>
                     <button id="pinSoyuzMarketBtn" class="refresh-btn-small pin-btn" title="Pin Market Timer">📌</button>
                 </div>
             </div>
+            <div class="expandable-body" id="soyuzMarketBody">
             <div class="last-updated" id="soyuzMarketLastUpdated"></div>
             <div id="soyuzMarketContainer"><div class="no-decisions">No market data cached yet.</div></div>
+            </div>
         </div>
         <div class="sub-section">
             <div class="market-sub-header">
-                <span class="market-sub-label" id="usolMarketLabel">Market-4</span>
+                <div class="expandable-header" id="usolMarketToggle" style="flex:1;">
+                    <span class="expand-arrow-sub">▶</span>
+                    <span class="market-sub-label" id="usolMarketLabel">Market-4</span>
+                </div>
                 <div style="display:flex;gap:4px;">
                     <button id="cleanupUsolMarketBtn" class="refresh-btn-small" title="Clear failed jobs - this button will disappear once cleanup is complete" style="display:none;">🧹</button>
                     <button id="refreshUsolMarketBtn" class="refresh-btn-small" title="Refresh Market">🔄</button>
                     <button id="pinUsolMarketBtn" class="refresh-btn-small pin-btn" title="Pin Market Timer">📌</button>
                 </div>
             </div>
+            <div class="expandable-body" id="usolMarketBody">
             <div class="last-updated" id="usolMarketLastUpdated"></div>
             <div id="usolMarketContainer"><div class="no-decisions">No market data cached yet.</div></div>
+            </div>
         </div>
         <div class="loadout-hw-info-overlay" id="marketInfoOverlay"></div>
         <div class="loadout-hw-info-popup" id="marketInfoPopup"></div>
@@ -417,106 +455,32 @@
             </div>
         </div>
 
-        <!-- Active Expeditions -->
+
+        <!-- Expedition mode tabs: Mercenaries (A layer) / Personal Drone (A layer) -->
+        <div class="auto-jobs-tabs" id="expModeTabs">
+            <button class="auto-jobs-tab active" id="expTabMercenaries">⚔️ Mercenaries</button>
+            <button class="auto-jobs-tab" id="expTabDrone">🛩️ Personal Drone Assembling</button>
+        </div>
+        <!-- A layer: Mercenaries -->
+        <div id="expPanelMercenaries" class="auto-jobs-tab-content active">
+        <!-- Active Expeditions (B layer, collapsible) -->
         <div class="market-sub-header">
-            <div style="display: flex; gap: 3px;">
+            <div class="expandable-header open" id="mercExpActiveToggle" style="flex:1;">
+                <span class="expand-arrow-sub">▶</span>
+                <div style="display: flex; gap: 3px;">
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 20 20" fill="none" data-sentry-element="Icon" data-sentry-component="getTabBarIcon" data-sentry-source-file="get-tab-bar-icon.tsx" style="vertical-align: -4px;">
                     <path d="M17.2203 13.9921L16.9063 13.5136L16.5176 12.9156L16.3084 12.6016C16.1738 12.3973 16.0293 12.2727 15.8749 12.2278C15.7254 12.1779 15.5609 12.1605 15.3816 12.1755H13.8792L10.9044 15.1434H13.5204L13.7895 14.8967L14.7761 13.9921H17.2203ZM1.40447 16.1003L1.39699 16.1078L1.28487 16.2722L1.14286 16.4965C0.853852 16.9949 1.00334 17.2665 1.59133 17.3113H18.4087C18.9967 17.2665 19.1461 16.9949 18.8571 16.4965L18.7899 16.3844L18.7674 16.3619L18.7151 16.2722L18.7076 16.2573L18.6778 16.2124L18.6628 16.1975L18.1919 15.4798L18.1022 15.3452L17.8182 14.9041H15.2545L13.9913 16.0554H6.02362L4.76045 14.9041H2.18928L1.52405 15.9134L1.48667 15.9807L1.40447 16.1003ZM4.12513 12.2278C3.99059 12.2627 3.86601 12.3624 3.75141 12.5268L3.70656 12.5792L2.78723 13.9921H5.23881L6.22544 14.8967L6.49451 15.1434H9.08811L8.84147 14.8967L6.12079 12.1755H4.61845C4.43905 12.1605 4.27462 12.1779 4.12513 12.2278ZM14.2903 4.05674C14.2953 3.21445 13.8518 2.75844 12.9598 2.68866H7.06257C6.1706 2.75844 5.72462 3.21445 5.72464 4.05674V10.0374L6.63653 10.9494L6.87571 11.1887L7.74272 12.0484L9.55154 13.8501V13.8575L10 14.2986L10.4485 13.8575L12.2647 12.0484L13.2812 11.0391L14.2903 10.0374V4.05674ZM7.77263 7.57037L6.77105 7.12182L9.0059 6.12754L10.0075 3.88479L11.009 6.12754L13.2439 7.12182L12.2423 7.57037L11.009 8.12358L10.0075 10.3588L9.0059 8.12358L7.77263 7.57037Z" fill="rgba(118, 193, 209, 1)"></path>
                 </svg>
                 <span class="market-sub-label"> Active Expedition</span>
+            </div>
             </div>
             <div style="display:flex;gap:4px;">
                 <button id="refreshExpeditionsBtn" class="refresh-btn-small" title="Refresh Expeditions">🔄</button>
             </div>
         </div>
         <div class="last-updated" id="expeditionLastUpdated"></div>
-        <div id="expeditionInfoContainer"><div class="no-decisions">No expedition data yet.</div></div>
-
-        <!-- Personal Drone Assembling (expandable) -->
-        <div class="expandable-header" id="personalDroneSectionToggle">
-            <span class="expand-arrow-sub">▶</span>
-            <div style="display: flex; gap: 2px;">
-                <svg width="17" height="17" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" data-sentry-element="GearIcon" data-sentry-source-file="expeditions-tabs.tsx">
-                    <path d="M4.7224 11.0233C4.92261 10.9534 5.14197 10.9623 5.33578 11.0485C5.52959 11.1346 5.68326 11.2914 5.7655 11.4869C5.84773 11.6824 5.85234 11.9019 5.77837 12.1006C5.7044 12.2994 5.55743 12.4625 5.3674 12.5567L5.2774 12.595C5.01693 12.6871 4.78342 12.8425 4.59786 13.0471C4.4123 13.2518 4.28051 13.4994 4.21432 13.7676C4.14813 14.0359 4.14963 14.3163 4.21867 14.5838C4.28771 14.8514 4.42214 15.0975 4.60987 15.3002C4.79761 15.5029 5.03276 15.6558 5.2942 15.7451C5.55564 15.8344 5.83517 15.8574 6.10768 15.8119C6.38018 15.7664 6.63713 15.654 6.85541 15.4846C7.07369 15.3153 7.24648 15.0943 7.35824 14.8417L7.40574 14.7225C7.43986 14.6164 7.49491 14.5183 7.56763 14.4339C7.64035 14.3494 7.72926 14.2804 7.8291 14.231C7.92895 14.1815 8.0377 14.1526 8.14892 14.1459C8.26014 14.1392 8.37158 14.1549 8.47664 14.192C8.5817 14.2291 8.67825 14.2869 8.76058 14.362C8.8429 14.4371 8.90934 14.5279 8.95595 14.6291C9.00256 14.7303 9.0284 14.8399 9.03194 14.9512C9.03548 15.0626 9.01665 15.1735 8.97657 15.2775C8.78898 15.8087 8.46987 16.2837 8.04902 16.6581C7.62817 17.0326 7.1193 17.2943 6.56992 17.4188C6.02055 17.5434 5.44856 17.5267 4.90737 17.3704C4.36618 17.2141 3.87342 16.9231 3.47509 16.5248C3.07676 16.1265 2.78585 15.6337 2.62951 15.0925C2.47317 14.5513 2.4565 13.9794 2.58106 13.43C2.70562 12.8806 2.96734 12.3717 3.3418 11.9509C3.71625 11.53 4.19123 11.2109 4.7224 11.0233ZM15.2774 11.0233C15.8086 11.2109 16.2836 11.53 16.658 11.9509C17.0325 12.3717 17.2942 12.8806 17.4187 13.43C17.5433 13.9794 17.5266 14.5513 17.3703 15.0925C17.214 15.6337 16.923 16.1265 16.5247 16.5248C16.1264 16.9231 15.6336 17.2141 15.0924 17.3704C14.5512 17.5267 13.9793 17.5434 13.4299 17.4188C12.8805 17.2943 12.3716 17.0326 11.9508 16.6581C11.5299 16.2837 11.2108 15.8087 11.0232 15.2775C10.9533 15.0773 10.9623 14.8579 11.0484 14.6641C11.1345 14.4703 11.2913 14.3166 11.4868 14.2344C11.6823 14.1522 11.9018 14.1476 12.1005 14.2215C12.2993 14.2955 12.4624 14.4425 12.5566 14.6325L12.5949 14.7225C12.687 14.983 12.8424 15.2165 13.0471 15.402C13.2517 15.5876 13.4993 15.7194 13.7675 15.7856C14.0358 15.8518 14.3162 15.8503 14.5838 15.7812C14.8513 15.7122 15.0974 15.5778 15.3001 15.39C15.5028 15.2023 15.6557 14.9671 15.745 14.7057C15.8343 14.4443 15.8573 14.1647 15.8118 13.8922C15.7663 13.6197 15.6539 13.3628 15.4845 13.1445C15.3152 12.9262 15.0942 12.7534 14.8416 12.6417L14.7224 12.595C14.6192 12.5586 14.5242 12.5021 14.4428 12.429C14.3614 12.3558 14.2952 12.2674 14.248 12.1686C14.1527 11.9692 14.1405 11.7401 14.2141 11.5317C14.2877 11.3233 14.441 11.1526 14.6405 11.0573C14.8399 10.9619 15.069 10.9497 15.2774 11.0233ZM6.67574 5.53333L6.76157 5.59167L8.97657 7.315C9.24994 7.52767 9.58277 7.64989 9.92881 7.66468C10.2748 7.67946 10.6169 7.58608 10.9074 7.3975L11.0232 7.315L13.2382 5.5925C13.3915 5.47316 13.5816 5.41109 13.7757 5.41702C13.9698 5.42295 14.1558 5.49651 14.3015 5.62498C14.4471 5.75345 14.5434 5.92877 14.5735 6.12064C14.6037 6.31251 14.5658 6.50889 14.4666 6.67583L14.4082 6.76167L12.6849 8.97667C12.4722 9.25004 12.35 9.58287 12.3352 9.92891C12.3204 10.2749 12.4138 10.617 12.6024 10.9075L12.6849 11.0233L14.4074 13.2383C14.5267 13.3916 14.5888 13.5817 14.5829 13.7758C14.5769 13.9699 14.5034 14.1559 14.3749 14.3016C14.2465 14.4472 14.0711 14.5435 13.8793 14.5736C13.6874 14.6037 13.491 14.5659 13.3241 14.4667L13.2382 14.4083L11.0232 12.685C10.7499 12.4723 10.417 12.3501 10.071 12.3353C9.72496 12.3205 9.38292 12.4139 9.0924 12.6025L8.97657 12.685L6.76157 14.4075C6.60833 14.5268 6.41822 14.5889 6.22409 14.583C6.02996 14.577 5.84399 14.5035 5.69832 14.375C5.55266 14.2465 5.45644 14.0712 5.4263 13.8794C5.39616 13.6875 5.43398 13.4911 5.53324 13.3242L5.59157 13.2383L7.3149 11.0233C7.52757 10.75 7.6498 10.4171 7.66458 10.0711C7.67937 9.72506 7.58598 9.38301 7.3974 9.0925L7.3149 8.97667L5.5924 6.76167C5.47824 6.6153 5.41622 6.43501 5.41617 6.24938C5.41612 6.06376 5.47804 5.88343 5.59212 5.737C5.7062 5.59057 5.86591 5.48643 6.04591 5.44108C6.22591 5.39573 6.41589 5.41177 6.58574 5.48667L6.67574 5.53333ZM14.1666 2.5C14.9532 2.49964 15.7146 2.77748 16.3161 3.28437C16.9176 3.79127 17.3205 4.49456 17.4535 5.26985C17.5864 6.04514 17.4409 6.84249 17.0427 7.52085C16.6445 8.19921 16.0192 8.71489 15.2774 8.97667C15.0772 9.04664 14.8578 9.03765 14.664 8.95152C14.4702 8.8654 14.3165 8.70861 14.2343 8.51312C14.1521 8.31763 14.1475 8.09813 14.2214 7.89937C14.2954 7.7006 14.4424 7.53751 14.6324 7.44333L14.7224 7.405C14.9829 7.3129 15.2164 7.15753 15.4019 6.95285C15.5875 6.74817 15.7193 6.50059 15.7855 6.23236C15.8517 5.96413 15.8502 5.68366 15.7811 5.41615C15.7121 5.14864 15.5777 4.90248 15.3899 4.69979C15.2022 4.4971 14.967 4.34423 14.7056 4.25491C14.4442 4.1656 14.1646 4.14264 13.8921 4.18811C13.6196 4.23358 13.3627 4.34604 13.1444 4.51539C12.9261 4.68474 12.7533 4.90567 12.6416 5.15833L12.5949 5.2775C12.5213 5.48592 12.3679 5.65656 12.1685 5.75189C11.9691 5.84722 11.74 5.85943 11.5316 5.78583C11.3232 5.71224 11.1525 5.55886 11.0572 5.35945C10.9618 5.16003 10.9496 4.93092 11.0232 4.7225C11.253 4.07245 11.6787 3.50965 12.2416 3.11161C12.8046 2.71357 13.4771 2.49989 14.1666 2.5ZM5.83324 2.5C6.52269 2.49989 7.19522 2.71357 7.75818 3.11161C8.32113 3.50965 8.74681 4.07245 8.97657 4.7225C9.04655 4.92271 9.03755 5.14206 8.95143 5.33587C8.8653 5.52968 8.70852 5.68336 8.51302 5.7656C8.31753 5.84783 8.09804 5.85243 7.89927 5.77847C7.7005 5.7045 7.53741 5.55753 7.44324 5.3675L7.4049 5.2775C7.31281 5.01703 7.15744 4.78352 6.95275 4.59796C6.74807 4.4124 6.50049 4.2806 6.23226 4.21442C5.96403 4.14823 5.68356 4.14973 5.41605 4.21877C5.14855 4.28781 4.90239 4.42224 4.69969 4.60997C4.497 4.7977 4.34413 5.03285 4.25481 5.29429C4.1655 5.55573 4.14255 5.83527 4.18801 6.10777C4.23348 6.38028 4.34594 6.63722 4.51529 6.85551C4.68464 7.07379 4.90558 7.24657 5.15824 7.35833L5.2774 7.40583C5.4798 7.48387 5.64379 7.63775 5.73453 7.83478C5.82527 8.03181 5.83561 8.25646 5.76335 8.46099C5.69108 8.66552 5.54191 8.83381 5.34754 8.9301C5.15316 9.02639 4.9289 9.0431 4.7224 8.97667C3.98161 8.71402 3.35741 8.19811 2.96 7.52001C2.56259 6.84191 2.41751 6.04521 2.55038 5.27054C2.68324 4.49588 3.08551 3.79305 3.68617 3.28613C4.28683 2.77921 5.04726 2.50078 5.83324 2.5Z" fill="rgba(118, 193, 209, 1)"></path>
-                </svg>
-                <span class="market-sub-label"> Personal Drone Assembling <span style="font-size:9px;color:var(--text-dim);"></span></span>
-            </div>
-        </div>
-        <div class="last-updated" id="personalDroneLastUpdated"></div>
-        <div class="expandable-body" id="personalDroneSectionBody">
-            <div id="personalDroneContainer"></div>
-        </div>
-
-        <!-- Decisions (expandable) -->
-        <div class="expandable-header" id="decisionsSectionToggle">
-            <span class="expand-arrow-sub">▶</span>
-            <span class="market-sub-label">📋 Decisions <span id="decisionsCount" style="font-size:9px;color:var(--text-dim);"></span></span>
-        </div>
-        <div class="last-updated" id="decisionLastUpdated"></div>
-        <div class="expandable-body" id="decisionsSectionBody">
-            <!-- Modifier controls -->
-            <div id="modifierDisplay" style="font-size:10px;margin-bottom:6px;margin-top:2px;">
-                <span style="color:var(--text-muted);">Loot: <strong id="modLootDisplay">1</strong> · Risk: <strong id="modRiskDisplay">-5</strong></span>
-                <span id="modDefaultsNote" style="color:var(--accent-orange);font-size:9px;margin-left:6px;display:none;">(defaults)</span>
-                <button id="editModifiersBtn" class="refresh-btn-small" style="margin-left:8px;font-size:9px;padding:2px 6px;vertical-align:1px;" title="Edit modifiers">✏️</button>
-            </div>
-            <div id="modifierEditRow" style="display:none;font-size:10px;margin-bottom:6px;margin-top:2px;">
-                <label>Loot × <input type="number" id="lootModifier" min="0" max="9" value="1" style="width:36px;"></label>
-                <label style="margin-left:8px;">Risk × <input type="number" id="riskModifier" min="-9" max="0" value="-5" style="width:36px;"></label>
-                <button id="saveModifiersBtn" class="refresh-btn-small" style="margin-left:8px;font-size:9px;padding:2px 6px;">💾 Save</button>
-                <button id="cancelModifiersBtn" class="refresh-btn-small" style="margin-left:4px;font-size:9px;padding:2px 6px;">Cancel</button>
-            </div>
-            <div class="auto-choose-row">
-                <span style="font-size:10px;">Apply modifiers to scores</span>
-                <label class="alarm-toggle-switch" style="margin-right:6px;">
-                    <input type="checkbox" id="modifiersEnabledToggle" checked>
-                    <span class="slider-track"></span>
-                </label>
-            </div>
-            <div class="auto-choose-row">
-                <span style="font-size:10px;">Get rid of Veterans (🎖️)</span>
-                <label class="alarm-toggle-switch" style="margin-right:6px;">
-                    <input type="checkbox" id="getRidOfVeteransToggle">
-                    <span class="slider-track"></span>
-                </label>
-            </div>
-            <div class="auto-choose-row">
-                <span style="font-size:10px;">Auto-choose highest score before deadline</span>
-                <label class="alarm-toggle-switch" style="margin-right:6px;">
-                    <input type="checkbox" id="autoChooseCheckbox">
-                    <span class="slider-track"></span>
-                </label>
-            </div>
-            <div class="auto-choose-row" id="noWaitRow" style="display:none;">
-                <span style="font-size:10px;">Do not wait to auto choose</span>
-                <label class="alarm-toggle-switch" style="margin-right:6px;">
-                    <input type="checkbox" id="noWaitAutoChooseCheckbox">
-                    <span class="slider-track"></span>
-                </label>
-            </div>
-            <div id="decisionsContainer"></div>
-        </div>
-
-        <!-- Inventory (expandable) -->
-        <div class="market-sub-header" style="margin-top:8px;">
-            <div class="expandable-header" id="inventorySectionToggle" style="flex:1;">
-                <span class="expand-arrow-sub">▶</span>
-                <div style="display: flex; gap: 3px;">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 20 20" fill="none" data-sentry-element="StashIcon" data-sentry-source-file="expeditions-stash-panel.tsx">
-                        <path d="M16.6667 5H3.33333C2.8731 5 2.5 5.3731 2.5 5.83333V16.6667C2.5 17.1269 2.8731 17.5 3.33333 17.5H16.6667C17.1269 17.5 17.5 17.1269 17.5 16.6667V5.83333C17.5 5.3731 17.1269 5 16.6667 5Z" stroke="rgba(118, 193, 209, 1)" stroke-width="1.66667" stroke-linejoin="round"></path>
-                        <path d="M7.47917 10.0033H12.4792M2.5 5.41659L5.41667 2.08325H14.5833L17.5 5.41659" stroke="rgba(118, 193, 209, 1)" stroke-width="1.66667" stroke-linecap="round" stroke-linejoin="round"></path>
-                    </svg>
-                    <span class="market-sub-label"> Inventory <span id="spaceInfo" class="space-badge" style="font-size:9px;padding:2px 6px;">-- / --</span> <span id="totalValue" style="font-size:10px;color:var(--accent-green);font-weight:normal;"></span></span>
-                </div>
-            </div>
-            <button id="refreshInventoryBtn" class="refresh-btn-small" title="Refresh Inventory">🔄</button>
-        </div>
-        <div class="last-updated" id="inventoryLastUpdated"></div>
-        <div class="expandable-body" id="inventorySectionBody">
-            <div id="specialistTimerInfo" style="display:none;"></div>
-            <div id="inventoryContainer"><div class="no-decisions">Loading inventory...</div></div>
-            <div class="loadout-hw-info-overlay" id="inventoryInfoOverlay"></div>
-            <div class="loadout-hw-info-popup" id="inventoryInfoPopup"></div>
+        <div class="expandable-body open" id="mercExpActiveBody">
+            <div id="expeditionInfoContainer"><div class="no-decisions">No expedition data yet.</div></div>
         </div>
 
         <!-- Mercenaries (expandable) -->
@@ -600,6 +564,56 @@
             <div id="mercenariesContainer"><div class="no-decisions">Loading mercenaries...</div></div>
         </div>
 
+        <!-- Decisions (expandable) -->
+        <div class="expandable-header" id="decisionsSectionToggle">
+            <span class="expand-arrow-sub">▶</span>
+            <span class="market-sub-label">📋 Decisions <span id="decisionsCount" style="font-size:9px;color:var(--text-dim);"></span></span>
+        </div>
+        <div class="last-updated" id="decisionLastUpdated"></div>
+        <div class="expandable-body" id="decisionsSectionBody">
+            <!-- Modifier controls -->
+            <div id="modifierDisplay" style="font-size:10px;margin-bottom:6px;margin-top:2px;">
+                <span style="color:var(--text-muted);">Loot: <strong id="modLootDisplay">1</strong> · Risk: <strong id="modRiskDisplay">-5</strong></span>
+                <span id="modDefaultsNote" style="color:var(--accent-orange);font-size:9px;margin-left:6px;display:none;">(defaults)</span>
+                <button id="editModifiersBtn" class="refresh-btn-small" style="margin-left:8px;font-size:9px;padding:2px 6px;vertical-align:1px;" title="Edit modifiers">✏️</button>
+            </div>
+            <div id="modifierEditRow" style="display:none;font-size:10px;margin-bottom:6px;margin-top:2px;">
+                <label>Loot × <input type="number" id="lootModifier" min="0" max="9" value="1" style="width:36px;"></label>
+                <label style="margin-left:8px;">Risk × <input type="number" id="riskModifier" min="-9" max="0" value="-5" style="width:36px;"></label>
+                <button id="saveModifiersBtn" class="refresh-btn-small" style="margin-left:8px;font-size:9px;padding:2px 6px;">💾 Save</button>
+                <button id="cancelModifiersBtn" class="refresh-btn-small" style="margin-left:4px;font-size:9px;padding:2px 6px;">Cancel</button>
+            </div>
+            <div class="auto-choose-row">
+                <span style="font-size:10px;">Apply modifiers to scores</span>
+                <label class="alarm-toggle-switch" style="margin-right:6px;">
+                    <input type="checkbox" id="modifiersEnabledToggle" checked>
+                    <span class="slider-track"></span>
+                </label>
+            </div>
+            <div class="auto-choose-row">
+                <span style="font-size:10px;">Get rid of Veterans (🎖️)</span>
+                <label class="alarm-toggle-switch" style="margin-right:6px;">
+                    <input type="checkbox" id="getRidOfVeteransToggle">
+                    <span class="slider-track"></span>
+                </label>
+            </div>
+            <div class="auto-choose-row">
+                <span style="font-size:10px;">Auto-choose highest score before deadline</span>
+                <label class="alarm-toggle-switch" style="margin-right:6px;">
+                    <input type="checkbox" id="autoChooseCheckbox">
+                    <span class="slider-track"></span>
+                </label>
+            </div>
+            <div class="auto-choose-row" id="noWaitRow" style="display:none;">
+                <span style="font-size:10px;">Do not wait to auto choose</span>
+                <label class="alarm-toggle-switch" style="margin-right:6px;">
+                    <input type="checkbox" id="noWaitAutoChooseCheckbox">
+                    <span class="slider-track"></span>
+                </label>
+            </div>
+            <div id="decisionsContainer"></div>
+        </div>
+
         <!-- Archived Expeditions -->
         <div class="market-sub-header">
             <div class="expandable-header" id="archivedExpSectionToggle" style="flex:1;">
@@ -611,7 +625,151 @@
         <div class="last-updated" id="archivedExpLastUpdated"></div>
         <div class="expandable-body" id="archivedExpSectionBody">
             <div id="archivedExpContainer"><div class="no-decisions">Loading archived expeditions...</div></div>
+        </div>        </div>
+        <!-- A layer: Personal Drone -->
+        <div id="expPanelDrone" class="auto-jobs-tab-content">
+            <!-- B layer: Active Expedition -->
+            <div class="market-sub-header" style="margin-top:8px;">
+                <div class="expandable-header open" id="droneExpActiveToggle" style="flex:1;">
+                    <span class="expand-arrow-sub">▶</span>
+                    <span class="market-sub-label">📍 Active Expedition</span>
+                </div>
+                <button id="refreshDroneActiveBtn" class="refresh-btn-small" title="Refresh Drone Mission">🔄</button>
+            </div>
+            <div class="last-updated" id="droneActiveLastUpdated"></div>
+            <div class="expandable-body open" id="droneExpActiveBody">
+                <div id="droneActiveContainer"><div class="no-decisions">No active drone mission.</div></div>
+            </div>
+
+        <!-- Personal Drone Assembling (expandable) -->
+        <div class="expandable-header" id="personalDroneSectionToggle">
+            <span class="expand-arrow-sub">▶</span>
+            <div style="display: flex; gap: 2px;">
+                <svg width="17" height="17" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" data-sentry-element="GearIcon" data-sentry-source-file="expeditions-tabs.tsx">
+                    <path d="M4.7224 11.0233C4.92261 10.9534 5.14197 10.9623 5.33578 11.0485C5.52959 11.1346 5.68326 11.2914 5.7655 11.4869C5.84773 11.6824 5.85234 11.9019 5.77837 12.1006C5.7044 12.2994 5.55743 12.4625 5.3674 12.5567L5.2774 12.595C5.01693 12.6871 4.78342 12.8425 4.59786 13.0471C4.4123 13.2518 4.28051 13.4994 4.21432 13.7676C4.14813 14.0359 4.14963 14.3163 4.21867 14.5838C4.28771 14.8514 4.42214 15.0975 4.60987 15.3002C4.79761 15.5029 5.03276 15.6558 5.2942 15.7451C5.55564 15.8344 5.83517 15.8574 6.10768 15.8119C6.38018 15.7664 6.63713 15.654 6.85541 15.4846C7.07369 15.3153 7.24648 15.0943 7.35824 14.8417L7.40574 14.7225C7.43986 14.6164 7.49491 14.5183 7.56763 14.4339C7.64035 14.3494 7.72926 14.2804 7.8291 14.231C7.92895 14.1815 8.0377 14.1526 8.14892 14.1459C8.26014 14.1392 8.37158 14.1549 8.47664 14.192C8.5817 14.2291 8.67825 14.2869 8.76058 14.362C8.8429 14.4371 8.90934 14.5279 8.95595 14.6291C9.00256 14.7303 9.0284 14.8399 9.03194 14.9512C9.03548 15.0626 9.01665 15.1735 8.97657 15.2775C8.78898 15.8087 8.46987 16.2837 8.04902 16.6581C7.62817 17.0326 7.1193 17.2943 6.56992 17.4188C6.02055 17.5434 5.44856 17.5267 4.90737 17.3704C4.36618 17.2141 3.87342 16.9231 3.47509 16.5248C3.07676 16.1265 2.78585 15.6337 2.62951 15.0925C2.47317 14.5513 2.4565 13.9794 2.58106 13.43C2.70562 12.8806 2.96734 12.3717 3.3418 11.9509C3.71625 11.53 4.19123 11.2109 4.7224 11.0233ZM15.2774 11.0233C15.8086 11.2109 16.2836 11.53 16.658 11.9509C17.0325 12.3717 17.2942 12.8806 17.4187 13.43C17.5433 13.9794 17.5266 14.5513 17.3703 15.0925C17.214 15.6337 16.923 16.1265 16.5247 16.5248C16.1264 16.9231 15.6336 17.2141 15.0924 17.3704C14.5512 17.5267 13.9793 17.5434 13.4299 17.4188C12.8805 17.2943 12.3716 17.0326 11.9508 16.6581C11.5299 16.2837 11.2108 15.8087 11.0232 15.2775C10.9533 15.0773 10.9623 14.8579 11.0484 14.6641C11.1345 14.4703 11.2913 14.3166 11.4868 14.2344C11.6823 14.1522 11.9018 14.1476 12.1005 14.2215C12.2993 14.2955 12.4624 14.4425 12.5566 14.6325L12.5949 14.7225C12.687 14.983 12.8424 15.2165 13.0471 15.402C13.2517 15.5876 13.4993 15.7194 13.7675 15.7856C14.0358 15.8518 14.3162 15.8503 14.5838 15.7812C14.8513 15.7122 15.0974 15.5778 15.3001 15.39C15.5028 15.2023 15.6557 14.9671 15.745 14.7057C15.8343 14.4443 15.8573 14.1647 15.8118 13.8922C15.7663 13.6197 15.6539 13.3628 15.4845 13.1445C15.3152 12.9262 15.0942 12.7534 14.8416 12.6417L14.7224 12.595C14.6192 12.5586 14.5242 12.5021 14.4428 12.429C14.3614 12.3558 14.2952 12.2674 14.248 12.1686C14.1527 11.9692 14.1405 11.7401 14.2141 11.5317C14.2877 11.3233 14.441 11.1526 14.6405 11.0573C14.8399 10.9619 15.069 10.9497 15.2774 11.0233ZM6.67574 5.53333L6.76157 5.59167L8.97657 7.315C9.24994 7.52767 9.58277 7.64989 9.92881 7.66468C10.2748 7.67946 10.6169 7.58608 10.9074 7.3975L11.0232 7.315L13.2382 5.5925C13.3915 5.47316 13.5816 5.41109 13.7757 5.41702C13.9698 5.42295 14.1558 5.49651 14.3015 5.62498C14.4471 5.75345 14.5434 5.92877 14.5735 6.12064C14.6037 6.31251 14.5658 6.50889 14.4666 6.67583L14.4082 6.76167L12.6849 8.97667C12.4722 9.25004 12.35 9.58287 12.3352 9.92891C12.3204 10.2749 12.4138 10.617 12.6024 10.9075L12.6849 11.0233L14.4074 13.2383C14.5267 13.3916 14.5888 13.5817 14.5829 13.7758C14.5769 13.9699 14.5034 14.1559 14.3749 14.3016C14.2465 14.4472 14.0711 14.5435 13.8793 14.5736C13.6874 14.6037 13.491 14.5659 13.3241 14.4667L13.2382 14.4083L11.0232 12.685C10.7499 12.4723 10.417 12.3501 10.071 12.3353C9.72496 12.3205 9.38292 12.4139 9.0924 12.6025L8.97657 12.685L6.76157 14.4075C6.60833 14.5268 6.41822 14.5889 6.22409 14.583C6.02996 14.577 5.84399 14.5035 5.69832 14.375C5.55266 14.2465 5.45644 14.0712 5.4263 13.8794C5.39616 13.6875 5.43398 13.4911 5.53324 13.3242L5.59157 13.2383L7.3149 11.0233C7.52757 10.75 7.6498 10.4171 7.66458 10.0711C7.67937 9.72506 7.58598 9.38301 7.3974 9.0925L7.3149 8.97667L5.5924 6.76167C5.47824 6.6153 5.41622 6.43501 5.41617 6.24938C5.41612 6.06376 5.47804 5.88343 5.59212 5.737C5.7062 5.59057 5.86591 5.48643 6.04591 5.44108C6.22591 5.39573 6.41589 5.41177 6.58574 5.48667L6.67574 5.53333ZM14.1666 2.5C14.9532 2.49964 15.7146 2.77748 16.3161 3.28437C16.9176 3.79127 17.3205 4.49456 17.4535 5.26985C17.5864 6.04514 17.4409 6.84249 17.0427 7.52085C16.6445 8.19921 16.0192 8.71489 15.2774 8.97667C15.0772 9.04664 14.8578 9.03765 14.664 8.95152C14.4702 8.8654 14.3165 8.70861 14.2343 8.51312C14.1521 8.31763 14.1475 8.09813 14.2214 7.89937C14.2954 7.7006 14.4424 7.53751 14.6324 7.44333L14.7224 7.405C14.9829 7.3129 15.2164 7.15753 15.4019 6.95285C15.5875 6.74817 15.7193 6.50059 15.7855 6.23236C15.8517 5.96413 15.8502 5.68366 15.7811 5.41615C15.7121 5.14864 15.5777 4.90248 15.3899 4.69979C15.2022 4.4971 14.967 4.34423 14.7056 4.25491C14.4442 4.1656 14.1646 4.14264 13.8921 4.18811C13.6196 4.23358 13.3627 4.34604 13.1444 4.51539C12.9261 4.68474 12.7533 4.90567 12.6416 5.15833L12.5949 5.2775C12.5213 5.48592 12.3679 5.65656 12.1685 5.75189C11.9691 5.84722 11.74 5.85943 11.5316 5.78583C11.3232 5.71224 11.1525 5.55886 11.0572 5.35945C10.9618 5.16003 10.9496 4.93092 11.0232 4.7225C11.253 4.07245 11.6787 3.50965 12.2416 3.11161C12.8046 2.71357 13.4771 2.49989 14.1666 2.5ZM5.83324 2.5C6.52269 2.49989 7.19522 2.71357 7.75818 3.11161C8.32113 3.50965 8.74681 4.07245 8.97657 4.7225C9.04655 4.92271 9.03755 5.14206 8.95143 5.33587C8.8653 5.52968 8.70852 5.68336 8.51302 5.7656C8.31753 5.84783 8.09804 5.85243 7.89927 5.77847C7.7005 5.7045 7.53741 5.55753 7.44324 5.3675L7.4049 5.2775C7.31281 5.01703 7.15744 4.78352 6.95275 4.59796C6.74807 4.4124 6.50049 4.2806 6.23226 4.21442C5.96403 4.14823 5.68356 4.14973 5.41605 4.21877C5.14855 4.28781 4.90239 4.42224 4.69969 4.60997C4.497 4.7977 4.34413 5.03285 4.25481 5.29429C4.1655 5.55573 4.14255 5.83527 4.18801 6.10777C4.23348 6.38028 4.34594 6.63722 4.51529 6.85551C4.68464 7.07379 4.90558 7.24657 5.15824 7.35833L5.2774 7.40583C5.4798 7.48387 5.64379 7.63775 5.73453 7.83478C5.82527 8.03181 5.83561 8.25646 5.76335 8.46099C5.69108 8.66552 5.54191 8.83381 5.34754 8.9301C5.15316 9.02639 4.9289 9.0431 4.7224 8.97667C3.98161 8.71402 3.35741 8.19811 2.96 7.52001C2.56259 6.84191 2.41751 6.04521 2.55038 5.27054C2.68324 4.49588 3.08551 3.79305 3.68617 3.28613C4.28683 2.77921 5.04726 2.50078 5.83324 2.5Z" fill="rgba(118, 193, 209, 1)"></path>
+                </svg>
+                <span class="market-sub-label"> Personal Drone Assembling <span style="font-size:9px;color:var(--text-dim);"></span></span>
+            </div>
         </div>
+        <div class="last-updated" id="personalDroneLastUpdated"></div>
+        <div class="expandable-body" id="personalDroneSectionBody">
+            <div style="display:flex;justify-content:flex-end;margin-bottom:4px;">
+                <button id="refreshDroneBtn" class="refresh-btn-small" title="Refresh Drone">🔄</button>
+            </div>
+            <div class="auto-choose-row">
+                <span style="font-size:10px;">Auto-dispatch drone</span>
+                <label class="alarm-toggle-switch"><input type="checkbox" id="autoDroneToggle"><span class="slider-track"></span></label>
+            </div>
+            <div class="auto-choose-row">
+                <span style="font-size:10px;">Auto-claim rewards</span>
+                <label class="alarm-toggle-switch"><input type="checkbox" id="autoDroneClaimToggle"><span class="slider-track"></span></label>
+            </div>
+            <div class="auto-choose-row">
+                <span style="font-size:10px;">Auto-resolve mission events</span>
+                <label class="alarm-toggle-switch"><input type="checkbox" id="autoDroneDecideToggle"><span class="slider-track"></span></label>
+            </div>
+            <div class="auto-choose-row">
+                <span style="font-size:10px;">Auto-choose mission</span>
+                <label class="alarm-toggle-switch"><input type="checkbox" id="autoChooseDroneLocationToggle"><span class="slider-track"></span></label>
+            </div>
+            <div class="auto-choose-row" id="droneMissionSelectRow">
+                <span style="font-size:10px;">Destination</span>
+                <div style="display:flex;gap:4px;">
+                    <select id="droneLocationSelect" style="max-width:110px;font-size:10px;background:#11111b;color:var(--text-primary);border:1px solid var(--border);border-radius:4px;"></select>
+                    <select id="droneMissionSelect" style="max-width:110px;font-size:10px;background:#11111b;color:var(--text-primary);border:1px solid var(--border);border-radius:4px;"></select>
+                </div>
+            </div>
+            <div class="auto-choose-row">
+                <span style="font-size:10px;">Launch only when fully charged</span>
+                <label class="alarm-toggle-switch"><input type="checkbox" id="autoDroneFullChargeToggle"><span class="slider-track"></span></label>
+            </div>
+            <div class="auto-choose-row">
+                <span style="font-size:10px;">Auto-repair drone</span>
+                <label class="alarm-toggle-switch"><input type="checkbox" id="autoDroneRepairToggle"><span class="slider-track"></span></label>
+            </div>
+            <div class="auto-choose-row">
+                <span style="font-size:10px;">Repair below durability</span>
+                <input type="number" id="droneRepairThresholdInput" min="1" max="99" value="60" style="width:52px;font-size:10px;background:#11111b;color:var(--text-primary);border:1px solid var(--border);border-radius:4px;padding:2px 4px;">
+            </div>
+            <div class="auto-choose-row">
+                <span style="font-size:10px;">Repair when battery &lt; <input type="number" id="droneLowBatteryThresholdInput" min="1" max="99" value="30" style="width:40px;font-size:10px;background:#11111b;color:var(--text-primary);border:1px solid var(--border);border-radius:4px;padding:2px 4px;">%</span>
+                <label class="alarm-toggle-switch"><input type="checkbox" id="autoDroneRepairOnLowBatteryToggle"><span class="slider-track"></span></label>
+            </div>
+            <div class="auto-choose-row">
+                <span style="font-size:10px;">Pause if repair fails</span>
+                <label class="alarm-toggle-switch"><input type="checkbox" id="autoDronePauseOnFailToggle"><span class="slider-track"></span></label>
+            </div>
+            <div id="droneWarning" style="display:none;background:rgba(255,160,0,0.15);border:1px solid var(--accent-orange);border-radius:6px;padding:6px 10px;margin-bottom:6px;font-size:10px;color:var(--accent-orange);"></div>
+            <div id="personalDroneContainer"></div>
+
+        </div>
+            <!-- B layer: Decisions -->
+            <div class="expandable-header" id="droneDecisionsToggle">
+                <span class="expand-arrow-sub">▶</span>
+                <span class="market-sub-label">📋 Decisions <span id="droneDecisionsCount" style="font-size:9px;color:var(--text-dim);"></span></span>
+            </div>
+            <div class="last-updated" id="droneDecisionsLastUpdated"></div>
+            <div class="expandable-body" id="droneDecisionsSectionBody">
+                <div id="droneDecisionsContainer"><div class="no-decisions">No active mission decisions.</div></div>
+            </div>
+
+            <!-- B layer: Archived Expeditions -->
+            <div class="market-sub-header" style="margin-top:8px;">
+                <div class="expandable-header" id="droneArchivedToggle" style="flex:1;">
+                    <span class="expand-arrow-sub">▶</span>
+                    <span class="market-sub-label">📦 Archived Expeditions</span>
+                </div>
+                <button id="refreshDroneArchivedBtn" class="refresh-btn-small" title="Refresh Drone Archived">🔄</button>
+            </div>
+            <div class="last-updated" id="droneArchivedLastUpdated"></div>
+            <div class="expandable-body" id="droneArchivedSectionBody">
+                <div id="droneArchivedContainer"><div class="no-decisions">No archived drone missions.</div></div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Inventory (independent section, shared stash) -->
+    <div class="section" id="inventoryPanelSection">
+        <!-- Inventory (expandable) -->
+        <div class="market-sub-header" style="margin-top:8px;">
+            <div class="expandable-header" id="inventorySectionToggle" style="flex:1;">
+                <span class="expand-arrow-sub">▶</span>
+                <div style="display: flex; gap: 3px;">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 20 20" fill="none" data-sentry-element="StashIcon" data-sentry-source-file="expeditions-stash-panel.tsx">
+                        <path d="M16.6667 5H3.33333C2.8731 5 2.5 5.3731 2.5 5.83333V16.6667C2.5 17.1269 2.8731 17.5 3.33333 17.5H16.6667C17.1269 17.5 17.5 17.1269 17.5 16.6667V5.83333C17.5 5.3731 17.1269 5 16.6667 5Z" stroke="rgba(118, 193, 209, 1)" stroke-width="1.66667" stroke-linejoin="round"></path>
+                        <path d="M7.47917 10.0033H12.4792M2.5 5.41659L5.41667 2.08325H14.5833L17.5 5.41659" stroke="rgba(118, 193, 209, 1)" stroke-width="1.66667" stroke-linecap="round" stroke-linejoin="round"></path>
+                    </svg>
+                    <span class="market-sub-label"> Inventory <span id="spaceInfo" class="space-badge" style="font-size:9px;padding:2px 6px;">-- / --</span> <span id="totalValue" style="font-size:10px;color:var(--accent-green);font-weight:normal;"></span></span>
+                </div>
+            </div>
+            <button id="refreshInventoryBtn" class="refresh-btn-small" title="Refresh Inventory">🔄</button>
+        </div>
+        <div class="last-updated" id="inventoryLastUpdated"></div>
+        <div class="expandable-body" id="inventorySectionBody">
+            <div id="specialistTimerInfo" style="display:none;"></div>
+            <!-- Batch sell toolbar -->
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:8px;font-size:10px;color:var(--text-secondary);">
+                <span>Rarity</span>
+                <select id="invBatchRarity" style="width:auto;font-size:10px;background:#11111b;color:var(--text-primary);border:1px solid var(--border);border-radius:4px;padding:2px 4px;">
+                    <option value="COMMON" selected>COMMON</option>
+                    <option value="RARE">RARE</option>
+                    <option value="EPIC">EPIC</option>
+                </select>
+                <span>Tag</span>
+                <select id="invBatchTag" style="width:auto;font-size:10px;background:#11111b;color:var(--text-primary);border:1px solid var(--border);border-radius:4px;padding:2px 4px;">
+                    <option value="NONE" selected>NONE</option>
+                    <option value="CRAFT">CRAFT</option>
+                </select>
+                <span id="invBatchCount" style="color:var(--text-dim);">-</span>
+                <button id="invBatchSellBtn" class="refresh-btn-small" style="margin-left:auto;padding:4px 10px !important;font-size:11px;border:1px solid var(--accent-green);color:var(--accent-green);">Sell</button>
+            </div>
+            <div id="inventoryContainer"><div class="no-decisions">Loading inventory...</div></div>
+            <div class="loadout-hw-info-overlay" id="inventoryInfoOverlay"></div>
+            <div class="loadout-hw-info-popup" id="inventoryInfoPopup"></div>
+        </div>
+
+
     </div>
 
     <!-- Loadout Section -->

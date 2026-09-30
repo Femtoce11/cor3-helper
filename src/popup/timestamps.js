@@ -21,7 +21,7 @@ export function refreshAllTimestamps() {
     showLastUpdated(usolMarketLastUpdated, 'usolMarketDataUpdatedAt');
     showLastUpdated(expeditionLastUpdated, 'expeditionsDataUpdatedAt');
     showLastUpdated(decisionLastUpdated, 'expeditionsDataUpdatedAt');
-    showLastUpdated(personalDroneLastUpdated, 'expeditionsDataUpdatedAt');
+    showLastUpdated(personalDroneLastUpdated, 'droneDataUpdatedAt');
     if (inventoryLastUpdated) showLastUpdated(inventoryLastUpdated, 'stashDataUpdatedAt');
     if (archivedExpLastUpdated) showLastUpdated(archivedExpLastUpdated, 'archivedExpeditionsUpdatedAt');
     if (mercenariesLastUpdated) showLastUpdated(mercenariesLastUpdated, 'mercenariesUpdatedAt');

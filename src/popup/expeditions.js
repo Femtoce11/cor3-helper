@@ -18,12 +18,10 @@ let savedRiskMod = -5;
 
 const personalDroneSectionToggle = document.getElementById('personalDroneSectionToggle');
 const personalDroneSectionBody = document.getElementById('personalDroneSectionBody');
-const personalDroneContainer = document.getElementById('personalDroneContainer');
 
 personalDroneSectionToggle.addEventListener('click', async () => {
     personalDroneSectionToggle.classList.toggle('open');
     personalDroneSectionBody.classList.toggle('open');
-    personalDroneContainer.replaceChildren(_h('div', null, _h('div', {className: 'no-decisions'}, 'Soon\u2122')));
 });
 
 decisionsSectionToggle.addEventListener('click', () => {

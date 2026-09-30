@@ -85,9 +85,12 @@ export function renderPinnedTimers() {
         pinnedTimersContainer.appendChild(row);
     }
 
-    chrome.storage.local.get('expeditionsData', async (result) => {
+    chrome.storage.local.get(['expeditionsData', 'droneMissionData'], async (result) => {
         const exps = result.expeditionsData || [];
+        const droneMission = result.droneMissionData || null;
         const activeExpIds = new Set(exps.map(e => e.id));
+        const activeDroneId = droneMission && droneMission.status === 'RUNNING' ? droneMission.id : null;
+        if (activeDroneId) activeExpIds.add(activeDroneId);
         let staleRemoved = false;
 
         for (const key of Object.keys(state.pinnedTimers)) {
@@ -112,6 +115,15 @@ export function renderPinnedTimers() {
             const labelEl = pinnedTimersContainer.querySelector(`.pinned-exp-label[data-exp-id="${exp.id}"]`);
             if (labelEl) {
                 labelEl.textContent = `${exp.locationName || 'Expedition'} — ${exp.zoneName || ''}`;
+            }
+        }
+        if (activeDroneId) {
+            if (droneMission.endTime) state.expeditionEndTimes[activeDroneId] = droneMission.endTime;
+            const labelEl = pinnedTimersContainer.querySelector(`.pinned-exp-label[data-exp-id="${activeDroneId}"]`);
+            if (labelEl) {
+                const loc = (droneMission.location && droneMission.location.name) || '';
+                const mis = (droneMission.mission && droneMission.mission.name) || '';
+                labelEl.textContent = `${loc} — ${mis}`;
             }
         }
     });

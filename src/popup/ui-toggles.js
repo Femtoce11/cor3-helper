@@ -23,7 +23,7 @@ const autoUpdateMarketsStatus = document.getElementById('autoUpdateMarketsStatus
 const secretFinderToggle = document.getElementById('secretFinderToggle');
 const secretFinderStatus = document.getElementById('secretFinderStatus');
 const secretFinderLogEl = document.getElementById('secretFinderLog');
-const togglesExtra = document.getElementById('togglesExtra');
+const togglesBody = document.getElementById('togglesBody');
 const togglesShowMoreBtn = document.getElementById('togglesShowMoreBtn');
 
 function statusLabel(el, enabled) {
@@ -225,12 +225,15 @@ function initSecretFinder() {
 }
 
 function initTogglesShowMore() {
-    if (togglesShowMoreBtn && togglesExtra) {
+    if (togglesShowMoreBtn && togglesBody) {
+        const update = () => {
+            togglesShowMoreBtn.textContent = togglesBody.style.display === 'none' ? 'Show toggles ▾' : 'Hide toggles ▴';
+        };
         togglesShowMoreBtn.addEventListener('click', () => {
-            const isHidden = togglesExtra.style.display === 'none';
-            togglesExtra.style.display = isHidden ? '' : 'none';
-            togglesShowMoreBtn.textContent = isHidden ? 'Show Less ▲' : 'Show More ▼';
+            togglesBody.style.display = togglesBody.style.display === 'none' ? '' : 'none';
+            update();
         });
+        update();
     }
 }
 

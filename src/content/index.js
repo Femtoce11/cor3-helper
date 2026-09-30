@@ -5,6 +5,7 @@ import './helpers.js';
 import './auto-update-markets.js';
 import './auto-choose.js';
 import './auto-send.js';
+import './drone.js';
 import './alarms.js';
 import './auto-refresh.js';
 import './solvers.js';
