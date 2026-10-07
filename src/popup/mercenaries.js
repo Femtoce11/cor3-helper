@@ -13,6 +13,7 @@ const refreshMercenariesBtn = document.getElementById('refreshMercenariesBtn');
 const autoSendMercenaryToggle = document.getElementById('autoSendMercenaryToggle');
 const autoChooseMercToggle = document.getElementById('autoChooseMercToggle');
 const autoChooseUsolFirstToggle = document.getElementById('autoChooseUsolFirstToggle');
+const insureHighRiskToggle = document.getElementById('insureHighRiskToggle');
 const ignoreEliteMercToggle = document.getElementById('ignoreEliteMercToggle');
 const applyMercCostLimiterToggle = document.getElementById('applyMercCostLimiterToggle');
 const maxMercCostInput = document.getElementById('maxMercCostInput');
@@ -80,6 +81,7 @@ chrome.storage.sync.get('autoSendMerc', (data) => {
         autoSendMercenaryToggle.checked = !!data.autoSendMerc.enabled;
         if (autoChooseMercToggle) autoChooseMercToggle.checked = !!data.autoSendMerc.autoChooseMerc;
         if (autoChooseUsolFirstToggle) autoChooseUsolFirstToggle.checked = !!data.autoSendMerc.autoChooseUsolFirst;
+        if (insureHighRiskToggle) insureHighRiskToggle.checked = !!data.autoSendMerc.insureHighRisk;
         if (ignoreEliteMercToggle) ignoreEliteMercToggle.checked = !!data.autoSendMerc.ignoreEliteMerc;
         if (applyMercCostLimiterToggle) applyMercCostLimiterToggle.checked = !!data.autoSendMerc.applyMercCostLimiter;
         if (maxMercCostInput) maxMercCostInput.value = data.autoSendMerc.maxMercCost ?? 15000;
@@ -113,6 +115,7 @@ function saveAutoSendMercSettings() {
                     enabled: isEnabling,
                     autoChooseMerc: autoChooseMercToggle ? autoChooseMercToggle.checked : false,
                     autoChooseUsolFirst: autoChooseUsolFirstToggle ? autoChooseUsolFirstToggle.checked : false,
+                    insureHighRisk: insureHighRiskToggle ? insureHighRiskToggle.checked : false,
                     ignoreEliteMerc: ignoreEliteMercToggle ? ignoreEliteMercToggle.checked : false,
                     applyMercCostLimiter: applyMercCostLimiterToggle ? applyMercCostLimiterToggle.checked : false,
                     maxMercCost: maxMercCostInput ? parseInt(maxMercCostInput.value, 10) || 15000 : 15000,
@@ -145,6 +148,9 @@ if (autoChooseUsolFirstToggle) {
         saveAutoSendMercSettings();
         loadMercenaries();
     });
+}
+if (insureHighRiskToggle) {
+    insureHighRiskToggle.addEventListener('change', saveAutoSendMercSettings);
 }
 if (ignoreEliteMercToggle) {
     ignoreEliteMercToggle.addEventListener('change', () => {

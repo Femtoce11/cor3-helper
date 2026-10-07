@@ -39,7 +39,7 @@ export async function applyHelperMode(helper, mode) {
                 value = state.isHelper ? disabledValue : (oldValues[key] ?? disabledValue);
                 chrome.storage.sync.set({ [key]: value });
             } else if (key === 'autoSendMerc') {
-                disabledValue = {"autoChooseMerc":false,"autoChooseUsolFirst":false,"ignoreEliteMerc":false,"applyMercCostLimiter":false,"maxMercCost":15000,"disabledReason":null,"enabled":false,"mercenaryId":"","mercenaryName":""};
+                disabledValue = {"autoChooseMerc":false,"autoChooseUsolFirst":false,"insureHighRisk":false,"ignoreEliteMerc":false,"applyMercCostLimiter":false,"maxMercCost":15000,"disabledReason":null,"enabled":false,"mercenaryId":"","mercenaryName":""};
                 value = state.isHelper ? disabledValue : (oldValues[key] ?? disabledValue);
                 chrome.storage.sync.set({ [key]: value });
             } else if (key === 'decisionModifiers') {
@@ -105,6 +105,7 @@ export async function applyHelperMode(helper, mode) {
         (document.getElementById('autoSendMercenaryToggle')).checked = !!toggles.autoSendMerc.enabled ?? false;
         (document.getElementById('autoChooseMercToggle')).checked = !!toggles.autoSendMerc.autoChooseMerc ?? false;
         (document.getElementById('autoChooseUsolFirstToggle')).checked = !!toggles.autoSendMerc.autoChooseUsolFirst ?? false;
+        (document.getElementById('insureHighRiskToggle')).checked = !!toggles.autoSendMerc.insureHighRisk ?? false;
         (document.getElementById('ignoreEliteMercToggle')).checked = !!toggles.autoSendMerc.ignoreEliteMerc ?? false;
         (document.getElementById('applyMercCostLimiterToggle')).checked = !!toggles.autoSendMerc.applyMercCostLimiter ?? false;
         (document.getElementById('maxMercCostInput')).value = toggles.autoSendMerc.maxMercCost ?? 15000;
@@ -129,7 +130,7 @@ export async function applyHelperMode(helper, mode) {
 
     // Auto Decisions and Auto Mercs
 
-    ['noWaitAutoChooseCheckbox', 'autoChooseCheckbox', 'autoSellCheapestToggle', 'autoChooseMercToggle', 'autoChooseUsolFirstToggle', 'ignoreEliteMercToggle', 'applyMercCostLimiterToggle', 'getRidOfVeteransToggle', 'autoSendMercenaryToggle'].forEach(key => {
+    ['noWaitAutoChooseCheckbox', 'autoChooseCheckbox', 'autoSellCheapestToggle', 'autoChooseMercToggle', 'autoChooseUsolFirstToggle', 'insureHighRiskToggle', 'ignoreEliteMercToggle', 'applyMercCostLimiterToggle', 'getRidOfVeteransToggle', 'autoSendMercenaryToggle'].forEach(key => {
         ((document.getElementById(key)).closest('.auto-choose-row')).style.display = state.isHelper ? 'none' : 'flex';
     });
 
