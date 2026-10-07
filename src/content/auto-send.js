@@ -228,9 +228,10 @@ export function proceedWithMerc(mercId, allMercs, settings, localData) {
         _automationFinish('auto-send');
         return;
     }
-    const mercConfig = localData.mercConfigData && localData.mercConfigData[mercId];
-    const isHighRisk = mercConfig && String(mercConfig.riskLevel).toUpperCase() === 'HIGH';
-    const hasInsurance = !!(settings.autoSendMerc.insureHighRisk && isHighRisk && mercConfig.isInsuranceAvailable);
+    const mercConfig = localData.mercConfigData?.[mercId];
+    const insuranceEnabled = settings.autoSendMerc.insureHighRisk === true;
+    const isHighRisk = String(mercConfig?.riskLevel ?? '').trim().toUpperCase() === 'HIGH';
+    const hasInsurance = insuranceEnabled && isHighRisk && !!mercConfig?.isInsuranceAvailable;
     const launchConfig = {
         mercenaryId: mercId,
         marketId: marketId,
@@ -239,9 +240,6 @@ export function proceedWithMerc(mercId, allMercs, settings, localData) {
         goalId: goal.id,
         hasInsurance
     };
-    if (settings.autoSendMerc.insureHighRisk && isHighRisk) {
-        console.log('[COR3 Helper] Auto-send: high-risk mercenary detected; insurance', hasInsurance ? 'enabled' : 'unavailable');
-    }
     console.log('[COR3 Helper] Auto-send: launching expedition with mercenary:', selectedMerc.callsign, '(' + (isUsol ? 'USOL' : 'CORE') + ')');
     setTimeout(() => {
         chrome.storage.local.set({ lastExpeditionLaunchData: launchConfig });

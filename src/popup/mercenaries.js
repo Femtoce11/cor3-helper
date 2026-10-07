@@ -128,6 +128,18 @@ function saveAutoSendMercSettings() {
     }
 }
 
+function saveInsureHighRiskSetting() {
+    if (state.isHelper || !insureHighRiskToggle) return;
+    chrome.storage.sync.get('autoSendMerc', (data) => {
+        chrome.storage.sync.set({
+            autoSendMerc: {
+                ...(data.autoSendMerc || {}),
+                insureHighRisk: insureHighRiskToggle.checked
+            }
+        });
+    });
+}
+
 autoSendMercenaryToggle.addEventListener('change', () => {
     saveAutoSendMercSettings();
     if (autoSendMercenaryToggle.checked) {
@@ -150,7 +162,7 @@ if (autoChooseUsolFirstToggle) {
     });
 }
 if (insureHighRiskToggle) {
-    insureHighRiskToggle.addEventListener('change', saveAutoSendMercSettings);
+    insureHighRiskToggle.addEventListener('change', saveInsureHighRiskSetting);
 }
 if (ignoreEliteMercToggle) {
     ignoreEliteMercToggle.addEventListener('change', () => {
