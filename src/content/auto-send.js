@@ -228,14 +228,27 @@ export function proceedWithMerc(mercId, allMercs, settings, localData) {
         _automationFinish('auto-send');
         return;
     }
+    // Insurance is an optional launch modifier only. It must never affect which
+    // mercenary is selected or whether an otherwise-valid launch proceeds.
+    const mercConfig = localData.mercConfigData?.[mercId];
+    const insuranceEnabled = settings.autoSendMerc.insureHighRisk === true;
+    const isHighRisk = String(mercConfig?.riskLevel ?? '').trim().toUpperCase() === 'HIGH';
+    const hasInsurance = insuranceEnabled && isHighRisk && !!mercConfig?.isInsuranceAvailable;
     const launchConfig = {
         mercenaryId: mercId,
         marketId: marketId,
         locationConfigId: loc.id,
         zoneConfigId: zone.id,
         goalId: goal.id,
-        hasInsurance: false
+        hasInsurance
     };
+    if (insuranceEnabled) {
+        if (isHighRisk) {
+            console.log('[COR3 Helper] Auto-send: high-risk mercenary detected; insurance', hasInsurance ? 'enabled' : 'unavailable');
+        } else {
+            console.log('[COR3 Helper] Auto-send: mercenary is not high risk; launching without insurance');
+        }
+    }
     console.log('[COR3 Helper] Auto-send: launching expedition with mercenary:', selectedMerc.callsign, '(' + (isUsol ? 'USOL' : 'CORE') + ')');
     setTimeout(() => {
         chrome.storage.local.set({ lastExpeditionLaunchData: launchConfig });
