@@ -1,7 +1,7 @@
 // Message listener: handles postMessage requests from content.js / popup
 import { wsSend, wsSendRaw, leaveRoom } from './ws-send.js';
 import { OrigWebSocket, trackedSockets, socketLastActivity, getActiveSocket, setActiveSocket } from './state.js';
-import { calculateAnalysis, findHackSoftwareForServerType, findBestHardware, getServerTypeName } from '../shared/loadout-resolver.js';
+import { findHackSoftwareForServerType, findBestSoftwareLoadout, getServerTypeName, hardwareMatches } from '../shared/loadout-resolver.js';
 
 // Periodic socket health check: clean up dead sockets and detect stale connections
 export function installSocketHealthCheck() {
@@ -136,35 +136,29 @@ export function installMessageListener() {
                             var allSw = loadout.ownedSoftware || [];
                             var equippedSwIds = (loadout.equippedSoftware || []).map(function (s) { return s.id; });
                             var hackCandidates = findHackSoftwareForServerType(allSw, serverTypeName);
-                            addLog('⚡ Loadout: found ' + hackCandidates.length + ' hack candidate(s) for ' + serverTypeName + (hackCandidates.length > 0 ? ' — best: ' + hackCandidates[0].sw.name : ''));
                             if (hackCandidates.length === 0) {
                                 addLog('⚡ Loadout: no hack software for ' + serverTypeName + ' — proceeding anyway');
                                 resolve(true);
                                 return;
                             }
-                            var bestHack = hackCandidates[0];
+                            var bestHack = findBestSoftwareLoadout(loadout, hackCandidates, 'HACK');
+                            if (!bestHack) {
+                                addLog('⚡ Loadout: no bootable hack software for ' + serverTypeName + ' — proceeding anyway');
+                                resolve(true);
+                                return;
+                            }
+                            addLog('⚡ Loadout: found ' + hackCandidates.length + ' hack candidate(s) for ' + serverTypeName + ' — best: ' + bestHack.sw.name + ' (power ' + bestHack.power + ')');
                             var targetSwIds = [bestHack.sw.id];
-                            var alreadyBest = equippedSwIds.length === 1 && equippedSwIds[0] === bestHack.sw.id;
+                            var currentHw = loadout.equippedHardware || {};
+                            var alreadyBest = equippedSwIds.length === 1 && equippedSwIds[0] === bestHack.sw.id &&
+                                hardwareMatches(currentHw, bestHack.hardware);
                             if (alreadyBest) {
                                 addLog('⚡ Loadout: best hack software "' + bestHack.sw.name + '" already equipped');
                                 resolve(true);
                                 return;
                             }
-                            var currentHw = loadout.equippedHardware || {};
-                            var analysis = calculateAnalysis(loadout, targetSwIds);
-                            var targetHw = currentHw;
-                            if (!analysis.canBoot) {
-                                var betterHw = findBestHardware(loadout, targetSwIds);
-                                if (betterHw) {
-                                    targetHw = betterHw;
-                                } else {
-                                    addLog('⚡ Loadout: cannot boot hack software — skipping');
-                                    resolve(true);
-                                    return;
-                                }
-                            }
                             addLog('⚡ Loadout: equipping hack software "' + bestHack.sw.name + '" for ' + serverTypeName);
-                            applyDevTcLoadout(loadout, targetHw, targetSwIds).then(function () {
+                            applyDevTcLoadout(loadout, bestHack.hardware, targetSwIds).then(function () {
                                 resolve(true);
                             });
                         }).catch(function () {

@@ -6,7 +6,7 @@ import { friendlyError } from '../shared/error-map.js';
 import { getServerTypeName } from '../shared/loadout-resolver.js';
 import { state, serverMap, sendCmd, delay, log, DARK_MARKET_SERVER_ID, SOYUZ_MARKET_SERVER_ID, USOL_MARKET_SERVER_ID, SERVER_PATH_MAP } from './state.js';
 import { getServerPriority, getJobTypePriority, isJobBugged, updateTracker, saveCompletedResultsIncremental, signalDone, fetchMapData, checkPathMaintenance, invalidateLoadoutCache, ensureLoadoutForJob } from './helpers.js';
-import { stepSetEndpoint, stepCompleteJob } from './steps.js';
+import { stepSetEndpoint, stepLogin, stepCompleteJob } from './steps.js';
 import { solveJob } from './solvers.js';
 import { waitForIceWallStuckClear, waitForMinigameWindow } from '../shared/hack-utils.js';
 
@@ -209,7 +209,17 @@ export async function processQueue() {
             log('Loadout pre-check warning: ' + loadoutErr.message + ' — proceeding anyway', 'warn');
         }
 
+        var checkingAccessBeforeTake = false;
         try {
+            if (!job.alreadyTaken && job.serverId) {
+                checkingAccessBeforeTake = true;
+                log('Checking target access before taking job: ' + (job.serverName || job.serverId));
+                await stepSetEndpoint(job.serverId);
+                await stepLogin(job.serverId);
+                checkingAccessBeforeTake = false;
+                log('Target access confirmed before taking job', 'success');
+            }
+
             if (job.marketKey === 'dark') {
                 await stepSetEndpoint(DARK_MARKET_SERVER_ID);
             } else if (job.marketKey === 'soyuz') {
@@ -348,6 +358,10 @@ export async function processQueue() {
                 job.status = 'skipped';
                 job.error = errText + ' (will retry next run)';
                 log('⚠️ Job skipped (rate limited): ' + job.name + ' — ' + errText, 'warn');
+            } else if (checkingAccessBeforeTake) {
+                job.status = 'skipped';
+                job.error = 'Access pre-check failed: ' + errText;
+                log('⚠️ Job skipped before taking: ' + job.name + ' — ' + errText, 'warn');
             } else {
                 job.status = 'failed';
                 job.error = errText;
@@ -386,7 +400,7 @@ export async function processQueue() {
 
     var depositStr = totalDeposit > 0 ? ' (deposits: -' + totalDeposit + ')' : '';
     var buggedStr = buggedCount > 0 ? ', ' + buggedCount + ' bugged' : '';
-    var skippedStr = skippedCount > 0 ? ', ' + skippedCount + ' skipped (maintenance)' : '';
+    var skippedStr = skippedCount > 0 ? ', ' + skippedCount + ' skipped' : '';
     log('=== Auto Jobs Complete: ' + doneCount + ' done, ' + failedCount + ' failed' + buggedStr + skippedStr + '. Net: 💰' + totalCredits + depositStr + ' ⭐' + totalRep + ' 🏅' + totalRenown + ' ===', 'success');
 
     var completedResults = state.jobQueue.map(function (j) {

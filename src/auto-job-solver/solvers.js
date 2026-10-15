@@ -15,10 +15,10 @@ async function runDecryptFlow(fileId, fileName, job) {
     await ensureDecryptOnlyLoadout(job);
     await delay(humanDelay());
 
-    var analysisOk = await checkDecryptPowerViaAnalysis(fileId, job);
-    if (!analysisOk) {
-        log('Decrypt power still insufficient after loadout swap — attempting hardware upgrade');
-        var swapOk = await tryLoadoutSwapForError('insufficient_power', job, {});
+    var powerCheck = await checkDecryptPowerViaAnalysis(fileId, job);
+    if (!powerCheck.ok && powerCheck.required > 0) {
+        log('Decrypt power still insufficient after loadout swap — attempting loadout upgrade');
+        var swapOk = await tryLoadoutSwapForError('insufficient_power', job, powerCheck);
         if (!swapOk) {
             throw new Error('Insufficient decrypt power — no loadout can meet requirement');
         }

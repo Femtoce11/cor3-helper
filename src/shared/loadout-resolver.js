@@ -5,6 +5,16 @@
 
 export var RESOURCE_KEYS = ['cpu_frequency', 'cpu_cores', 'gpu_power', 'gpu_memory', 'ram_frequency', 'ram_memory'];
 
+export function hardwareMatches(currentHw, targetHw) {
+    var categories = ['cpu', 'gpu', 'ram', 'psu'];
+    for (var i = 0; i < categories.length; i++) {
+        var current = currentHw[categories[i]];
+        var target = targetHw[categories[i]];
+        if (!current || !target || current.id !== target.id) return false;
+    }
+    return true;
+}
+
 // Parse consuming array: 2-value = [min,max] (base=0), 3-value = [base,min,max]
 export function parseConsuming(vals) {
     if (!vals || !Array.isArray(vals) || vals.length < 2) return null;
@@ -137,7 +147,7 @@ export function findHackSoftwareForServerType(allSoftware, serverTypeName) {
         for (var j = 0; j < specs.length; j++) {
             if (specs[j].type === 'HACK' && specs[j].serverTypes &&
                 specs[j].serverTypes.indexOf(serverTypeName) >= 0) {
-                candidates.push({ sw: allSoftware[i], spec: specs[j] });
+                candidates.push({ sw: allSoftware[i], spec: specs[j], specIndex: j });
             }
         }
     }
@@ -153,7 +163,7 @@ export function findSearchSoftwareForServerType(allSoftware, serverTypeName) {
         for (var j = 0; j < specs.length; j++) {
             if (specs[j].type === 'SEARCH' && specs[j].serverTypes &&
                 specs[j].serverTypes.indexOf(serverTypeName) >= 0) {
-                candidates.push({ sw: allSoftware[i], spec: specs[j] });
+                candidates.push({ sw: allSoftware[i], spec: specs[j], specIndex: j });
             }
         }
     }
@@ -169,7 +179,7 @@ export function findDecryptSoftwareForFileType(allSoftware, fileType) {
         for (var j = 0; j < specs.length; j++) {
             if (specs[j].type === 'DECRYPT' && specs[j].fileTypes &&
                 specs[j].fileTypes.indexOf(fileType) >= 0) {
-                candidates.push({ sw: allSoftware[i], spec: specs[j] });
+                candidates.push({ sw: allSoftware[i], spec: specs[j], specIndex: j });
             }
         }
     }
@@ -215,6 +225,62 @@ export function findBestHardware(loadout, softwareIds) {
         }
     }
     return bestHw;
+}
+
+// Find the software and owned hardware combination with the highest achievable power.
+export function findBestSoftwareLoadout(loadout, candidates, abilityType) {
+    var best = null;
+    var equippedSw = loadout.equippedSoftware || [];
+    for (var i = 0; i < candidates.length; i++) {
+        var candidate = candidates[i];
+        var softwareIds = [candidate.sw.id];
+        var currentAnalysis = calculateAnalysis(loadout, softwareIds);
+        var hardware = findBestHardware(loadout, softwareIds);
+        if (!hardware) {
+            if (!currentAnalysis.canBoot) continue;
+            hardware = loadout.equippedHardware || {};
+        }
+
+        var testLoadout = JSON.parse(JSON.stringify(loadout));
+        testLoadout.equippedHardware = hardware;
+        var analysis = calculateAnalysis(testLoadout, softwareIds);
+        if (!analysis.canBoot) continue;
+
+        var swAnalysis = analysis.swAnalysis[candidate.sw.id];
+        if (!swAnalysis) continue;
+        var ability = typeof candidate.specIndex === 'number' ? swAnalysis.abilities[candidate.specIndex] : null;
+        if (!ability || ability.type !== abilityType) {
+            ability = null;
+            for (var ai = 0; ai < swAnalysis.abilities.length; ai++) {
+                if (swAnalysis.abilities[ai].type === abilityType) {
+                    ability = swAnalysis.abilities[ai];
+                    break;
+                }
+            }
+        }
+        if (!ability) continue;
+
+        if (currentAnalysis.canBoot) {
+            var currentSwAnalysis = currentAnalysis.swAnalysis[candidate.sw.id];
+            var currentAbility = currentSwAnalysis && typeof candidate.specIndex === 'number' ? currentSwAnalysis.abilities[candidate.specIndex] : null;
+            if (currentAbility && currentAbility.type === abilityType && currentAbility.computedPower === ability.computedPower) {
+                hardware = loadout.equippedHardware || {};
+            }
+        }
+
+        var isEquipped = equippedSw.some(function (sw) { return sw.id === candidate.sw.id; });
+        if (!best || ability.computedPower > best.power ||
+            (ability.computedPower === best.power && isEquipped && !best.isEquipped)) {
+            best = {
+                sw: candidate.sw,
+                spec: candidate.spec,
+                hardware: hardware,
+                power: ability.computedPower,
+                isEquipped: isEquipped
+            };
+        }
+    }
+    return best;
 }
 
 // Find the lowest-priority equipped software that can be removed (not the protected one)
